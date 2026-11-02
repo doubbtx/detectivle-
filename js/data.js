@@ -30,7 +30,7 @@ export const CHARACTERS = [
 /** Kim podejrzani są dla poszkodowanego (skąd znali kod do drzwi). */
 export const ROLES = [
   { m: 'były pracownik', f: 'była pracownica' },
-  { m: 'stały klient', f: 'stała klientka' },
+  { m: 'stały bywalec', f: 'stała bywalczyni' },
   { m: 'księgowy', f: 'księgowa' },
   { m: 'sprzątacz', f: 'sprzątaczka' },
   { m: 'dozorca kamienicy', f: 'dozorczyni kamienicy' },
@@ -60,6 +60,21 @@ export const WITNESSES = [
   { full: 'Grzegorz Mróz', f: false },
   { full: 'Elżbieta Pająk', f: true },
 ];
+
+/** Mianownik przedmiotów, których biernik brzmi inaczej (do kart „Przedmiot: …”). */
+export const ITEM_NOM = {
+  'kolekcję przedwojennych pocztówek z Borowic': 'kolekcja przedwojennych pocztówek z Borowic',
+  'brązową rzeźbę tancerki': 'brązowa rzeźba tancerki',
+  'teczkę szkiców węglem': 'teczka szkiców węglem',
+  'kasetkę z utargiem': 'kasetka z utargiem',
+  'srebrną papierośnicę': 'srebrna papierośnica',
+  'srebrną szablę z 1831 roku': 'srebrna szabla z 1831 roku',
+  'szkatułkę z dawnymi monetami': 'szkatułka z dawnymi monetami',
+  'wiolonczelę z kolekcji hrabiego Borowskiego': 'wiolonczela z kolekcji hrabiego Borowskiego',
+  'kolekcję starych map Borowic': 'kolekcja starych map Borowic',
+  'kolekcję szklanych negatywów': 'kolekcja szklanych negatywów',
+  'srebrną tacę z 1910 roku': 'srebrna taca z 1910 roku',
+};
 
 /** Sceny zbrodni. */
 export const SCENES = [
@@ -93,6 +108,21 @@ export const SCENES = [
     owner: { full: 'Roman Pietrzak', f: false }, ownerRole: 'lutnik',
     items: ['XVIII-wieczne skrzypce', 'wiolonczelę z kolekcji hrabiego Borowskiego', 'smyczek z pernambuku'],
   },
+  {
+    id: 'ksiegarnia', name: 'Księgarnia „Zakładka”', inLoc: 'w księgarni „Zakładka”', short: 'księgarni', ownerIns: 'z właścicielką', address: 'ul. Długa 9',
+    owner: { full: 'Bożena Wrzos', f: true }, ownerRole: 'właścicielka',
+    items: ['rękopis powieści miejscowego pisarza', 'kasetkę z utargiem', 'kolekcję starych map Borowic'],
+  },
+  {
+    id: 'fotograf', name: 'Zakład fotograficzny „Kadr”', inLoc: 'w zakładzie fotograficznym „Kadr”', short: 'zakładu fotograficznego', ownerIns: 'z fotografem', address: 'ul. Ogrodnicza 14',
+    owner: { full: 'Marek Jaworski', f: false }, ownerRole: 'fotograf',
+    items: ['zabytkowy aparat mieszkowy', 'kolekcję szklanych negatywów', 'obiektyw z lat trzydziestych'],
+  },
+  {
+    id: 'cukiernia', name: 'Cukiernia „Pod Kogutem”', inLoc: 'w cukierni „Pod Kogutem”', short: 'cukierni', ownerIns: 'z cukiernikiem', address: 'ul. Piekarska 2',
+    owner: { full: 'Józef Kogut', f: false }, ownerRole: 'cukiernik',
+    items: ['kasetkę z utargiem', 'zeszyt z rodzinnymi przepisami', 'srebrną tacę z 1910 roku'],
+  },
 ];
 
 /**
@@ -110,10 +140,10 @@ export const PLACES = {
   basen: { name: 'Basen „Delfin”', loc: 'na basenie „Delfin”', cardlog: true },
   silownia: { name: 'Siłownia „Atlas”', loc: 'w siłowni „Atlas”', cardlog: true },
   dworzec: { name: 'Dworzec kolejowy', loc: 'na dworcu kolejowym', cctv: true },
-  rynek: { name: 'Rynek', loc: 'na Rynku', cctv: true, photo: true },
-  plac: { name: 'Plac Wolności', loc: 'na Placu Wolności', cctv: true, photo: true },
-  bulwar: { name: 'Bulwar nad rzeką', loc: 'na bulwarze nad rzeką', cctv: true, photo: true },
-  park: { name: 'Park Zdrojowy', loc: 'w Parku Zdrojowym', photo: true },
+  rynek: { name: 'Rynek', loc: 'na Rynku', walk: 'po Rynku', cctv: true, photo: true },
+  plac: { name: 'Plac Wolności', loc: 'na Placu Wolności', walk: 'po Placu Wolności', cctv: true, photo: true },
+  bulwar: { name: 'Bulwar nad rzeką', loc: 'na bulwarze nad rzeką', walk: 'po bulwarze nad rzeką', cctv: true, photo: true },
+  park: { name: 'Park Zdrojowy', loc: 'w Parku Zdrojowym', walk: 'po Parku Zdrojowym', photo: true },
   kino: { name: 'Kino „Mewa”', loc: 'w kinie „Mewa”' },
   kawiarnia: { name: 'Kawiarnia „Filiżanka”', loc: 'w kawiarni „Filiżanka”', venue: true, address: 'ul. Rynkowa 4' },
   apteka: { name: 'Apteka „Pod Orłem”', loc: 'w aptece „Pod Orłem”', venue: true, address: 'ul. Szpitalna 9' },
@@ -135,7 +165,7 @@ export const PLACES = {
   stopSzpital: { name: 'przystanek Szpital', loc: 'na przystanku Szpital', stop: 'Szpital' },
   stopStadion: { name: 'przystanek Stadion', loc: 'na przystanku Stadion', stop: 'Stadion' },
   stopZajezdnia: { name: 'przystanek Zajezdnia', loc: 'na przystanku Zajezdnia', stop: 'Zajezdnia' },
-  stopSloneczne: { name: 'przystanek Osiedle Słoneczne', loc: 'na przystanku Osiedle Słoneczne', stop: 'Osiedle Słoneczne' },
+  stopZielone: { name: 'przystanek Osiedle Zielone', loc: 'na przystanku Osiedle Zielone', stop: 'Osiedle Zielone' },
   // miejsca tylko do szumu na mapie
   stadion: { name: 'Stadion OSiR', loc: 'na stadionie OSiR' },
   szpital: { name: 'Szpital Powiatowy', loc: 'w Szpitalu Powiatowym' },
@@ -184,7 +214,7 @@ export const CCTV_DETAILS = [
 ];
 
 export const PHOTO_POSES = [
-  'uśmiecha się do obiektywu przy fontannie', 'pozuje na tle podświetlonego ratusza', 'stoi przy barierce',
+  'uśmiecha się do obiektywu przy fontannie', 'pozuje na tle ratusza', 'stoi przy barierce',
   'trzyma kubek z herbatą', 'robi minę do aparatu',
 ];
 
@@ -213,6 +243,7 @@ export const RULES = [
   'Sprawca jest jednym z pięciorga podejrzanych i działał sam. Przez cały czas od otwarcia do zamknięcia drzwi był w środku.',
   'Dokumenty urzędowe, rejestry, rozkłady, mapy, nagrania z kamer i świadkowie spoza grona podejrzanych mówią prawdę.',
   'Dowody dostarczone przez podejrzanych są prawdziwe, z wyjątkiem dokładnie jednego. Ten jeden sfałszował sprawca, żeby mieć alibi.',
-  'Czasy dojścia na mapie to najszybsza możliwa droga, w obie strony, co do minuty.',
-  'Wszystkie zegary są zgodne, a sprawa wydarzyła się dzień przed datą gry.',
+  'Czasy dojścia na mapie dotyczą najszybszej możliwej drogi, są dokładne co do minuty i takie same w każdą stronę.',
+  'Prawdziwy bilet, paragon, zdjęcie albo zapis w rejestrze oznacza, że ta osoba naprawdę była w tym miejscu o tej porze. Wejście i wyjście w rejestrze kart, tak jak dwie godziny w jednym zeznaniu („przyszedł o…, zapłacił o…”), to pobyt w tym miejscu przez cały ten czas, a wyjazd pociągiem oznacza, że potem tej osoby nie było już w mieście.',
+  'Wszystkie zegary są zgodne. Rozkłady, godziny otwarcia i strefy parkowania obowiązują dokładnie tak, jak zapisano je na kartach, także w święta. Liczy się dzień tygodnia podany w aktach.',
 ];

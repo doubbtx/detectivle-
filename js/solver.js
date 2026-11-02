@@ -3,7 +3,11 @@
 // ma dokładnie jedno rozwiązanie, i układa wyjaśnienie na ekran wyniku.
 
 import { PLACES, TRAIN_NOTES, TEAM_DESKS } from './data.js';
-import { dayType, fmt, WEEKDAYS } from './time.js';
+import { dayType, fmt, WEEKDAYS_ACC } from './time.js';
+
+const SCENE = '@scena';
+const AWAY = '@poza-miastem';
+const FAR = 100000;
 
 const placeName = (key) => PLACES[key]?.name ?? key;
 const placeLoc = (key) => PLACES[key]?.loc ?? key;
@@ -102,7 +106,7 @@ export function solveCase(c) {
           const lref = legend.get(row.note);
           if (lref && lref !== row.ref) out.refs.push(lref);
           out.contradicted = true;
-          out.reason = `pociąg ${cl.no} ma w rozkładzie [${row.ref}] znak „${row.note}”, czyli ${note.text}${lref && lref !== row.ref ? ` [${lref}]` : ''}, a sprawa wydarzyła się w dzień: ${WEEKDAYS[weekday]}`;
+          out.reason = `pociąg ${cl.no} ma w rozkładzie [${row.ref}] znak „${row.note}”, czyli ${note.text}${lref && lref !== row.ref ? ` [${lref}]` : ''}, a kradzież wydarzyła się ${WEEKDAYS_ACC[weekday]}`;
           break;
         }
         out.okNote = `pociąg ${cl.no} odjeżdża o ${fmt(row.dep)} i tego dnia kursuje [${row.ref}]`;
@@ -116,8 +120,8 @@ export function solveCase(c) {
         if (!openAt(h, dt, cl.time)) {
           out.contradicted = true;
           out.reason = h[dt]
-            ? `${placeName(cl.place)} jest tego dnia czynny tylko do ${fmt(h[dt][1])} [${h.ref}], a paragon ma godzinę ${fmt(cl.time)}`
-            : `${placeName(cl.place)} jest w ten dzień tygodnia nieczynny [${h.ref}], a paragon ma godzinę ${fmt(cl.time)}`;
+            ? `${placeName(cl.place)} – lokal czynny tego dnia tylko do ${fmt(h[dt][1])} [${h.ref}], a paragon ma godzinę ${fmt(cl.time)}`
+            : `${placeName(cl.place)} – lokal nieczynny w ten dzień tygodnia [${h.ref}], a paragon ma godzinę ${fmt(cl.time)}`;
           break;
         }
         out.okNote = `${placeName(cl.place)} był wtedy otwarty [${h.ref}]`;
@@ -221,7 +225,13 @@ export function solveCase(c) {
     return out;
   }
 
-  const evaluated = claims.map(evaluate);
+  const evaluated = claims.map((cl) => {
+    const e = evaluate(cl);
+    // Prawdziwy bilet kolejowy oznacza, że po odjeździe tej osoby nie było już w mieście.
+    e.events = e.sightings.map((x) => ({ ...x, refs: [e.card] }));
+    if (cl.kind === 'train' && !e.contradicted && !e.unknown) e.events.push({ place: AWAY, from: cl.time + 1, to: FAR, refs: [e.card] });
+    return e;
+  });
   const byCard = new Map(evaluated.map((e) => [e.card, e]));
 
   function clearingFrom(sightings, refsBase) {
@@ -231,6 +241,43 @@ export function solveCase(c) {
       if (tr) res.push({ place: s.place, from: s.from, to: s.to, travel: tr.min, refs: [...refsBase, tr.ref] });
     }
     return res;
+  }
+
+  /**
+   * Czy dwa pobyty tej samej osoby da się pogodzić? Gracz zna tylko czasy dojścia
+   * do miejsca zbrodni, więc z kart wynika dolna granica: przejście z A do B trwa
+   * co najmniej |dA − dB| minut. Pobyty nakładające się w czasie w różnych miejscach
+   * są zawsze sprzeczne. Miejsce zbrodni ma czas dojścia 0.
+   */
+  const travelMin = (place) => (place === SCENE ? 0 : travel.get(place)?.min);
+  function conflict(a, b) {
+    if (a.place === b.place) return false;
+    if (a.from <= b.to && b.from <= a.to) return true;
+    const [x, y] = a.to < b.from ? [a, b] : [b, a];
+    const dx = travelMin(x.place);
+    const dy = travelMin(y.place);
+    if (dx === undefined || dy === undefined) return false;
+    return y.from - x.to < Math.abs(dx - dy);
+  }
+  function firstConflict(events) {
+    for (let i = 0; i < events.length; i++) {
+      for (let j = i + 1; j < events.length; j++) {
+        if (conflict(events[i], events[j])) return [events[i], events[j]];
+      }
+    }
+    return null;
+  }
+  const neutralEvents = new Map();
+  for (const s of seen) {
+    if (!suspects.has(s.who)) continue;
+    if (!neutralEvents.has(s.who)) neutralEvents.set(s.who, []);
+    neutralEvents.get(s.who).push({ place: s.place, from: s.from, to: s.to, refs: s.refs });
+  }
+  /** Prawdziwe pobyty osoby przy założeniu, że `forgedCard` jest fałszywką. */
+  function trueEvents(who, forgedCard) {
+    const evs = [...(neutralEvents.get(who) || [])];
+    for (const e of evaluated) if (e.who === who && e.card !== forgedCard) evs.push(...e.events);
+    return evs;
   }
 
   const neutralClears = new Map();
@@ -251,6 +298,14 @@ export function solveCase(c) {
       if (neutralClears.has(sus.id)) continue;
       const ownTrue = evaluated.filter((e) => e.who === sus.id && e !== forged);
       if (ownTrue.some((e) => clearingFrom(e.sightings, [e.card]).length)) continue;
+      // Każda osoba musi dać się fizycznie „przeprowadzić” przez wszystkie swoje prawdziwe pobyty,
+      // a sprawca dodatkowo przez pobyt na miejscu zbrodni.
+      const physicalOk = c.suspects.every((p) => {
+        const evs = trueEvents(p.id, forged.card);
+        if (p.id === sus.id) evs.push({ place: SCENE, from: W1, to: W2, refs: [] });
+        return !firstConflict(evs);
+      });
+      if (!physicalOk) continue;
       consistent.push({ culprit: sus.id, forged: forged.card });
     }
   }
@@ -276,6 +331,8 @@ export function solveCase(c) {
   return {
     ok: Boolean(unique),
     consistent,
+    trueEvents,
+    firstConflict,
     unique,
     evaluated,
     neutralClears,
@@ -283,7 +340,7 @@ export function solveCase(c) {
     window: { W1, W2 },
     describeClear(item) {
       const when = item.from === item.to ? `o ${fmt(item.from)}` : `od ${fmt(item.from)} do ${fmt(item.to)}`;
-      return `${placeLoc(item.place)} ${when}; dojście zajmuje ${item.travel} min`;
+      return `${placeLoc(item.place)} ${when} (dojście: ${item.travel} min)`;
     },
   };
 }
@@ -310,6 +367,10 @@ export function qualityIssues(c, res = solveCase(c)) {
     if (s.id === c.solution.culprit) continue;
     if (!res.explain.suspects[s.id]?.length) issues.push(`niewinny ${s.full} nie ma potwierdzonego alibi`);
   }
+  // Fałszywkę ma obalać tylko zamierzona karta, a nie np. pułapka z udziałem sprawcy.
+  const storyEvents = [...res.trueEvents(c.solution.culprit, c.solution.forged), ...forged.sightings.map((x) => ({ ...x, refs: [forged.card] }))];
+  if (forged.kind === 'train') storyEvents.push({ place: '@poza-miastem', from: forged.sightings[0].from + 1, to: 100000, refs: [forged.card] });
+  if (res.firstConflict(storyEvents)) issues.push('fałszywkę obala też fizyczna sprzeczność z innym pobytem sprawcy');
   // Współpraca: sfałszowana karta i karta, która ją obala, muszą być u różnych graczy.
   const deskOf = (id) => c.cards.find((k) => k.id === id)?.desk;
   const forgedDesk = deskOf(c.solution.forged);

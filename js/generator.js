@@ -9,7 +9,7 @@
 import { makeRng, hashString } from './rng.js';
 import {
   CHARACTERS, ROLES, WITNESSES, SCENES, PLACES, TRAIN_DESTINATIONS, TRAIN_NOTES, FILMS,
-  VENUE_ITEMS, CCTV_DETAILS, PHOTO_POSES, DESK_DEFS,
+  VENUE_ITEMS, CCTV_DETAILS, PHOTO_POSES, DESK_DEFS, ITEM_NOM,
 } from './data.js';
 import {
   fmt, fmtHour, addDays, weekdayOf, dayType, dateLong, dateShort, sunsetFor, daysBetween,
@@ -104,6 +104,16 @@ export function buildCase(opts) {
   throw new Error(`Nie udało się wygenerować sprawy dla ziarna ${opts.seed}`);
 }
 
+/** Do diagnostyki: jedna próba generowania bez kontroli jakości. */
+export function generateAttempt(opts, attempt) {
+  try {
+    return { case: generate(makeRng(`${opts.seed}#${attempt}`), opts) };
+  } catch (e) {
+    if (e instanceof RetryError) return { retry: true };
+    throw e;
+  }
+}
+
 function generate(rng, opts) {
   const P = params(opts.difficulty);
   const crimeIso = addDays(opts.date, -1);
@@ -119,6 +129,7 @@ function generate(rng, opts) {
   // --- Scena, podejrzani, okno czasowe -------------------------------------
   const scene = rng.pick(SCENES);
   const stolen = rng.pick(scene.items);
+  const stolenNom = ITEM_NOM[stolen] ?? stolen;
   const roles = rng.sample(ROLES, 5);
   const suspects = rng.sample(CHARACTERS, 5).map((ch, i) => ({
     id: `s${i + 1}`,
@@ -166,6 +177,23 @@ function generate(rng, opts) {
     return k;
   };
 
+  // Pobyty każdej osoby (miejsce + przedział czasu). Nowe dowody muszą dać się z nimi
+  // pogodzić: przejście z A do B trwa co najmniej |dA − dB| minut (to gracz wyliczy z mapy).
+  const AWAY = '@poza-miastem';
+  const FAR = 100000;
+  const events = Object.fromEntries(suspects.map((s) => [s.id, []]));
+  const tmin = (place) => (place === AWAY ? undefined : travel[place]);
+  const clash = (a, b, margin) => {
+    if (a.place === b.place) return false;
+    if (a.from <= b.to + margin && b.from <= a.to + margin) return true;
+    const [x, y] = a.to < b.from ? [a, b] : [b, a];
+    const dx = tmin(x.place);
+    const dy = tmin(y.place);
+    if (dx === undefined || dy === undefined) return false;
+    return y.from - x.to < Math.abs(dx - dy) + margin;
+  };
+  const fits = (sid, evs) => evs.every((e, i) => events[sid].every((o) => !clash(e, o, 4)) && evs.slice(i + 1).every((f) => !clash(e, f, 4)));
+
   const cards = [];
   const addCard = (card) => {
     cards.push({ lines: [], facts: [], kind: 'official', ...card });
@@ -177,8 +205,49 @@ function generate(rng, opts) {
   const usedTrainNos = new Set();
   const usedDest = new Set();
 
+  const snapshot = () => ({
+    cards: cards.length, trains: T.trains.length, hours: T.hours.length, films: T.films.length,
+    streets: T.streets.length, zones: T.zones.length, buses: T.buses.length, weather: T.weather,
+    cardlogs: JSON.stringify(T.cardlogs), taken: [...taken], used: [...usedPlaces],
+    nos: [...usedTrainNos], dest: [...usedDest], widx: witnessIdx,
+  });
+  const restore = (sn, s) => {
+    const removed = new Set(cards.slice(sn.cards));
+    cards.length = sn.cards;
+    T.trains.length = sn.trains; T.hours.length = sn.hours; T.films.length = sn.films;
+    T.streets.length = sn.streets; T.zones.length = sn.zones; T.buses.length = sn.buses;
+    T.weather = sn.weather;
+    T.cardlogs = JSON.parse(sn.cardlogs);
+    const reset = (set, list) => { set.clear(); list.forEach((x) => set.add(x)); };
+    reset(taken, sn.taken); reset(usedPlaces, sn.used); reset(usedTrainNos, sn.nos); reset(usedDest, sn.dest);
+    witnessIdx = sn.widx;
+    s.items = s.items.filter((c) => !removed.has(c));
+    if (removed.has(s.claimCard)) s.claimCard = s.items[0] || null;
+  };
+  /** Tworzy dowód; jeśli nie pasuje do innych pobytów tej osoby, cofa go i losuje jeszcze raz. */
+  const attempt = (s, fn) => {
+    for (let k = 0; k < 14; k++) {
+      const sn = snapshot();
+      let res;
+      try {
+        res = fn();
+      } catch (e) {
+        if (!(e instanceof RetryError)) throw e;
+        restore(sn, s);
+        continue;
+      }
+      if (fits(s.id, res.events)) {
+        events[s.id].push(...res.events);
+        return res;
+      }
+      restore(sn, s);
+    }
+    return retry();
+  };
+
   // --- Dowody dostarczone przez podejrzanych --------------------------------
   function makeClaim(kind, s, forged) {
+    let evs = [];
     let card;
     const by = s.id;
     switch (kind) {
@@ -204,13 +273,14 @@ function generate(rng, opts) {
         card = addCard({
           desk: 'D', kind: 'supplied', by, title: 'Bilet kolejowy',
           lines: [
-            'Koleje Regionalne · bilet jednorazowy',
+            'przejazd jednorazowy · klasa 2',
             `${no} → ${dest.name}`,
             `${dShort} · odjazd z Borowic ${fmt(t)}`,
             `wagon ${rng.int(2, 12)}, miejsce ${rng.int(11, 88)} · ${rng.int(19, 89)},${rng.pick(['00', '50', '90'])} zł`,
           ],
           facts: [{ t: 'claim', kind, who: by, no, time: t }],
         });
+        evs = [{ place: 'dworzec', from: t, to: t }, { place: AWAY, from: t + 1, to: FAR }];
         card.alibi = (id) => `Twierdzi, że ${g(s, 'wyjechał', 'wyjechała')} pociągiem do ${dest.gen} (bilet: ${id}).`;
         break;
       }
@@ -221,7 +291,7 @@ function generate(rng, opts) {
         const hours = { wd: span(), sat: rng.chance(0.85) ? span() : null, sun: rng.chance(0.6) ? span() : null };
         if (!forged) {
           hours[dt] = [rng.pick([8, 9, 10, 11, 12]) * 60, Math.ceil((t + rng.int(6, 70)) / 30) * 30];
-        } else if (rng.chance(0.4)) {
+        } else if (dt !== 'wd' && rng.chance(0.4)) {
           hours[dt] = null;
         } else {
           hours[dt] = [rng.pick([8, 9, 10]) * 60, Math.floor((t - rng.int(8, 60)) / 30) * 30];
@@ -240,6 +310,7 @@ function generate(rng, opts) {
           ],
           facts: [{ t: 'claim', kind, who: by, place, time: t }],
         });
+        evs = [{ place, from: t, to: t }];
         card.alibi = (id) => `Twierdzi, że ${g(s, 'był', 'była')} ${PLACES[place].loc} (paragon: ${id}).`;
         break;
       }
@@ -295,7 +366,8 @@ function generate(rng, opts) {
           ],
           facts: [{ t: 'claim', kind, who: by, place, time: t, sky, ground }],
         });
-        card.alibi = (id) => `Twierdzi, że ${g(s, 'spacerował', 'spacerowała')} ${PLACES[place].loc} (zdjęcie: ${id}).`;
+        evs = [{ place, from: t, to: t }];
+        card.alibi = (id) => `Twierdzi, że ${g(s, 'spacerował', 'spacerowała')} ${PLACES[place].walk} (zdjęcie: ${id}).`;
         break;
       }
       case 'cinema': {
@@ -322,6 +394,7 @@ function generate(rng, opts) {
           ],
           facts: [{ t: 'claim', kind, who: by, film, start }],
         });
+        evs = [{ place: 'kino', from: start, to: start + dur }];
         card.alibi = (id) => `Twierdzi, że ${g(s, 'był', 'była')} w kinie „Mewa” na filmie „${film}” (bilet: ${id}).`;
         break;
       }
@@ -329,7 +402,7 @@ function generate(rng, opts) {
         const st1 = takePlace((p) => p.street);
         const st2 = takePlace((p) => p.street);
         const t1 = timeIn(st1, 18 * 60, 22 * 60 + 30);
-        const t2 = t1 + rng.int(9, 24);
+        const t2 = t1 + Math.max(rng.int(9, 24), Math.abs(travel[st1] - travel[st2]) + rng.int(5, 10));
         const mkStreet = (street) => {
           const parity = rng.pick(['all', 'all', 'even', 'odd']);
           let max = rng.int(7, 48);
@@ -367,13 +440,14 @@ function generate(rng, opts) {
         card = addCard({
           desk: 'Z', kind: 'supplied', by, title: 'Zrzut ekranu z aplikacji kurierskiej',
           lines: [
-            `Kurier: ${s.full} · ${dShort}`,
+            `Konto kuriera: ${s.full} · ${dShort}`,
             `${fmt(t1)} ✓ doręczono: ${PLACES[st1].name} ${n1}`,
             `${fmt(t2)} ✓ doręczono: ${PLACES[st2].name} ${n2}`,
           ],
           facts: [{ t: 'claim', kind, who: by, stops: [{ place: st1, no: n1, time: t1 }, { place: st2, no: n2, time: t2 }] }],
         });
-        card.alibi = (id) => `Twierdzi, że ${g(s, 'rozwoził', 'rozwoziła')} paczki (zrzut ekranu: ${id}).`;
+        evs = [{ place: st1, from: t1, to: t1 }, { place: st2, from: t2, to: t2 }];
+        card.alibi = (id) => `Twierdzi, że tego wieczoru ${g(s, 'dorabiał', 'dorabiała')} jako ${g(s, 'kurier', 'kurierka')} i ${g(s, 'rozwoził', 'rozwoziła')} paczki (zrzut ekranu: ${id}).`;
         break;
       }
       case 'parking': {
@@ -383,7 +457,7 @@ function generate(rng, opts) {
         const span = () => [rng.pick([8, 9]) * 60, rng.pick([15, 16, 17, 18, 20, 22]) * 60];
         const hours = { wd: span(), sat: rng.chance(0.7) ? span() : null, sun: rng.chance(0.3) ? span() : null };
         if (!forged) hours[dt] = [rng.pick([8, 9, 10]) * 60, Math.min(24 * 60, Math.ceil((t + rng.int(10, 90)) / 60) * 60)];
-        else if (rng.chance(0.4)) hours[dt] = null;
+        else if (dt !== 'wd' && rng.chance(0.4)) hours[dt] = null;
         else hours[dt] = [rng.pick([8, 9]) * 60, Math.max(12 * 60, Math.floor((t - rng.int(6, 70)) / 30) * 30)];
         T.zones.push({ zone, streets: [place], hours, claimed: true });
         card = addCard({
@@ -395,6 +469,7 @@ function generate(rng, opts) {
           ],
           facts: [{ t: 'claim', kind, who: by, place, zone, time: t }],
         });
+        evs = [{ place, from: t, to: t }];
         card.alibi = (id) => `Twierdzi, że ${g(s, 'zostawił', 'zostawiła')} auto ${PLACES[place].loc} (bilet parkingowy: ${id}).`;
         break;
       }
@@ -425,8 +500,8 @@ function generate(rng, opts) {
           for (let k = 0; k + 1 < today.length; k++) {
             const gap = today[k + 1] - today[k];
             const a = Math.max(lo, today[k] + 6);
-            const b = Math.min(hi, today[k + 1] - 4);
-            if (gap >= 16 && a <= b) options.push(rng.int(a, b));
+            const b = Math.min(hi, today[k + 1] - 10);
+            if (gap >= 18 && a <= b) options.push(rng.int(a, b));
           }
           if (!options.length) retry();
           t = rng.pick(options);
@@ -442,6 +517,7 @@ function generate(rng, opts) {
           ],
           facts: [{ t: 'claim', kind, who: by, stop: place, line, time: t }],
         });
+        evs = [{ place, from: t, to: t }];
         card.alibi = (id) => `Twierdzi, że ${g(s, 'wracał', 'wracała')} do domu autobusem linii ${line} (bilet: ${id}).`;
         break;
       }
@@ -450,7 +526,7 @@ function generate(rng, opts) {
     }
     s.items.push(card);
     if (!s.claimCard) s.claimCard = card;
-    return card;
+    return { card, events: evs };
   }
 
   // --- Niezależne potwierdzenia (świadkowie, kamery, rejestry kart) ---------
@@ -466,16 +542,16 @@ function generate(rng, opts) {
       : `„${pan(s)} ${s.first} ${g(s, 'zamówił', 'zamówiła')} u mnie żurek o ${fmt(ts[0])}.”`),
     kregielnia: (s, w, ts) => (ts.length > 1
       ? `„${pan(s)} ${s.first} ${g(s, 'grał', 'grała')} na torze 4. O ${fmt(ts[0])} ${g(w, 'zapisałem', 'zapisałam')} wynik w systemie, a o ${fmt(ts[1])} ${g(s, 'oddał', 'oddała')} buty.”`
-      : `„O ${fmt(ts[0])} ${pan(s).toLowerCase()} ${s.first} ${g(s, 'wypożyczył', 'wypożyczyła')} u mnie buty na tor 2.”`),
+      : `„O ${fmt(ts[0])} ${pan(s).toLowerCase()} ${s.first} ${g(s, 'wypożyczył', 'wypożyczyła')} u mnie buty i ${g(s, 'zajął', 'zajęła')} tor 2.”`),
     hotel: (s, w, ts) => (ts.length > 1
-      ? `„${pan(s)} ${s.first} ${g(s, 'czekał', 'czekała')} w lobby na znajomego. ${g(s, 'Przyszedł', 'Przyszła')} o ${fmt(ts[0])}, a o ${fmt(ts[1])} wciąż tam ${g(s, 'siedział', 'siedziała')}.”`
-      : `„Rozmawialiśmy z ${s.f ? 'panią' : 'panem'} ${s.ins} przy recepcji o ${fmt(ts[0])}.”`),
+      ? `„${pan(s)} ${s.first} ${g(s, 'przyszedł', 'przyszła')} do nas o ${fmt(ts[0])} i ${g(s, 'czekał', 'czekała')} w lobby na znajomego. O ${fmt(ts[1])} wciąż tam ${g(s, 'siedział', 'siedziała')}.”`
+      : `„${g(w, 'Rozmawiałem', 'Rozmawiałam')} z ${s.f ? 'panią' : 'panem'} ${s.ins} przy recepcji o ${fmt(ts[0])}.”`),
     biblioteka: (s, w, ts) => (ts.length > 1
       ? `„${pan(s)} ${s.first} ${g(s, 'przyszedł', 'przyszła')} do czytelni o ${fmt(ts[0])}, a o ${fmt(ts[1])} ${g(s, 'wypożyczył', 'wypożyczyła')} dwie książki.”`
       : `„${pan(s)} ${s.first} ${g(s, 'oddał', 'oddała')} mi książki o ${fmt(ts[0])}.”`),
   };
   const TRAP_TEXT = (s, side, t) => (side === 'before'
-    ? `„${pan(s)} ${s.first} ${g(s, 'wychodził', 'wychodziła')} od nas o ${fmt(t)}. ${g(s, 'Spieszył', 'Spieszyła')} się.”`
+    ? `„${pan(s)} ${s.first} ${g(s, 'wyszedł', 'wyszła')} od nas o ${fmt(t)}. ${g(s, 'Spieszył', 'Spieszyła')} się.”`
     : `„${pan(s)} ${s.first} ${g(s, 'przyszedł', 'przyszła')} do nas dopiero o ${fmt(t)}.”`);
 
   function makeNeutral(source, s, mode) {
@@ -497,9 +573,10 @@ function generate(rng, opts) {
         desk: 'S', kind: 'witness', title: `Zeznanie: ${w.full}`,
         sub: `${PLACES[place].witness[w.f ? 'f' : 'm']} ${PLACES[place].loc}`,
         lines: [text],
-        facts: ts.map((t) => ({ t: 'seen', who: s.id, place, from: t, to: t })),
+        // Dwie godziny w zeznaniu („o 20:19 zamówił, o 21:12 zapłacił”) to pobyt przez cały ten czas.
+        facts: [{ t: 'seen', who: s.id, place, from: ts[0], to: ts[ts.length - 1] }],
       });
-      return place;
+      return { place, events: [{ place, from: ts[0], to: ts[ts.length - 1] }] };
     }
     if (source === 'cctv') {
       const place = takePlace((p) => p.cctv);
@@ -513,7 +590,7 @@ function generate(rng, opts) {
         ],
         facts: [{ t: 'seen', who: s.id, place, from: t, to: t }],
       });
-      return place;
+      return { place, events: [{ place, from: t, to: t }] };
     }
     // rejestr kart wejściowych
     const place = takePlace((p) => p.cardlog);
@@ -534,7 +611,7 @@ function generate(rng, opts) {
     }
     if (!T.cardlogs[place]) T.cardlogs[place] = [];
     T.cardlogs[place].push({ owner: s.id, ownerName: s.full, t1, t2 });
-    return place;
+    return { place, events: [{ place, from: t1, to: t2 }] };
   }
 
   // --- Plan alibi ------------------------------------------------------------
@@ -545,17 +622,24 @@ function generate(rng, opts) {
   const kinds = rng.shuffle(ALL_KINDS);
   let kp = 0;
 
-  const forgedCard = makeClaim(kinds[kp++], suspects[culpritIdx], true);
-  for (const i of decoyIdx) makeClaim(kinds[kp++], suspects[i], false);
+  const culprit = suspects[culpritIdx];
+  const forgedKind = kinds[kp++];
+  const forgedCard = attempt(culprit, () => makeClaim(forgedKind, culprit, true)).card;
+  for (const i of decoyIdx) {
+    const kind = kinds[kp++];
+    attempt(suspects[i], () => makeClaim(kind, suspects[i], false));
+  }
   const neutralPlace = {};
   for (const i of neutralIdx) {
-    neutralPlace[i] = makeNeutral(rng.pick(['witness', 'witness', 'cctv', 'cardlog']), suspects[i], 'clear');
+    neutralPlace[i] = attempt(suspects[i], () => makeNeutral(rng.pick(['witness', 'witness', 'cctv', 'cardlog']), suspects[i], 'clear')).place;
   }
   for (let k = 0; k < P.extraTrueItems && k < neutralIdx.length; k++) {
-    makeClaim(kinds[kp++], suspects[neutralIdx[k]], false);
+    const kind = kinds[kp++];
+    const sus = suspects[neutralIdx[k]];
+    attempt(sus, () => makeClaim(kind, sus, false));
   }
-  for (const i of rng.sample(innocents, P.traps)) makeNeutral(rng.pick(['witness', 'cctv', 'cardlog']), suspects[i], 'trap');
-  if (P.culpritTrap) makeNeutral(rng.pick(['witness', 'witness', 'cctv', 'cardlog']), suspects[culpritIdx], 'trap');
+  for (const i of rng.sample(innocents, P.traps)) attempt(suspects[i], () => makeNeutral(rng.pick(['witness', 'cctv', 'cardlog']), suspects[i], 'trap'));
+  if (P.culpritTrap) attempt(culprit, () => makeNeutral(rng.pick(['witness', 'witness', 'cctv', 'cardlog']), culprit, 'trap'));
 
   // --- Karty urzędowe ze wspólnych tabel --------------------------------------
   const wantTable = (has) => has || rng.chance(P.noiseTableChance);
@@ -578,7 +662,7 @@ function generate(rng, opts) {
       sub: 'odjazdy wieczorne',
       lines: [
         ...T.trains.map((r) => `${fmt(r.dep)}  ${r.no} → ${r.dest}${r.note ? ` ${r.note}` : ''}`),
-        ...(P.splitLegend ? ['Objaśnienia znaków: osobna karta.'] : ['Objaśnienia:', ...legendLines]),
+        ...(P.splitLegend ? ['Objaśnienia znaków na osobnej karcie.'] : ['Objaśnienia:', ...legendLines]),
       ],
       facts: T.trains.map((r) => ({ t: 'train', ...r })),
     });
@@ -666,7 +750,8 @@ function generate(rng, opts) {
     }
     const desc = (r) => (r.parity === 'all' ? `numery 1–${r.max}` : r.parity === 'even' ? `tylko parzyste, 2–${r.max}` : `tylko nieparzyste, 1–${r.max}`);
     addCard({
-      desk: 'M', title: 'Spis ulic i numeracji budynków',
+      desk: 'M', title: 'Spis numeracji budynków',
+      sub: 'wybrane ulice',
       lines: rng.shuffle(T.streets).map((r) => `${PLACES[r.street].name}: ${desc(r)}`),
       facts: T.streets.map((r) => ({ t: 'street', ...r })),
     });
@@ -687,7 +772,7 @@ function generate(rng, opts) {
     }
     const fmtSpan = (sp) => (sp ? `${fmtHour(sp[0])}–${fmtHour(sp[1])}` : 'bezpłatnie');
     addCard({
-      desk: 'R', title: 'Strefa płatnego parkowania',
+      desk: 'R', title: 'Strefy płatnego parkowania',
       sub: 'uchwała Rady Miasta',
       lines: [
         ...T.zones.slice().sort((a, b) => a.zone.localeCompare(b.zone)).map((z) => `Strefa ${z.zone} (${z.streets.map((k) => PLACES[k].name).join(', ')}): pn–pt ${fmtSpan(z.hours.wd)} · sob ${fmtSpan(z.hours.sat)} · nd ${fmtSpan(z.hours.sun)}`),
@@ -707,7 +792,7 @@ function generate(rng, opts) {
         `pn–pt: ${short(b.deps.wd)}`,
         `soboty: ${short(b.deps.sat)}`,
         `niedziele: ${short(b.deps.sun)}`,
-        'Bilet kasuje się od razu po wejściu do autobusu.',
+        'Autobus zatrzymuje się na przystanku tylko na chwilę. Bilet kasuje się od razu po wejściu, najpóźniej 2 minuty po odjeździe z rozkładu.',
       ],
       facts: [{ t: 'bus', stop: b.stop, line: b.line, deps: b.deps }],
     });
@@ -730,7 +815,7 @@ function generate(rng, opts) {
     const split = P.splitCardOwners;
     const logFacts = [];
     for (const r of rows) {
-      logFacts.push({ t: 'cardlog', place, card: r.no, from: r.t1, to: r.t1 }, { t: 'cardlog', place, card: r.no, from: r.t2, to: r.t2 });
+      logFacts.push({ t: 'cardlog', place, card: r.no, from: r.t1, to: r.t2 });
     }
     const ownerFacts = rows.map((r) => ({ t: 'cardowner', place, card: r.no, who: r.owner }));
     addCard({
@@ -740,7 +825,7 @@ function generate(rng, opts) {
     });
     if (split) {
       addCard({
-        desk: 'D', title: `Lista karnetów: ${PLACES[place].name}`,
+        desk: 'D', title: `Właściciele kart wejściowych: ${PLACES[place].name}`,
         lines: rng.shuffle(rows).map((r) => `nr ${r.no}: ${r.ownerName}`),
         facts: ownerFacts,
       });
@@ -753,38 +838,38 @@ function generate(rng, opts) {
   const amount = () => `${rng.int(12, 180)} ${rng.pick(['000', '500'])}`;
   const NOISE = {
     D: [
-      () => ({ title: 'Polisa ubezpieczeniowa', lines: [`Polisa nr PL-${rng.int(100000, 999999)}`, `Przedmiot: ${stolen}`, `Suma ubezpieczenia: ${amount()} zł`, `Ubezpieczony: ${owner.full}`] }),
-      () => ({ title: 'Protokół oględzin', lines: ['Zamek bez śladów wyważenia.', 'Drzwi otwarto kodem z klawiatury.', 'Gablotę otwarto kluczem, który wisiał na zapleczu.'] }),
-      () => ({ title: 'Faktura za serwis alarmu', lines: [`Faktura nr ${rng.int(10, 299)}/2026`, 'Przegląd czujnika drzwi i synchronizacja zegara.', 'Wynik: sprawny, zegar zgodny co do sekundy.'] }),
-      () => ({ title: 'Notatka z tablicy na zapleczu', lines: [`„Przypominam: kodu nie podajemy nikomu spoza naszej piątki. ${initials}”`] }),
+      () => ({ title: 'Polisa ubezpieczeniowa', lines: [`Polisa nr PL-${rng.int(100000, 999999)}`, `Przedmiot: ${stolenNom}`, `Suma ubezpieczenia: ${amount()} zł`, `Ubezpieczony: ${owner.full}`] }),
+      () => ({ title: 'Protokół oględzin', lines: ['Zamek bez śladów forsowania.', 'Drzwi otwarto kodem wpisanym na klawiaturze.', 'Na klamce i klawiaturze brak odcisków palców.'] }),
+      () => ({ title: 'Faktura za serwis alarmu', lines: [`Faktura nr ${rng.int(10, 299)}/2026`, 'Przegląd czujnika drzwi i synchronizacja zegara.', 'Stan: sprawny, zegar zgodny co do sekundy.'] }),
+      () => ({ title: 'Notatka z tablicy na zapleczu', lines: [`„Przypominam: kodu nie podajemy nikomu obcemu. ${initials}”`] }),
       () => ({ title: 'Wycinek z „Gazety Borowickiej”', lines: ['W weekend w Teatrze Miejskim premiera „Zemsty”.', 'Bilety na wszystkie spektakle wyprzedane.'] }),
-      () => ({ title: 'Wycena rzeczoznawcy', lines: [`Przedmiot: ${stolen}`, `Wartość rynkowa: ${amount()} zł`] }),
+      () => ({ title: 'Wycena rzeczoznawcy', lines: [`Przedmiot: ${stolenNom}`, `Wartość rynkowa: ${amount()} zł`] }),
       () => ({ title: 'Lista osób znających kod', lines: ['Kod zmieniono na początku miesiąca.', `Znają go: ${suspects.map((x) => x.full).join(', ')}.`] }),
-      () => ({ title: 'Umowa najmu lokalu', lines: [`Najemca: ${owner.full}`, `Lokal: ${scene.address}`, 'Czynsz płatny do 10. dnia miesiąca.'] }),
+      () => ({ title: 'Umowa z firmą ochroniarską', lines: ['Firma: Ochrona Borowice', 'Zakres: czujnik drzwi i alarm, bez kamer.', 'Patrol przyjeżdża tylko po włączeniu się alarmu.'] }),
       () => ({ title: 'Rachunek za prąd', lines: ['Zakład Energetyczny Borowice', `Zużycie w poprzednim miesiącu: ${rng.int(150, 320)} kWh`, `Do zapłaty: ${rng.int(120, 260)},${rng.int(10, 99)} zł`] }),
     ],
     S: [
-      () => { const w = nextWitness(); return { title: `Zeznanie: ${w.full}`, sub: g(w, 'sąsiad z naprzeciwka', 'sąsiadka z naprzeciwka'), lines: [`„Około ${fmt(W1 + rng.int(-2, 2))} ${g(w, 'usłyszałem', 'usłyszałam')} pisk drzwi. Przez firankę nikogo nie ${g(w, 'widziałem', 'widziałam')}.”`] }; },
+      () => { const w = nextWitness(); return { title: `Zeznanie: ${w.full}`, sub: g(w, 'sąsiad z naprzeciwka', 'sąsiadka z naprzeciwka'), lines: [`„Około ${fmt(W1)} ${g(w, 'usłyszałem', 'usłyszałam')} pisk drzwi. Przez firankę nikogo nie ${g(w, 'widziałem', 'widziałam')}.”`] }; },
       () => { const w = nextWitness(); return { title: `Zeznanie: ${w.full}`, sub: g(w, 'dozorca sąsiedniej kamienicy', 'dozorczyni sąsiedniej kamienicy'), lines: [`„O 22:00 ${g(w, 'zamknąłem', 'zamknęłam')} bramę na podwórko. Wieczorem było spokojnie.”`] }; },
-      () => { const w = nextWitness(); return { title: `Zeznanie: ${w.full}`, sub: g(w, 'taksówkarz', 'taksówkarka'), lines: [`„${g(w, 'Miałem', 'Miałam')} wieczorem tylko dwa kursy, oba na dworzec. Nikogo z tej piątki nie ${g(w, 'woziłem', 'woziłam')}.”`] }; },
+      () => { const w = nextWitness(); return { title: `Zeznanie: ${w.full}`, sub: g(w, 'taksówkarz', 'taksówkarka'), lines: [`„${g(w, 'Miałem', 'Miałam')} wieczorem tylko dwa kursy, oba na dworzec. Nikogo z tej piątki nie ${g(w, 'wiozłem', 'wiozłam')}.”`] }; },
       () => { const w = nextWitness(); return { title: `Zeznanie: ${w.full}`, sub: g(w, 'sprzedawca w budce z kebabem', 'sprzedawczyni w budce z kebabem'), lines: ['„Koło 21:00 ktoś w kapturze przebiegł w stronę parku. Chyba biegacz, miał opaskę odblaskową.”'] }; },
-      () => ({ title: `Zeznanie: ${owner.full}`, sub: scene.ownerRole, lines: [`„${g(owner, 'Wyszedłem', 'Wyszłam')} o ${fmt(closeT)}, ${g(owner, 'zamknąłem', 'zamknęłam')} drzwi i ${g(owner, 'uzbroiłem', 'uzbroiłam')} alarm. Rano gablota była pusta.”`] }),
+      () => ({ title: `Zeznanie: ${owner.full}`, sub: scene.ownerRole, lines: [`„${g(owner, 'Wyszedłem', 'Wyszłam')} o ${fmt(closeT)}, ${g(owner, 'zamknąłem', 'zamknęłam')} drzwi i ${g(owner, 'uzbroiłem', 'uzbroiłam')} alarm. Rano ${g(owner, 'zauważyłem', 'zauważyłam')} kradzież.”`] }),
     ],
     M: [
       () => ({ title: 'Plan miasta: objaśnienia', lines: ['Rzeka dzieli miasto na dwie części.', 'Dla aut jedyną przeprawą jest most przy Rynku.', 'Piesi mogą przejść także kładką przy bulwarze.'] }),
-      () => ({ title: 'Komunikat drogowy', lines: ['Remont chodnika przy ul. Szpitalnej.', 'Przejście dla pieszych bez utrudnień.'] }),
+      () => ({ title: 'Komunikat drogowy', lines: ['Remont chodnika przy ul. Szpitalnej.', 'Ruch pieszy bez utrudnień.'] }),
       () => ({ title: 'Mapa ścieżek rowerowych', lines: ['Ścieżka wzdłuż rzeki: od bulwaru do stadionu.', 'Stacje rowerów miejskich: Rynek, Dworzec, Park Zdrojowy.'] }),
     ],
     Z: [
-      () => ({ title: 'Zdjęcie z oględzin', lines: ['Pusta gablota, na szybie smuga po rękawiczce.'] }),
+      () => ({ title: 'Zdjęcie z oględzin', lines: ['Puste miejsce po skradzionym przedmiocie.', 'Na blacie smuga po rękawiczce.'] }),
       () => ({ title: 'Zdjęcie z oględzin', lines: ['Rozmyte ślady błota przy drzwiach.', 'Nie da się ustalić rozmiaru buta.'] }),
       () => ({ title: 'Zdjęcie klawiatury przy drzwiach', lines: ['Na klawiszach 1, 4, 7 i 9 starta farba.'] }),
       () => ({ title: 'Zdjęcie z wigilii firmowej', lines: ['Cała piątka podejrzanych przy choince, rok temu.', 'Nic nie wskazuje na dawne konflikty.'] }),
       () => ({ title: 'Kamera sklepu naprzeciwko', lines: ['Kamera jest atrapą i nic nie nagrywa.'] }),
-      () => ({ title: 'Monitoring miejski', lines: [`Kamera nr ${rng.int(2, 19)} · ${rng.pick(['Rynek', 'Plac Wolności', 'Dworzec kolejowy'])}`, `Nagranie z godz. ${fmt(rng.int(19 * 60, 21 * 60 + 30))}`, 'Widać parę z psem. Nikogo z podejrzanych.'] }),
+      () => ({ title: 'Monitoring miejski', lines: [`Kamera nr ${rng.int(2, 19)} · ${rng.pick(['Rynek', 'Plac Wolności', 'Dworzec kolejowy'])}`, `Nagranie z godz. ${fmt(rng.int(19 * 60, 21 * 60 + 30))}`, 'Widać parę z psem.'] }),
     ],
     R: [
-      () => ({ title: 'Rejestr systemu alarmowego', lines: [`${fmt(closeT)} uzbrojony przez właściciela`, `${fmt(W1)} rozbrojony kodem`, `${fmt(W2)} uzbrojony kodem`] }),
+      () => ({ title: 'Rejestr systemu alarmowego', lines: [`${fmt(closeT)} uzbrojony przez ${g(owner, 'właściciela', 'właścicielkę')}`, `${fmt(W1)} rozbrojony kodem`, `${fmt(W2)} uzbrojony kodem`] }),
       () => ({ title: 'Rejestr zgłoszeń straży miejskiej', lines: [`${fmt(rng.int(19 * 60, 20 * 60))} głośna muzyka, Osiedle Leśne`, `${fmt(rng.int(20 * 60, 21 * 60 + 30))} pies bez smyczy, Park Zdrojowy`] }),
       () => ({ title: 'Rowery miejskie: stacja Rynek', lines: [`${fmt(rng.int(19 * 60, 21 * 60))} wypożyczono rower nr ${rng.int(10, 60)} (karta anonimowa)`, `${fmt(rng.int(19 * 60, 21 * 60))} zwrócono rower nr ${rng.int(10, 60)}`] }),
     ],
@@ -816,7 +901,7 @@ function generate(rng, opts) {
     addCard({
       desk: 'M',
       title: parts > 1 ? `Czasy dojścia do ${scene.short} (${k / chunk + 1}/${parts})` : `Czasy dojścia do ${scene.short}`,
-      sub: 'najszybsza droga, w obie strony',
+      sub: 'najszybsza droga, tyle samo w każdą stronę',
       lines: part.map((p) => `${PLACES[p].name}: ${travel[p]} min`),
       facts: part.map((p) => ({ t: 'travel', place: p, min: travel[p] })),
     });

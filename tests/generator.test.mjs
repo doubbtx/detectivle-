@@ -99,3 +99,66 @@ test('teksty nie zawierają niewypełnionych pól ani „undefined”', () => {
     assert.ok(!/undefined|NaN|\$\{|null/.test(all), `${iso}: ${all.match(/.*(undefined|NaN|\$\{|null).*/)?.[0]}`);
   }
 });
+
+// Niezależna od solvera kontrola: prawdziwe pobyty każdej osoby muszą dać się pogodzić.
+function staysOf(c) {
+  const travel = {};
+  const owners = {};
+  const films = [];
+  for (const k of c.cards) {
+    for (const f of k.facts || []) {
+      if (f.t === 'travel') travel[f.place] = f.min;
+      if (f.t === 'cardowner') owners[`${f.place}#${f.card}`] = f.who;
+      if (f.t === 'screening') films.push(f);
+    }
+  }
+  const stays = {};
+  const add = (who, st) => { (stays[who] = stays[who] || []).push(st); };
+  for (const k of c.cards) {
+    for (const f of k.facts || []) {
+      if (f.t === 'seen') add(f.who, { place: f.place, from: f.from, to: f.to, card: k.id });
+      if (f.t === 'cardlog') add(owners[`${f.place}#${f.card}`], { place: f.place, from: f.from, to: f.to, card: k.id });
+      if (f.t === 'claim' && k.id !== c.solution.forged) {
+        if (f.kind === 'train') {
+          add(f.who, { place: 'dworzec', from: f.time, to: f.time, card: k.id });
+          add(f.who, { place: '@away', from: f.time + 1, to: 1e9, card: k.id });
+        } else if (f.kind === 'cinema') {
+          const sc = films.find((x) => x.film === f.film && x.start === f.start);
+          add(f.who, { place: 'kino', from: f.start, to: f.start + sc.dur, card: k.id });
+        } else if (f.kind === 'delivery') {
+          for (const st of f.stops) add(f.who, { place: st.place, from: st.time, to: st.time, card: k.id });
+        } else {
+          add(f.who, { place: f.place || f.stop, from: f.time, to: f.time, card: k.id });
+        }
+      }
+    }
+  }
+  return { stays, travel };
+}
+
+test('prawdziwe pobyty każdej osoby są fizycznie spójne (osobna implementacja)', () => {
+  for (const iso of dates) {
+    const c = buildDailyCase(iso);
+    const { stays, travel } = staysOf(c);
+    for (const [who, list] of Object.entries(stays)) {
+      if (!c.suspects.some((s) => s.id === who)) continue;
+      for (let i = 0; i < list.length; i++) {
+        for (let j = i + 1; j < list.length; j++) {
+          const a = list[i];
+          const b = list[j];
+          if (a.place === b.place) continue;
+          const overlap = a.from <= b.to && b.from <= a.to;
+          assert.ok(!overlap, `${iso}: ${who} jest w dwóch miejscach naraz (${a.card}, ${b.card})`);
+          const [x, y] = a.to < b.from ? [a, b] : [b, a];
+          if (travel[x.place] === undefined || travel[y.place] === undefined) continue;
+          assert.ok(y.from - x.to >= Math.abs(travel[x.place] - travel[y.place]), `${iso}: ${who} nie zdąży z ${x.card} do ${y.card}`);
+        }
+      }
+    }
+    // Sprawca: żaden jego prawdziwy pobyt nie wyklucza obecności na miejscu zbrodni.
+    for (const st of stays[c.solution.culprit] || []) {
+      if (travel[st.place] === undefined) continue;
+      assert.ok(!(st.from < c.window.to + travel[st.place] && st.to > c.window.from - travel[st.place]), `${iso}: prawdziwy pobyt sprawcy ${st.card} daje mu alibi`);
+    }
+  }
+});

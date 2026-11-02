@@ -42,6 +42,15 @@ function loadCase(ref) {
   state.ref = ref;
   state.c = ref.type === 'daily' ? buildDailyCase(ref.date) : buildPracticeCase(ref.code);
   state.sol = solveCase(state.c);
+  resetCaseUi();
+}
+
+function resetCaseUi() {
+  state.accuse = { forged: null, proof: null, last: null };
+  state.showAll = false;
+  state.tab = 'akta';
+  state.modal = null;
+  state.confirm = null;
 }
 
 function myDesks() {
@@ -53,8 +62,19 @@ function seatOfDesk(desk) {
   return TEAM_DESKS[state.teamSize].findIndex((ds) => ds.includes(desk)) + 1;
 }
 
-function progressKey(mode = state.mode, ref = state.ref) {
-  return `p:${caseKey(ref)}:${mode}`;
+function progressKey(mode = state.mode, ref = state.ref, size = state.teamSize, seat = state.seat) {
+  return mode === 'team' ? `p:${caseKey(ref)}:team:${size}:${seat}` : `p:${caseKey(ref)}:solo`;
+}
+
+/** Ostatnio używane ustawienie ekipy dla tej sprawy: { size, seat }. */
+function lastTeam(ref = state.ref) {
+  return store.get(`lastTeam:${caseKey(ref)}`);
+}
+
+function savedProgress(mode, ref = state.ref) {
+  if (mode === 'solo') return store.get(progressKey('solo', ref));
+  const lt = lastTeam(ref);
+  return lt ? store.get(progressKey('team', ref, lt.size, lt.seat)) : null;
 }
 
 function freshProgress() {
@@ -132,6 +152,12 @@ function getStats(mode) {
   return store.get(statsKey(mode), { played: 0, solved: 0, streak: 0, best: 0, last: null, bestTime: null });
 }
 
+/** Seria wygasa, jeśli wczoraj i dziś nie było rozwiązanej sprawy dnia. */
+function shownStreak(st) {
+  const today = localTodayIso();
+  return st.last === today || st.last === addDays(today, -1) ? st.streak : 0;
+}
+
 function recordResult(solved) {
   if (state.ref.type !== 'daily') return;
   const mode = state.mode;
@@ -163,31 +189,74 @@ function go(screen) {
   window.scrollTo(0, 0);
 }
 
-function openDaily() {
+function clearPracticeHash() {
+  if (!/^#sprawa-/.test(window.location.hash)) return;
+  try {
+    window.history.replaceState(null, '', window.location.pathname + window.location.search);
+  } catch {
+    window.location.hash = '';
+  }
+}
+
+/** Otwiera sprawę dnia. Przy pierwszym wejściu wraca od razu do rozpoczętej gry. */
+function openDaily({ resume = false } = {}) {
+  clearPracticeHash();
   loadCase({ type: 'daily', date: localTodayIso() });
+  if (resume && tryResume()) return;
   go('home');
 }
 
-function openPractice(code) {
+function openPractice(code, { resume = false } = {}) {
   loadCase({ type: 'practice', code });
+  if (resume && tryResume()) return;
   go('intro');
+}
+
+function tryResume() {
+  const mode = store.get(`resume:${caseKey(state.ref)}`);
+  if (!mode) return false;
+  const saved = savedProgress(mode);
+  if (!saved || !saved.startedAt || saved.status !== 'playing') return false;
+  startMode(mode);
+  return true;
 }
 
 function startMode(mode) {
   state.mode = mode;
-  const saved = store.get(progressKey(mode));
+  resetCaseUi();
+  if (mode === 'team') {
+    const lt = lastTeam();
+    if (lt) {
+      state.teamSize = lt.size;
+      state.seat = lt.seat;
+    }
+  }
+  const saved = savedProgress(mode);
   if (saved) {
     progress = saved;
-    state.teamSize = saved.teamSize || state.teamSize;
-    state.seat = saved.seat || state.seat;
     if (saved.status !== 'playing') return go('result');
     if (mode === 'team' && !saved.startedAt) return go('setup');
-    state.tab = 'akta';
     return go('game');
   }
   progress = freshProgress();
   if (mode === 'team') return go('setup');
-  state.tab = 'akta';
+  go('game');
+}
+
+/** Zmiana liczby osób albo numeru gracza: każde ustawienie ma osobny zapis. */
+function changeTeam() {
+  state.mode = 'team';
+  resetCaseUi();
+  progress = freshProgress();
+  go('setup');
+}
+
+function startTeam() {
+  const saved = store.get(progressKey('team'));
+  progress = saved || freshProgress();
+  store.set(`lastTeam:${caseKey(state.ref)}`, { size: state.teamSize, seat: state.seat });
+  if (progress.status !== 'playing') return go('result');
+  startClock();
   go('game');
 }
 
@@ -198,14 +267,21 @@ function startClock() {
     progress.seat = state.seat;
     saveProgress();
   }
+  store.set(`resume:${caseKey(state.ref)}`, state.mode);
 }
 
 function finish(status) {
   progress.status = status;
   progress.endedAt = Date.now();
   saveProgress();
+  store.set(`resume:${caseKey(state.ref)}`, null);
   if (status === 'solved' || status === 'failed') recordResult(status === 'solved');
   go('result');
+}
+
+function goHome() {
+  if (state.ref?.type === 'daily' && state.ref.date === localTodayIso()) go('home');
+  else openDaily();
 }
 
 // ---------------------------------------------------------------------------
@@ -221,19 +297,22 @@ function caseHeading() {
   return `
     <div class="file-tab">${esc(label)}</div>
     <h1 class="case-title">${esc(c.title)}</h1>
-    <p class="case-meta">Zbrodnia: ${esc(c.crimeDate.label)}</p>
+    <p class="case-meta">Data kradzieży: ${esc(c.crimeDate.label)}</p>
     <p class="case-meta">Trudność ${difficultyDots(c.difficulty)} ${esc(DIFFICULTY_LABELS[c.difficulty])}</p>`;
 }
 
 function playedLine(mode) {
-  const p = store.get(progressKey(mode));
+  const p = savedProgress(mode);
   if (!p) return '';
-  const label = mode === 'solo' ? 'Solo' : 'Z ekipą';
-  if (p.status === 'solved') return `<li><b>${label}:</b> rozwiązana w ${fmtClock(Math.floor((p.endedAt - p.startedAt) / 1000) + p.penalty)}</li>`;
-  if (p.status === 'failed') return `<li><b>${label}:</b> nierozwiązana</li>`;
-  if (p.status === 'revealed') return `<li><b>${label}:</b> rozwiązanie odsłonięte</li>`;
-  if (p.startedAt) return `<li><b>${label}:</b> w toku, możesz wrócić</li>`;
-  return '';
+  const label = mode === 'solo' ? 'Solo' : `Z ekipą (gracz ${p.seat} z ${p.teamSize})`;
+  const change = mode === 'team' ? ` <button class="link-btn" data-act="change-team">Zmień ekipę lub numer</button>` : '';
+  let text = '';
+  if (p.status === 'solved') text = `rozwiązana w ${fmtClock(Math.floor((p.endedAt - p.startedAt) / 1000) + p.penalty)}`;
+  else if (p.status === 'failed') text = 'nierozwiązana';
+  else if (p.status === 'revealed') text = 'rozwiązanie odsłonięte';
+  else if (p.startedAt) text = `w toku · <button class="link-btn" data-act="mode" data-mode="${mode}">Wróć do gry</button>`;
+  else return '';
+  return `<li><b>${label}:</b> ${text}${change}</li>`;
 }
 
 function renderHow() {
@@ -241,11 +320,11 @@ function renderHow() {
   <details class="how" ${store.get('seenHow') ? '' : 'open'}>
     <summary>Jak grać</summary>
     <ol class="how-list">
-      <li>Pięcioro podejrzanych ma alibi. Jedno z nich jest fałszywe: sprawca podrzucił <b>dokładnie jeden sfałszowany dowód</b>.</li>
+      <li>Pięcioro podejrzanych ma alibi. Jedno z nich jest fałszywe: sprawca dostarczył <b>dokładnie jeden sfałszowany dowód</b>.</li>
       <li>Dowody leżą na pięciu biurkach: Dokumenty, Świadkowie, Mapa i rozkłady, Zdjęcia, Rejestry. Fałszywkę zawsze obala karta z <b>innego</b> biurka.</li>
       <li>Liczcie czasy. Jeśli kogoś widziano o 19:40 w teatrze, a z teatru na miejsce zbrodni idzie się 25 minut, to nie mógł być w środku o 19:52.</li>
       <li>Oskarżenie to dwie karty: <b>sfałszowany dowód</b> i <b>karta, która go obala</b>. Kto dostarczył fałszywkę, ten jest sprawcą. Masz ${CONFIG.maxAttempts} próby, każda pomyłka to +${fmtPenalty(CONFIG.wrongPenalty)}, a podpowiedź +${fmtPenalty(CONFIG.hintPenalty)}.</li>
-      <li><b>Z ekipą:</b> każdy otwiera grę na swoim telefonie i wybiera inny numer gracza. Każdy widzi tylko swoje biurka, więc musicie rozmawiać (Discord, telefon, przy stole). Oskarżenie składa kapitan, czyli gracz 1.</li>
+      <li><b>Z ekipą:</b> każdy otwiera grę na swoim telefonie i wybiera inny numer gracza. Każdy widzi tylko swoje biurka, więc musicie rozmawiać (na Discordzie, przez telefon albo przy stole). Oskarżenie składa kapitan, czyli gracz 1.</li>
     </ol>
   </details>`;
 }
@@ -257,7 +336,7 @@ function renderStats() {
     <div class="stat-group">
       <h3>${label}</h3>
       <dl>
-        <div><dt>Seria</dt><dd>${st.streak}</dd></div>
+        <div><dt>Seria</dt><dd>${shownStreak(st)}</dd></div>
         <div><dt>Najdłuższa</dt><dd>${st.best}</dd></div>
         <div><dt>Rozwiązane</dt><dd>${st.solved}/${st.played}</dd></div>
         <div><dt>Najlepszy czas</dt><dd>${st.bestTime == null ? '–' : fmtClock(st.bestTime)}</dd></div>
@@ -285,13 +364,13 @@ function renderHome() {
     ${renderHow()}
     <section class="practice">
       <h2>Trening</h2>
-      <p>Sprawa dnia jest jedna na dobę. Sprawy treningowe nie liczą się do serii. Ten sam kod daje tę samą sprawę, więc możecie zagrać nią całą ekipą.</p>
+      <p>Sprawa dnia jest jedna na dobę. Sprawy treningowe nie liczą się do serii. Ten sam kod daje tę samą sprawę, więc możecie zagrać w nią całą ekipą.</p>
       <div class="practice-row">
         <button class="btn" data-act="practice-new">Nowa sprawa treningowa</button>
-        <form class="code-form" data-act="practice-code">
+        <form class="code-form" data-act="practice-code" novalidate>
           <label for="code-input">Kod od znajomych</label>
           <div class="code-row">
-            <input id="code-input" name="code" maxlength="4" autocomplete="off" placeholder="np. K7Q2" pattern="[A-Za-z0-9]{4}" required>
+            <input id="code-input" name="code" maxlength="20" autocomplete="off" autocapitalize="characters" spellcheck="false" placeholder="np. K7Q2">
             <button class="btn" type="submit">Wczytaj</button>
           </div>
         </form>
@@ -314,6 +393,7 @@ function renderIntro() {
         <button class="btn btn-primary" data-act="mode" data-mode="team">Graj z ekipą <small>2–5 osób</small></button>
         <button class="btn" data-act="mode" data-mode="solo">Graj solo</button>
       </div>
+      ${[playedLine('solo'), playedLine('team')].join('') ? `<ul class="played">${playedLine('solo')}${playedLine('team')}</ul>` : ''}
       <p class="muted">Podaj znajomym kod <b class="code">${esc(state.c.code)}</b>, żeby dostali tę samą sprawę.</p>
     </section>
   </div>`;
@@ -324,7 +404,10 @@ function inviteText() {
   const what = c.kind === 'daily' ? `sprawę dnia nr ${c.number}` : `sprawę treningową z kodem ${c.code}`;
   const seats = Array.from({ length: state.teamSize }, (_, i) => i + 1).filter((n) => n !== state.seat).join(', ');
   const url = CONFIG.shareUrl ? ` ${CONFIG.shareUrl}${c.kind === 'practice' ? `#sprawa-${c.code}` : ''}` : '';
-  return `Gramy w Fałszywe Alibi: ${what}, ekipa ${state.teamSize}-osobowa.${url} Wejdźcie w „Graj z ekipą”, wybierzcie ${state.teamSize} osoby i numery: ${seats}. Ja mam numer ${state.seat}. Startujemy razem, jak wszyscy będą na rozmowie.`;
+  if (state.teamSize === 2) {
+    return `Gramy w Fałszywe Alibi: ${what}, we dwoje.${url} Wejdź w „Graj z ekipą”, ustaw liczbę osób na 2 i weź numer ${seats}. Ja mam numer ${state.seat}. Startujemy razem, jak oboje będziemy na rozmowie.`;
+  }
+  return `Gramy w Fałszywe Alibi: ${what}, ekipa ${state.teamSize}-osobowa.${url} Wejdźcie w „Graj z ekipą”, ustawcie liczbę osób na ${state.teamSize} i weźcie numery: ${seats}. Ja mam numer ${state.seat}. Startujemy razem, jak wszyscy będą na rozmowie.`;
 }
 
 function renderSetup() {
@@ -339,6 +422,7 @@ function renderSetup() {
     <section class="setup">
       <h1 class="setup-title">Ustawienie ekipy</h1>
       <p class="muted">Każdy otwiera tę stronę na swoim urządzeniu, wybiera tę samą liczbę osób i inny numer gracza.</p>
+      <p class="fingerprint">Sprawdźcie, czy wszyscy macie tę samą sprawę: <b>${esc(state.c.kind === 'daily' ? `nr ${state.c.number}` : `kod ${state.c.code}`)}</b>, podejrzani: ${esc(state.c.suspects.map((x) => `${x.first[0]}. ${x.full.split(' ').slice(1).join(' ')}`).join(', '))}.</p>
       <fieldset class="seg">
         <legend>Ile osób w ekipie?</legend>
         <div class="seg-row">
@@ -420,7 +504,7 @@ function renderAkta() {
     </div>
     <h3 class="sec-label">Podejrzani i ich alibi</h3>
     <ul class="suspects">${renderSuspects()}</ul>
-    ${team ? `<p class="muted small">Kody na szaro to karty z biurek innych graczy. Kliknij kod, żeby sprawdzić, kto go ma.</p>` : ''}
+    ${team ? `<p class="muted small">Szare kody to karty z biurek innych graczy. Kliknij kod, żeby sprawdzić, kto ma tę kartę.</p>` : ''}
     <details class="rules" open>
       <summary>Zasady śledztwa</summary>
       <ol>${RULES.map((r) => `<li>${esc(r)}</li>`).join('')}</ol>
@@ -454,7 +538,7 @@ function renderCard(k, opts = {}) {
 
 function cardPlainText(k) {
   const by = k.by ? suspectById(k.by) : null;
-  return [`[${k.id}] ${k.title}${k.sub ? ` (${k.sub})` : ''}${by ? `, od: ${by.full}` : ''}`, ...k.lines].join('\n');
+  return [`[${k.id}] ${k.title}${k.sub ? ` (${k.sub})` : ''}${by ? ` · ${by.f ? 'dostarczyła' : 'dostarczył'}: ${by.full}` : ''}`, ...k.lines].join('\n');
 }
 
 function renderDesk(desk) {
@@ -464,7 +548,7 @@ function renderDesk(desk) {
   <section class="desk" aria-label="Biurko ${esc(def.name)}">
     <header class="desk-head">
       <h2>${esc(def.name)}</h2>
-      <p class="muted small">${cards.length} kart · ${esc(def.hint)}</p>
+      <p class="muted small">${cards.length} ${cards.length >= 2 && cards.length <= 4 ? 'karty' : 'kart'} · ${esc(def.hint)}</p>
     </header>
     <div class="cards">${cards.map((k) => renderCard(k)).join('')}</div>
   </section>`;
@@ -518,7 +602,7 @@ function renderGate() {
   <div class="page">
     <section class="gate">
       ${caseHeading()}
-      <p>Zegar ruszy, kiedy otworzysz akta. Masz ${CONFIG.maxAttempts} próby na wskazanie fałszywego dowodu i karty, która go obala.</p>
+      <p>Zegar ruszy, kiedy otworzysz akta. Masz ${CONFIG.maxAttempts} próby na wskazanie sfałszowanego dowodu i karty, która go obala.</p>
       <div class="actions">
         <button class="btn btn-primary" data-act="solo-start">Otwórz akta</button>
         <button class="btn btn-ghost" data-act="leave">Wróć</button>
@@ -535,7 +619,7 @@ function renderGame() {
   const rightHtml = right === 'notes' ? renderNotes() : renderDesk(right);
   return `
   <div class="sticky-head">${renderTopbar()}${renderTabs()}</div>
-  <div class="game tab-${state.tab === 'akta' ? 'akta' : 'other'}">
+  <div class="game view-${state.tab === 'akta' ? 'akta' : 'other'}">
     <div class="col-left">${renderAkta()}</div>
     <div class="col-right">${rightHtml}</div>
   </div>
@@ -552,15 +636,15 @@ function hintTexts() {
   if (neutral) {
     const [id, items] = neutral;
     const it = items.find((i) => i.type === 'neutral');
-    out.push(`${suspectById(id).full} ma alibi potwierdzone przez niezależne źródło. Zobacz karty ${it.refs.join(' i ')}.`);
+    out.push(`${suspectById(id).full} ma alibi potwierdzone przez niezależne źródło. Zobacz karty ${it.refs.slice(0, -1).join(', ')} i ${it.refs[it.refs.length - 1]}.`);
   } else {
-    out.push('Zacznijcie od czasów dojścia na biurku Mapa i rozkłady.');
+    out.push(`${state.mode === 'team' ? 'Zacznijcie' : 'Zacznij'} od czasów dojścia na biurku „Mapa i rozkłady”.`);
   }
   const forged = sol.explain.forged;
   const refDesk = cardById(forged.refs.find((r) => r !== forged.card))?.desk;
-  out.push(`Fałszywkę obala karta z biurka: ${deskName(refDesk)}.${state.mode === 'team' ? ` Ma je gracz ${seatOfDesk(refDesk)}.` : ''}`);
+  out.push(`Fałszywkę obala karta z biurka „${deskName(refDesk)}”.${state.mode === 'team' ? ` Ma je gracz ${seatOfDesk(refDesk)}.` : ''}`);
   const keyRef = forged.refs.find((r) => r !== forged.card);
-  out.push(`Porównajcie dokładnie kartę ${keyRef} z dowodami dostarczonymi przez podejrzanych.`);
+  out.push(`${state.mode === 'team' ? 'Porównajcie' : 'Porównaj'} dokładnie kartę ${keyRef} z dowodami dostarczonymi przez podejrzanych.`);
   return out;
 }
 
@@ -572,7 +656,7 @@ function renderModal() {
     const used = texts.slice(0, progress.hints);
     const confirming = state.confirm === 'hint';
     body = `
-      <h2>Podpowiedzi</h2>
+      <h2 tabindex="-1">Podpowiedzi</h2>
       ${used.length ? `<ol class="hint-list">${used.map((t) => `<li>${esc(t)}</li>`).join('')}</ol>` : '<p class="muted">Nie użyto jeszcze żadnej podpowiedzi.</p>'}
       ${progress.hints < texts.length
         ? `<button class="btn ${confirming ? 'btn-primary' : ''}" data-act="hint">${confirming ? `Na pewno? +${fmtPenalty(CONFIG.hintPenalty)} do czasu` : `Pokaż podpowiedź ${progress.hints + 1} z 3`}</button>`
@@ -587,14 +671,16 @@ function renderModal() {
     const forgedCard = a.forged ? cardById(a.forged) : null;
     const accused = forgedCard ? suspectById(forgedCard.by) : null;
     const sq = (v) => (v === null ? 'skip' : v ? 'ok' : 'bad');
+    const tried = progress.attempts.some((t) => t.forged === a.forged && t.proof === a.proof);
     body = `
-      <h2>Oskarżenie</h2>
-      <p class="muted small">Zostały próby: ${left}. Pomyłka dodaje ${fmtPenalty(CONFIG.wrongPenalty)} do czasu.</p>
-      ${a.last ? `<p class="feedback" role="status"><span class="sq ${sq(a.last[0])}"></span> fałszywka: ${a.last[0] ? 'trafiona' : 'pudło'} · <span class="sq ${sq(a.last[1])}"></span> obalenie: ${a.last[1] === null ? 'nie sprawdzono' : a.last[1] ? 'trafione' : 'pudło'}</p>` : ''}
+      <h2 tabindex="-1">Oskarżenie</h2>
+      <p class="muted small">Pozostałe próby: ${left}. Pomyłka dodaje ${fmtPenalty(CONFIG.wrongPenalty)} do czasu.</p>
+      ${a.last ? `<p class="feedback" role="status"><span class="fb"><span class="sq ${sq(a.last[0])}"></span> fałszywka: ${a.last[0] ? 'trafiona' : 'pudło'}</span> <span class="fb"><span class="sq ${sq(a.last[1])}"></span> obalenie: ${a.last[1] === null ? 'nie sprawdzono' : a.last[1] ? 'trafione' : 'pudło'}</span></p>` : ''}
+      ${progress.attempts.length ? `<div class="history"><span class="history-label">Wcześniejsze próby:</span> ${progress.attempts.map((t) => `<span class="fb"><span class="chip">${t.forged}</span> + <span class="chip">${t.proof}</span> <span class="sq ${sq(t.ok[0])}"></span><span class="sq ${sq(t.ok[1])}"></span></span>`).join(' ')}</div>` : ''}
       <fieldset class="pick">
         <legend>1. Który dowód jest sfałszowany?</legend>
         <div class="pick-list">
-          ${supplied.map((k) => `<button class="pick-btn pick-row${a.forged === k.id ? ' on' : ''}" data-act="pick-forged" data-id="${k.id}" aria-pressed="${a.forged === k.id}"><span class="chip">${k.id}</span> ${esc(k.title)} <span class="muted">· ${esc(suspectById(k.by).full)}</span></button>`).join('')}
+          ${supplied.map((k) => `<button class="pick-btn pick-row${a.forged === k.id ? ' on' : ''}" data-act="pick-forged" data-id="${k.id}" aria-pressed="${a.forged === k.id}"><span class="chip">${k.id}</span> <span class="pick-main">${esc(k.title)}<span class="pick-sub">${esc(suspectById(k.by).full)}</span></span></button>`).join('')}
         </div>
       </fieldset>
       <fieldset class="pick">
@@ -607,21 +693,22 @@ function renderModal() {
             return `<div class="proof-row"><span class="proof-desk">${esc(d.name)}</span><div class="proof-chips">${ids.map((k) => `<button class="proof-chip${a.proof === k.id ? ' on' : ''}" data-act="pick-proof" data-id="${k.id}" aria-pressed="${a.proof === k.id}" ${mine.includes(k.desk) ? `title="${esc(k.title)}"` : ''}>${k.id}</button>`).join('')}</div></div>`;
           }).join('')}
         </div>
-        ${proofCard ? `<p class="small">Wybrana karta: <span class="chip">${proofCard.id}</span> ${mine.includes(proofCard.desk) ? esc(proofCard.title) : `z biurka ${esc(deskName(proofCard.desk))}`}</p>` : ''}
+        ${proofCard ? `<p class="small">Wybrana karta: <span class="chip">${proofCard.id}</span> ${mine.includes(proofCard.desk) ? esc(proofCard.title) : `z biurka „${esc(deskName(proofCard.desk))}”`}</p>` : ''}
       </fieldset>
       ${accused ? `<p class="accused">Oskarżasz: <b>${esc(accused.full)}</b></p>` : ''}
-      <button class="btn btn-primary btn-wide" data-act="accuse" ${a.forged && a.proof ? '' : 'disabled'}>Oskarżam</button>`;
+      ${tried ? '<p class="small muted">Ta para kart była już sprawdzona. Wybierz inną.</p>' : ''}
+      <button class="btn btn-primary btn-wide" data-act="accuse" ${a.forged && a.proof && !tried ? '' : 'disabled'}>Oskarżam</button>`;
   }
   if (state.modal === 'end') {
     const confirming = state.confirm === 'reveal';
     body = `
-      <h2>Koniec śledztwa</h2>
+      <h2 tabindex="-1">Koniec śledztwa</h2>
       <p>Oskarżenie składa kapitan, czyli gracz 1. Kiedy zamknie sprawę, możesz tu zobaczyć rozwiązanie i wszystkie karty.</p>
-      <button class="btn ${confirming ? 'btn-primary' : ''}" data-act="reveal">${confirming ? 'Na pewno? Odsłoni to rozwiązanie' : 'Pokaż rozwiązanie'}</button>`;
+      <button class="btn ${confirming ? 'btn-primary' : ''}" data-act="reveal">${confirming ? 'Na pewno? To odsłoni rozwiązanie' : 'Pokaż rozwiązanie'}</button>`;
   }
   return `
   <div class="overlay" data-act="close-modal">
-    <div class="modal" role="dialog" aria-modal="true" aria-label="${esc(state.modal)}" data-stop>
+    <div class="modal" role="dialog" aria-modal="true" aria-label="${({ hints: 'Podpowiedzi', accuse: 'Oskarżenie', end: 'Koniec śledztwa' })[state.modal]}" data-stop>
       <button class="btn btn-ghost btn-icon modal-close" data-act="close-modal" aria-label="Zamknij">✕</button>
       ${body}
     </div>
@@ -635,6 +722,9 @@ function proofSet() {
 
 function submitAccusation() {
   const a = state.accuse;
+  // Po pomyłce karta-obalenie jest czyszczona, więc podwójne kliknięcie nie wyśle drugiej próby.
+  if (!a.forged || !a.proof || progress.status !== 'playing') return;
+  if (progress.attempts.some((t) => t.forged === a.forged && t.proof === a.proof)) return;
   const sol = state.c.solution;
   const forgedOk = a.forged === sol.forged;
   const ok = [forgedOk, forgedOk ? proofSet().has(a.proof) : null];
@@ -642,6 +732,7 @@ function submitAccusation() {
   a.last = ok;
   if (ok[0] && ok[1]) return finish('solved');
   progress.penalty += CONFIG.wrongPenalty;
+  a.proof = null;
   saveProgress();
   if (progress.attempts.length >= CONFIG.maxAttempts) return finish('failed');
   render();
@@ -653,7 +744,7 @@ function submitAccusation() {
 function shareText() {
   const c = state.c;
   const head = c.kind === 'daily' ? `Fałszywe Alibi nr ${c.number}` : `Fałszywe Alibi · trening ${c.code}`;
-  const mode = state.mode === 'solo' ? 'solo' : `ekipa ${state.teamSize}-os.`;
+  const mode = state.mode === 'solo' ? 'solo' : `ekipa · ${state.teamSize} ${state.teamSize === 5 ? 'osób' : 'osoby'}`;
   const rows = progress.attempts.map((a) => a.ok.map((x) => (x === null ? '⬜' : x ? '🟩' : '🟥')).join('')).join('\n');
   const tail = progress.status === 'solved'
     ? `⏱ ${fmtClock(elapsedSec())} · 💡 ${progress.hints}`
@@ -661,10 +752,10 @@ function shareText() {
   return [`${head} · ${mode}`, rows, tail, CONFIG.shareUrl].filter(Boolean).join('\n');
 }
 
-function msToMidnight() {
-  const now = new Date();
-  const next = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1);
-  return next - now;
+/** Ile zostało do następnej sprawy dnia (liczone od daty sprawy na ekranie). */
+function msToNextCase() {
+  const [y, m, d] = state.ref.date.split('-').map(Number);
+  return new Date(y, m - 1, d + 1) - new Date();
 }
 
 function renderResult() {
@@ -685,7 +776,7 @@ function renderResult() {
     });
     return `<li><b>${esc(s.full)}</b>: ${items.map((i) => `${esc(sol.describeClear(i))} ${i.refs.map((r) => `<span class="chip">${r}</span>`).join(' ')}`).join('; ')}</li>`;
   }).join('');
-  const nextIn = msToMidnight();
+  const nextIn = c.kind === 'daily' ? msToNextCase() : 0;
   const hh = Math.floor(nextIn / 3600000);
   const mm = Math.floor((nextIn % 3600000) / 60000);
   return `
@@ -709,11 +800,11 @@ function renderResult() {
         <textarea id="share-text" readonly rows="5">${esc(shareText())}</textarea>
         <button class="btn btn-primary" data-act="copy-share">Kopiuj wynik</button>
       </div>`}
-      ${c.kind === 'daily' ? `<p class="muted">Następna sprawa za ${hh} h ${mm} min.</p>` : ''}
+      ${c.kind === 'daily' ? (nextIn > 0 ? `<p class="muted">Następna sprawa za ${hh} h ${mm} min.</p>` : '<p><button class="btn" data-act="home">Nowa sprawa dnia już czeka</button></p>') : ''}
     </section>
     <section class="solution">
       <h2>Rozwiązanie</h2>
-      <p class="verdict">Sprawcą jest <b>${esc(culprit.full)}</b> (${esc(culprit.role)}). Sfałszowany dowód to <span class="chip">${forged.id}</span> ${esc(forged.title)}, a obala go ${[...proofSet()].map((r) => `<span class="chip">${r}</span>`).join(' lub ')}.</p>
+      <p class="verdict">${culprit.f ? 'Sprawczynią' : 'Sprawcą'} jest <b>${esc(culprit.full)}</b> (${esc(culprit.role)}). Sfałszowany dowód to <span class="chip">${forged.id}</span> ${esc(forged.title)}, a obala go ${[...proofSet()].map((r) => `<span class="chip">${r}</span>`).join(' lub ')}.</p>
       <p>Dlaczego: ${refsHtml(sol.explain.forged.reason)}.</p>
       <div class="cards cards-solution">
         ${renderCard(forged, { noActions: true, highlight: true })}
@@ -734,8 +825,27 @@ function renderResult() {
 // ---------------------------------------------------------------------------
 // Render i zdarzenia
 
+let lastModal = null;
+let modalOpener = null;
+
+function focusKeyOf(el) {
+  if (!el || !el.dataset || !el.dataset.act) return null;
+  const d = el.dataset;
+  return [d.act, d.id || '', d.tab || '', d.n || '', d.mode || '', d.v || ''].join('|');
+}
+
+function findByKey(key) {
+  if (!key) return null;
+  const [act, id, tab, n, mode, v] = key.split('|');
+  return [...app.querySelectorAll(`[data-act="${act}"]`)].find((el) => (el.dataset.id || '') === id && (el.dataset.tab || '') === tab && (el.dataset.n || '') === n && (el.dataset.mode || '') === mode && (el.dataset.v || '') === v) || null;
+}
+
 function render() {
   clearInterval(timerHandle);
+  const active = document.activeElement;
+  const focusKey = app.contains(active) ? focusKeyOf(active) : null;
+  const modalScroll = app.querySelector('.modal')?.scrollTop ?? 0;
+  if (state.modal && !lastModal) modalOpener = focusKey;
   let html = '';
   switch (state.screen) {
     case 'home': html = renderHome(); break;
@@ -748,6 +858,15 @@ function render() {
   app.innerHTML = `${html}<div id="toast" class="toast" role="status" ${state.toast ? '' : 'hidden'}>${esc(state.toast)}</div>`;
   const head = app.querySelector('.sticky-head');
   if (head) document.documentElement.style.setProperty('--head-h', `${head.offsetHeight}px`);
+  const modal = app.querySelector('.modal');
+  if (state.modal && state.modal !== lastModal) {
+    modal?.querySelector('h2')?.focus({ preventScroll: true });
+  } else {
+    if (modal && state.modal === lastModal) modal.scrollTop = modalScroll;
+    const target = findByKey(!state.modal && lastModal ? modalOpener : focusKey);
+    if (target) target.focus({ preventScroll: true });
+  }
+  lastModal = state.modal;
   if (state.screen === 'game' && progress?.startedAt && progress.status === 'playing') {
     timerHandle = setInterval(() => {
       const el = document.getElementById('clock');
@@ -759,7 +878,7 @@ function render() {
 function gotoCard(id) {
   const k = cardById(id);
   if (!myDesks().includes(k.desk)) {
-    showToast(`Karta ${id} leży na biurku ${deskName(k.desk)}. Ma ją gracz ${seatOfDesk(k.desk)}.`);
+    showToast(`Karta ${id} leży na biurku „${deskName(k.desk)}”. Ma ją gracz ${seatOfDesk(k.desk)}.`);
     return;
   }
   state.tab = k.desk;
@@ -779,8 +898,9 @@ app.addEventListener('click', (e) => {
   if (act === 'close-modal' && e.target.closest('[data-stop]') && !e.target.closest('.modal-close')) return;
   switch (act) {
     case 'home': openDaily(); break;
+    case 'change-team': changeTeam(); break;
     case 'mode': startMode(target.dataset.mode); break;
-    case 'back-intro': go(state.ref.type === 'daily' ? 'home' : 'intro'); break;
+    case 'back-intro': if (state.ref.type === 'daily') goHome(); else go('intro'); break;
     case 'size':
       state.teamSize = Number(target.dataset.n);
       if (state.seat > state.teamSize) state.seat = 1;
@@ -789,12 +909,8 @@ app.addEventListener('click', (e) => {
     case 'seat': state.seat = Number(target.dataset.n); render(); break;
     case 'copy-invite': copyText(inviteText(), 'Skopiowano wiadomość'); break;
     case 'team-start':
-      progress.teamSize = state.teamSize;
-      progress.seat = state.seat;
-      startClock();
-      state.tab = 'akta';
       store.set('seenHow', true);
-      go('game');
+      startTeam();
       break;
     case 'solo-start':
       startClock();
@@ -803,7 +919,7 @@ app.addEventListener('click', (e) => {
       break;
     case 'leave':
       saveProgress();
-      if (state.ref.type === 'daily') go('home');
+      if (state.ref.type === 'daily') goHome();
       else openDaily();
       break;
     case 'tab':
@@ -828,7 +944,7 @@ app.addEventListener('click', (e) => {
     }
     case 'copy-card': copyText(cardPlainText(cardById(target.dataset.id)), `Skopiowano kartę ${target.dataset.id}`); break;
     case 'open-hints': state.modal = 'hints'; state.confirm = null; render(); break;
-    case 'open-accuse': state.modal = 'accuse'; state.accuse.last = null; render(); break;
+    case 'open-accuse': state.modal = 'accuse'; render(); break;
     case 'open-end': state.modal = 'end'; state.confirm = null; render(); break;
     case 'close-modal': state.modal = null; state.confirm = null; render(); break;
     case 'hint':
@@ -870,7 +986,7 @@ app.addEventListener('submit', (e) => {
   const form = e.target.closest('[data-act="practice-code"]');
   if (!form) return;
   e.preventDefault();
-  const code = new FormData(form).get('code').toString().trim().toUpperCase();
+  const code = new FormData(form).get('code').toString().toUpperCase().replace(/\s+/g, '').replace(/^.*#?SPRAWA-/, '').replace(/^#/, '');
   if (!/^[A-Z0-9]{4}$/.test(code)) {
     showToast('Kod ma 4 znaki: litery i cyfry.');
     return;
@@ -891,13 +1007,37 @@ document.addEventListener('keydown', (e) => {
     state.modal = null;
     state.confirm = null;
     render();
+    return;
+  }
+  if (e.key === 'Tab' && state.modal) {
+    const modal = app.querySelector('.modal');
+    const items = [...modal.querySelectorAll('button:not([disabled]), [href], input, textarea, [tabindex]:not([tabindex="-1"])')];
+    if (!items.length) return;
+    const first = items[0];
+    const last = items[items.length - 1];
+    if (!modal.contains(document.activeElement)) {
+      e.preventDefault();
+      first.focus();
+    } else if (e.shiftKey && document.activeElement === first) {
+      e.preventDefault();
+      last.focus();
+    } else if (!e.shiftKey && document.activeElement === last) {
+      e.preventDefault();
+      first.focus();
+    }
   }
 });
 
-function routeFromHash() {
+// Po powrocie do karty (np. następnego dnia) pokaż aktualną sprawę dnia.
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState !== 'visible' || !state.ref || state.ref.type !== 'daily') return;
+  if (state.ref.date !== localTodayIso() && ['home', 'result'].includes(state.screen)) openDaily();
+});
+
+function routeFromHash(resume = false) {
   const m = window.location.hash.match(/^#sprawa-([A-Za-z0-9]{4})$/);
   if (m) {
-    openPractice(m[1].toUpperCase());
+    openPractice(m[1].toUpperCase(), { resume });
     return true;
   }
   return false;
@@ -912,7 +1052,7 @@ window.addEventListener('hashchange', () => {
   if (!routeFromHash() && state.ref?.type === 'practice' && !window.location.hash) openDaily();
 });
 
-if (!routeFromHash()) openDaily();
+if (!routeFromHash(true)) openDaily({ resume: true });
 
 // Do testów w konsoli przeglądarki.
 window.__falszyweAlibi = { state, get progress() { return progress; } };
