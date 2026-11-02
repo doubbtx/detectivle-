@@ -1,6 +1,7 @@
 // Interfejs gry „Fałszywe Alibi”. Czysty JavaScript, bez bibliotek.
 
-import { buildDailyCase, buildPracticeCase, randomPracticeCode, DIFFICULTY_LABELS } from './generator.js';
+import { randomPracticeCode, DIFFICULTY_LABELS } from './generator.js';
+import { loadDailyCase, loadPracticeCase } from './cases.js';
 import { solveCase } from './solver.js';
 import { TEAM_DESKS, RULES, DESK_DEFS } from './data.js';
 import { fmt, localTodayIso, addDays } from './time.js';
@@ -38,12 +39,22 @@ const cardById = (id) => state.c.cards.find((k) => k.id === id);
 const caseKey = (ref) => (ref.type === 'daily' ? ref.date : `T-${ref.code}`);
 const isCaptain = () => state.mode === 'solo' || state.seat === 1;
 
-function loadCase(ref) {
+let loadToken = 0;
+
+/** Wczytuje sprawę. Zwraca false, jeśli w międzyczasie zaczęło się wczytywanie innej. */
+async function loadCase(ref) {
+  const token = ++loadToken;
+  const loaded = ref.type === 'daily' ? await loadDailyCase(ref.date) : loadPracticeCase(ref.code);
+  if (token !== loadToken) return false;
   state.ref = ref;
-  state.c = ref.type === 'daily' ? buildDailyCase(ref.date) : buildPracticeCase(ref.code);
+  state.c = loaded.case;
+  state.source = loaded.source;
   state.sol = solveCase(state.c);
   resetCaseUi();
+  return true;
 }
+
+const isArchive = () => state.ref?.type === 'daily' && state.ref.date < addDays(localTodayIso(), -1);
 
 function resetCaseUi() {
   state.accuse = { forged: null, proof: null, last: null };
@@ -159,7 +170,8 @@ function shownStreak(st) {
 }
 
 function recordResult(solved) {
-  if (state.ref.type !== 'daily') return;
+  // Do serii liczą się tylko sprawy dnia (dzisiejsza albo wczorajsza, jeśli gra przeszła przez północ).
+  if (state.ref.type !== 'daily' || isArchive()) return;
   const mode = state.mode;
   const st = getStats(mode);
   if (st.lastPlayed === state.ref.date) return;
@@ -190,7 +202,7 @@ function go(screen) {
 }
 
 function clearPracticeHash() {
-  if (!/^#sprawa-/.test(window.location.hash)) return;
+  if (!/^#(sprawa|dzien)-/.test(window.location.hash)) return;
   try {
     window.history.replaceState(null, '', window.location.pathname + window.location.search);
   } catch {
@@ -198,16 +210,18 @@ function clearPracticeHash() {
   }
 }
 
-/** Otwiera sprawę dnia. Przy pierwszym wejściu wraca od razu do rozpoczętej gry. */
-function openDaily({ resume = false } = {}) {
-  clearPracticeHash();
-  loadCase({ type: 'daily', date: localTodayIso() });
+/** Otwiera sprawę dnia (domyślnie dzisiejszą). Przy pierwszym wejściu wraca od razu do rozpoczętej gry. */
+async function openDaily({ resume = false, date = null } = {}) {
+  const today = localTodayIso();
+  const iso = date && date <= today ? date : today;
+  if (!date) clearPracticeHash();
+  if (!(await loadCase({ type: 'daily', date: iso }))) return;
   if (resume && tryResume()) return;
   go('home');
 }
 
-function openPractice(code, { resume = false } = {}) {
-  loadCase({ type: 'practice', code });
+async function openPractice(code, { resume = false } = {}) {
+  if (!(await loadCase({ type: 'practice', code }))) return;
   if (resume && tryResume()) return;
   go('intro');
 }
@@ -293,12 +307,13 @@ function renderBrand(small = false) {
 
 function caseHeading() {
   const c = state.c;
-  const label = c.kind === 'daily' ? `Sprawa nr ${c.number}` : `Trening · kod ${c.code}`;
+  const label = c.kind === 'daily' ? `Sprawa nr ${c.number} · ${c.fingerprint}` : `Trening · kod ${c.code}`;
   return `
     <div class="file-tab">${esc(label)}</div>
     <h1 class="case-title">${esc(c.title)}</h1>
     <p class="case-meta">Data kradzieży: ${esc(c.crimeDate.label)}</p>
-    <p class="case-meta">Trudność ${difficultyDots(c.difficulty)} ${esc(DIFFICULTY_LABELS[c.difficulty])}</p>`;
+    <p class="case-meta">Trudność ${difficultyDots(c.difficulty)} ${esc(DIFFICULTY_LABELS[c.difficulty])}</p>
+    ${isArchive() ? '<p class="case-meta"><b>Sprawa archiwalna.</b> Wynik nie liczy się do serii.</p>' : ''}`;
 }
 
 function playedLine(mode) {
@@ -401,9 +416,9 @@ function renderIntro() {
 
 function inviteText() {
   const c = state.c;
-  const what = c.kind === 'daily' ? `sprawę dnia nr ${c.number}` : `sprawę treningową z kodem ${c.code}`;
+  const what = c.kind === 'daily' ? `sprawę dnia nr ${c.number} (odcisk ${c.fingerprint})` : `sprawę treningową z kodem ${c.code}`;
   const seats = Array.from({ length: state.teamSize }, (_, i) => i + 1).filter((n) => n !== state.seat).join(', ');
-  const url = CONFIG.shareUrl ? ` ${CONFIG.shareUrl}${c.kind === 'practice' ? `#sprawa-${c.code}` : ''}` : '';
+  const url = CONFIG.shareUrl ? ` ${CONFIG.shareUrl}${c.kind === 'practice' ? `#sprawa-${c.code}` : `#dzien-${c.date}`}` : '';
   if (state.teamSize === 2) {
     return `Gramy w Fałszywe Alibi: ${what}, we dwoje.${url} Wejdź w „Graj z ekipą”, ustaw liczbę osób na 2 i weź numer ${seats}. Ja mam numer ${state.seat}. Startujemy razem, jak oboje będziemy na rozmowie.`;
   }
@@ -422,7 +437,7 @@ function renderSetup() {
     <section class="setup">
       <h1 class="setup-title">Ustawienie ekipy</h1>
       <p class="muted">Każdy otwiera tę stronę na swoim urządzeniu, wybiera tę samą liczbę osób i inny numer gracza.</p>
-      <p class="fingerprint">Sprawdźcie, czy wszyscy macie tę samą sprawę: <b>${esc(state.c.kind === 'daily' ? `nr ${state.c.number}` : `kod ${state.c.code}`)}</b>, podejrzani: ${esc(state.c.suspects.map((x) => `${x.first[0]}. ${x.full.split(' ').slice(1).join(' ')}`).join(', '))}.</p>
+      <p class="fingerprint">Sprawdźcie, czy wszyscy macie te same akta. Odcisk sprawy: <b class="code">${esc(state.c.fingerprint)}</b> (${esc(state.c.kind === 'daily' ? `sprawa nr ${state.c.number}` : `kod ${state.c.code}`)}). Jeśli komuś wychodzi inny, niech odświeży stronę.</p>
       <fieldset class="seg">
         <legend>Ile osób w ekipie?</legend>
         <div class="seg-row">
@@ -568,7 +583,7 @@ function renderNotes() {
 
 function renderTopbar() {
   const c = state.c;
-  const label = c.kind === 'daily' ? `Sprawa nr ${c.number}` : `Trening ${c.code}`;
+  const label = c.kind === 'daily' ? `Sprawa nr ${c.number} · ${c.fingerprint}` : `Trening ${c.code}`;
   const who = state.mode === 'solo' ? 'solo' : `gracz ${state.seat} z ${state.teamSize}`;
   const left = CONFIG.maxAttempts - progress.attempts.length;
   return `
@@ -1041,6 +1056,12 @@ function routeFromHash(resume = false) {
     openPractice(m[1].toUpperCase(), { resume });
     return true;
   }
+  // Link z datą (np. z zaproszenia wysłanego tuż przed północą) daje wszystkim tę samą sprawę dnia.
+  const d = window.location.hash.match(/^#dzien-(\d{4}-\d{2}-\d{2})$/);
+  if (d) {
+    openDaily({ resume, date: d[1] });
+    return true;
+  }
   return false;
 }
 
@@ -1050,7 +1071,7 @@ window.addEventListener('resize', () => {
 });
 
 window.addEventListener('hashchange', () => {
-  if (!routeFromHash() && state.ref?.type === 'practice' && !window.location.hash) openDaily();
+  if (!routeFromHash() && !window.location.hash && (state.ref?.type === 'practice' || isArchive())) openDaily();
 });
 
 if (!routeFromHash(true)) openDaily({ resume: true });

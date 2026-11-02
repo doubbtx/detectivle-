@@ -17,6 +17,26 @@ import {
 } from './time.js';
 import { solveCase, qualityIssues } from './solver.js';
 
+/**
+ * Wersja generatora. Podbij ją przy każdej zmianie, która zmienia treść spraw.
+ * Opublikowane sprawy (cases/*.json) i tak się nie zmienią, bo gra czyta je z plików.
+ */
+export const GENERATOR_VERSION = 4;
+
+/** Krótki „odcisk” sprawy: 4 znaki, po których ekipa sprawdza, że ma te same akta. */
+export function caseFingerprint(c) {
+  const { fingerprint, ...rest } = c;
+  void fingerprint;
+  const alphabet = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+  let h = hashString(JSON.stringify(rest));
+  let out = '';
+  for (let i = 0; i < 4; i++) {
+    out += alphabet[h % 32];
+    h = Math.floor(h / 32);
+  }
+  return out;
+}
+
 /** Dzień przed sprawą nr 1. Sprawa nr 1 to 2 listopada 2026. */
 export const EPOCH = '2026-11-01';
 
@@ -98,6 +118,8 @@ export function buildCase(opts) {
     const res = solveCase(c);
     if (qualityIssues(c, res).length === 0) {
       c.attempt = attempt;
+      c.generatorVersion = GENERATOR_VERSION;
+      c.fingerprint = caseFingerprint(c);
       return c;
     }
   }

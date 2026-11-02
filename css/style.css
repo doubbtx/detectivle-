@@ -109,6 +109,7 @@ button { font: inherit; color: inherit; }
 }
 
 .muted { color: var(--ink-soft); }
+.loading { padding: 2rem max(16px, env(safe-area-inset-left, 0px)); color: var(--ink-soft); font-family: var(--font-doc); }
 .small { font-size: var(--step--1); }
 
 /* ---------- Strony ---------- */

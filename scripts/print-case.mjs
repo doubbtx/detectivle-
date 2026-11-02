@@ -9,10 +9,13 @@ import { RULES } from '../js/data.js';
 
 const arg = process.argv[2] || '2026-11-02';
 const showSolution = process.argv.includes('--solution');
-const c = /^\d{4}-\d{2}-\d{2}$/.test(arg) ? buildDailyCase(arg) : buildPracticeCase(arg);
+import { existsSync, readFileSync } from 'node:fs';
+const frozen = new URL(`../cases/${arg}.json`, import.meta.url);
+const isDate = /^\d{4}-\d{2}-\d{2}$/.test(arg);
+const c = isDate && existsSync(frozen) ? JSON.parse(readFileSync(frozen, 'utf8')) : isDate ? buildDailyCase(arg) : buildPracticeCase(arg);
 const name = (id) => c.suspects.find((s) => s.id === id)?.full;
 
-console.log(`# ${c.title}${c.number ? ` (sprawa #${c.number})` : ` (trening ${c.code})`}`);
+console.log(`# ${c.title}${c.number ? ` (sprawa #${c.number} · ${c.fingerprint})` : ` (trening ${c.code})`}`);
 console.log(`Trudność: ${c.difficulty}/7 · zbrodnia: ${c.crimeDate.label}`);
 console.log(`\n${c.intro}`);
 console.log(`Okno: ${fmt(c.window.from)}–${fmt(c.window.to)}\n`);

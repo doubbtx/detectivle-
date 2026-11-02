@@ -38,6 +38,17 @@ npm run case 2026-11-08 -- --solution   # podgląd sprawy z danego dnia w termin
 
 Wymagany Node.js 18 lub nowszy (tylko do serwera i testów; sama gra działa w przeglądarce).
 
+## Zamrożone akta
+
+Sprawy dnia są zapisane w plikach `cases/RRRR-MM-DD.json`, a ich sumy kontrolne w `cases/manifest.json`. Gra najpierw czyta plik, więc późniejsza zmiana generatora nie przepisze już opublikowanych spraw. Jeśli pliku dla danego dnia nie ma, sprawa powstaje w przeglądarce z generatora. Ekipa porównuje 4-znakowy odcisk sprawy (np. `V8V4`) widoczny na ekranie ustawienia ekipy.
+
+```bash
+node scripts/publish-cases.mjs            # dopisz sprawy do dziś + 60 dni (istniejących nie rusza)
+node scripts/publish-cases.mjs --days 90  # dalej w przyszłość
+```
+
+Skrypt warto uruchamiać co kilka tygodni, zanim skończą się opublikowane dni. Test `tests/cases.test.mjs` pilnuje, że nikt nie zmienił opublikowanych plików. Link `adres-gry/#dzien-RRRR-MM-DD` otwiera sprawę z danego dnia (np. w zaproszeniu wysłanym tuż przed północą). Starsze sprawy nie liczą się do serii.
+
 ## Wdrożenie na GitHub Pages
 
 1. Wypchnij repozytorium na GitHuba.
