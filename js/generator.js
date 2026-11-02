@@ -280,7 +280,8 @@ function generate(rng, opts) {
           ],
           facts: [{ t: 'claim', kind, who: by, no, time: t }],
         });
-        evs = [{ place: 'dworzec', from: t, to: t }, { place: AWAY, from: t + 1, to: FAR }];
+        // „Poza miastem” zaczyna się kilka minut po odjeździe, żeby nie kolidował z samym odjazdem (margines 4 min).
+        evs = [{ place: 'dworzec', from: t, to: t }, { place: AWAY, from: t + 5, to: FAR }];
         card.alibi = (id) => `Twierdzi, że ${g(s, 'wyjechał', 'wyjechała')} pociągiem do ${dest.gen} (bilet: ${id}).`;
         break;
       }

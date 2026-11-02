@@ -162,3 +162,22 @@ test('prawdziwe pobyty każdej osoby są fizycznie spójne (osobna implementacja
     }
   }
 });
+
+test('każdy z 7 rodzajów dowodów pojawia się jako fałszywka i jako prawdziwy dowód', () => {
+  const forged = {};
+  const real = {};
+  for (const iso of dates) {
+    const c = buildDailyCase(iso);
+    for (const k of c.cards) {
+      for (const f of k.facts || []) {
+        if (f.t !== 'claim') continue;
+        const bucket = k.id === c.solution.forged ? forged : real;
+        bucket[f.kind] = (bucket[f.kind] || 0) + 1;
+      }
+    }
+  }
+  for (const kind of ['train', 'receipt', 'photo', 'cinema', 'delivery', 'parking', 'bus']) {
+    assert.ok((forged[kind] || 0) >= dates.length * 0.05, `fałszywka ${kind}: ${forged[kind] || 0}`);
+    assert.ok((real[kind] || 0) >= dates.length * 0.05, `prawdziwy ${kind}: ${real[kind] || 0}`);
+  }
+});
