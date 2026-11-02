@@ -8,6 +8,7 @@ import { renderTownSvg } from './map.js';
 import { icon } from './icons.js';
 import { portrait } from './portraits.js';
 import { cardLook, cardIcon, cardVisual } from './visuals.js';
+import { renderBoard, isPinnable } from './board.js';
 import { PLACE_CELLS, SCENE_CELLS, OFFICE_CELL, cellsApart, blocksText, MIN_PER_CELL } from './town.js';
 import { buildEpilogue } from './epilogue.js';
 import { fmt, localTodayIso, addDays } from './time.js';
@@ -72,6 +73,7 @@ function resetCaseUi() {
   state.showAll = false;
   state.tab = 'akta';
   state.mapSel = [];
+  state.boardSel = [];
   if (state.mapScrolls) delete state.mapScrolls.plan;
   state.modal = null;
   state.confirm = null;
@@ -724,6 +726,7 @@ function renderCard(k, opts = {}) {
     ${opts.noActions ? '' : `
     <footer class="card-foot">
       <button class="link-btn" data-act="mark-card" data-id="${k.id}" aria-pressed="${Boolean(marked)}">${marked ? '★ Ważna' : '☆ Ważna'}</button>
+      ${isPinnable(k) ? `<button class="link-btn${(progress.pins || []).includes(k.id) ? ' on-board' : ''}" data-act="pin-card" data-id="${k.id}" aria-pressed="${(progress.pins || []).includes(k.id)}">${(progress.pins || []).includes(k.id) ? 'Na tablicy ✓' : 'Na tablicę'}</button>` : ''}
       <button class="link-btn" data-act="aside-card" data-id="${k.id}">Odłóż</button>
       <button class="link-btn" data-act="copy-card" data-id="${k.id}">Kopiuj</button>
       ${state.mode === 'live' ? (onTable(k.id) ? `<span class="link-btn on-table">Na stole ✓</span>` : `<button class="link-btn" data-act="table" data-id="${k.id}">Połóż na stół</button>`) : ''}
@@ -805,6 +808,12 @@ function renderPlan() {
   </section>`;
 }
 
+function renderBoardTab() {
+  const c = state.c;
+  const canSee = (k) => myDesks().includes(k.desk) && !isSealed(k);
+  return renderBoard({ c, pins: progress.pins || [], sel: state.boardSel || [], canSee, hasMap: hasMapTab(), sceneCell: SCENE_CELLS[sceneIdOf(c)] });
+}
+
 function renderNotes() {
   return `
   <section class="notes-panel" aria-label="Notatki">
@@ -831,7 +840,7 @@ function renderTopbar() {
       <div class="tb-title"><b>${esc(label)}</b><span>${esc(who)} · śledztwo <span class="nw${usedMin() > budgetMin() ? ' over' : ''}">${fmtHM(usedMin())}/${fmtHM(budgetMin())} h</span></span></div>
       <div class="tb-clock" aria-live="off"><span id="clock">${fmtClock(elapsedSec())}</span>${totalPenalty() ? `<small>w tym +${fmtPenalty(totalPenalty())}</small>` : ''}</div>
       <div class="tb-actions">
-        <button class="btn btn-small" data-act="open-hints">Podpowiedź <span class="pill">${progress.hints}/3</span></button>
+        <button class="btn btn-small" data-act="open-hints" aria-label="Podpowiedź, użyto ${progress.hints} z 3"><span class="tb-long">Podpowiedź</span><span class="tb-short" aria-hidden="true">?</span> <span class="pill">${progress.hints}/3</span></button>
         ${isCaptain()
           ? `<button class="btn btn-small btn-primary" data-act="open-accuse">Raport <span class="pill">${left}</span></button>`
           : `<button class="btn btn-small" data-act="open-end">Koniec</button>`}
@@ -841,11 +850,11 @@ function renderTopbar() {
 }
 
 function renderTabs() {
-  const tabs = [{ id: 'akta', label: 'Akta' }, ...(state.mode === 'live' ? [{ id: 'table', label: `Stół ${state.live?.rs?.table.length ?? 0}` }] : []), ...myDesks().map((d) => ({ id: d, label: deskName(d) })), ...(hasMapTab() ? [{ id: 'plan', label: 'Plan miasta' }] : []), { id: 'notes', label: 'Notatki' }];
+  const tabs = [{ id: 'akta', label: 'Akta' }, ...(state.mode === 'live' ? [{ id: 'table', label: `Stół ${state.live?.rs?.table.length ?? 0}` }] : []), ...myDesks().map((d) => ({ id: d, label: deskName(d) })), { id: 'board', label: `Tablica${(progress.pins || []).length ? ` ${(progress.pins || []).length}` : ''}` }, ...(hasMapTab() ? [{ id: 'plan', label: 'Plan miasta' }] : []), { id: 'notes', label: 'Notatki' }];
   return `
   <nav class="tabs" aria-label="Biurka">
     <div class="tabs-inner">
-      ${tabs.map((t) => `<button class="tab${state.tab === t.id ? ' on' : ''}${t.id === 'akta' ? ' tab-akta' : ''}" data-act="tab" data-tab="${t.id}" aria-current="${state.tab === t.id ? 'page' : 'false'}">${esc(t.label)}${['akta', 'notes', 'table', 'plan'].includes(t.id) ? '' : ` <span class="tab-n">${state.c.cards.filter((k) => k.desk === t.id).length}</span>`}</button>`).join('')}
+      ${tabs.map((t) => `<button class="tab${state.tab === t.id ? ' on' : ''}${t.id === 'akta' ? ' tab-akta' : ''}" data-act="tab" data-tab="${t.id}" aria-current="${state.tab === t.id ? 'page' : 'false'}">${esc(t.label)}${['akta', 'notes', 'table', 'plan', 'board'].includes(t.id) ? '' : ` <span class="tab-n">${state.c.cards.filter((k) => k.desk === t.id).length}</span>`}</button>`).join('')}
     </div>
   </nav>`;
 }
@@ -867,13 +876,13 @@ function renderGate() {
 function renderGame() {
   if (!progress.startedAt) return renderGate();
   const mine = myDesks();
-  if (!['akta', 'notes', 'table', 'plan', ...mine].includes(state.tab) || (state.tab === 'table' && state.mode !== 'live') || (state.tab === 'plan' && !hasMapTab())) state.tab = 'akta';
+  if (!['akta', 'notes', 'table', 'plan', 'board', ...mine].includes(state.tab) || (state.tab === 'table' && state.mode !== 'live') || (state.tab === 'plan' && !hasMapTab())) state.tab = 'akta';
   let right = state.tab;
   if (right === 'akta') right = mine[0];
-  const rightHtml = right === 'notes' ? renderNotes() : right === 'table' ? renderTable() : right === 'plan' ? renderPlan() : renderDesk(right);
+  const rightHtml = right === 'notes' ? renderNotes() : right === 'table' ? renderTable() : right === 'plan' ? renderPlan() : right === 'board' ? renderBoardTab() : renderDesk(right);
   return `
   <div class="sticky-head">${renderTopbar()}${renderTabs()}</div>
-  <div class="game view-${state.tab === 'akta' ? 'akta' : 'other'}${state.tab === 'plan' ? ' view-plan' : ''}">
+  <div class="game view-${state.tab === 'akta' ? 'akta' : 'other'}${state.tab === 'plan' || state.tab === 'board' ? ' view-plan' : ''}">
     <div class="col-left">${renderAkta()}</div>
     <div class="col-right">${rightHtml}</div>
   </div>
@@ -1404,6 +1413,7 @@ async function detectLive() {
 // Render i zdarzenia
 
 let lastModal = null;
+let lastScreen = null;
 let modalOpener = null;
 
 function focusKeyOf(el) {
@@ -1423,6 +1433,9 @@ function render() {
   const active = document.activeElement;
   const focusKey = app.contains(active) ? focusKeyOf(active) : null;
   const modalScroll = app.querySelector('.modal')?.scrollTop ?? 0;
+  // Przewinięcia, które nie mogą skakać przy przerysowaniu: pasek zakładek i cała strona.
+  const tabsX = app.querySelector('.tabs-inner')?.scrollLeft ?? null;
+  const winY = window.scrollY;
   const mapWrap = app.querySelector('.town-wrap');
   state.mapScrolls = state.mapScrolls || {};
   if (mapWrap) state.mapScrolls[mapWrap.dataset.scrollKey] = [mapWrap.scrollLeft, mapWrap.scrollTop];
@@ -1442,6 +1455,19 @@ function render() {
   document.body.classList.toggle('in-game', state.screen === 'game');
   const head = app.querySelector('.sticky-head');
   if (head) document.documentElement.style.setProperty('--head-h', `${head.offsetHeight}px`);
+  const tabsEl = app.querySelector('.tabs-inner');
+  if (tabsEl) {
+    if (tabsX !== null) tabsEl.scrollLeft = tabsX;
+    // Aktywna zakładka zawsze widoczna (bez przewijania całej strony).
+    const on = tabsEl.querySelector('.tab.on');
+    if (on) {
+      const l = on.offsetLeft - tabsEl.offsetLeft;
+      if (l < tabsEl.scrollLeft + 8) tabsEl.scrollLeft = Math.max(0, l - 24);
+      else if (l + on.offsetWidth > tabsEl.scrollLeft + tabsEl.clientWidth - 8) tabsEl.scrollLeft = l + on.offsetWidth - tabsEl.clientWidth + 24;
+    }
+  }
+  // Strona zostaje tam, gdzie była (przerysowanie podmienia cały widok i przeglądarka potrafi go podskoczyć).
+  if (state.screen === lastScreen && !state.modal) window.scrollTo(0, winY);
   // Plan miasta: przy odświeżeniu zostaje przewinięty tam, gdzie był; za pierwszym razem pokazuje miejsce kradzieży.
   const wrap = app.querySelector('.town-wrap');
   const mapScroll = wrap && state.mapScrolls?.[wrap.dataset.scrollKey];
@@ -1473,6 +1499,7 @@ function render() {
     }
   }
   lastModal = state.modal;
+  lastScreen = state.screen;
   if (state.focusResult && state.screen === 'result') {
     state.focusResult = false;
     document.getElementById('result-stamp')?.focus({ preventScroll: true });
@@ -1557,6 +1584,23 @@ app.addEventListener('click', (e) => {
       render();
       break;
     }
+    case 'pin-card': {
+      const id = target.dataset.id;
+      const pins = progress.pins || [];
+      progress.pins = pins.includes(id) ? pins.filter((x) => x !== id) : [...pins, id];
+      saveProgress();
+      if (progress.pins.includes(id)) showToast(`Karta ${id} jest na tablicy.`);
+      render();
+      break;
+    }
+    case 'board-pick': {
+      const id = target.dataset.id;
+      const sel = state.boardSel || [];
+      state.boardSel = sel.includes(id) ? sel.filter((x) => x !== id) : sel.length >= 2 ? [id] : [...sel, id];
+      render();
+      break;
+    }
+    case 'board-clear': state.boardSel = []; render(); break;
     case 'aside-card': {
       const id = target.dataset.id;
       progress.aside = progress.aside || {};
