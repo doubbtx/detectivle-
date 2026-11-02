@@ -55,7 +55,8 @@ export const DIFFICULTY_LABELS = ['', 'bardzo łatwa', 'łatwa', 'średnia', 'ś
 
 function params(diff) {
   return {
-    decoys: diff <= 2 ? 1 : 2,
+    // Pn–wt więcej osób z własnymi dowodami: w raporcie nie może być tylko dwóch kart do wyboru.
+    decoys: diff === 2 ? 3 : 2,
     // W alibi krzyżowym (sob–nd) nie dajemy dodatkowych dowodów: psułyby symetrię dwóch wspólnych dowodów.
     extraTrueItems: diff === 5 ? 1 : 0,
     traps: diff <= 1 ? 0 : diff <= 4 ? 1 : 2,
@@ -74,7 +75,9 @@ function params(diff) {
     // Zeznanie bez godziny („widziałam go przy Rynku”), które naprowadza na nagranie z kamery.
     tipChance: diff >= 3 ? 0.7 : 0.3,
     // Prawdziwy dowód bez alibi (godzina poza zasięgiem): liczenie kart z alibi nie wskazuje sprawcy.
-    coverChance: diff >= 5 ? 0.8 : diff >= 3 ? 0.5 : 0,
+    coverChance: diff >= 5 ? 0.8 : 0.5,
+    // Pn–czw przykrywki dostają też osoby z alibi od świadka (więcej kart w raporcie, ale łatwe do odrzucenia).
+    neutralCover: diff <= 4,
     // Jak zdradza się fałszywka: 'table' – sprzeczność z tabelą urzędową; 'self' – sprawcę widziano
     // wtedy gdzie indziej (fizyczna niemożliwość); 'cross' – fałszywka obejmuje niewinną osobę,
     // której prawdziwy pobyt temu przeczy (alibi krzyżowe).
@@ -807,7 +810,11 @@ function generate(rng, opts) {
   let kp = 0;
 
   const culprit = suspects[culpritIdx];
-  const mode = P.forgeMode;
+  // Weekend: zawsze dwa wspólne dowody i jeden zwykły. W około 60% spraw fałszywką jest wspólny dowód sprawcy
+  // (alibi krzyżowe), w pozostałych oba wspólne dowody są prawdziwe, a fałszywką jest zwykły dowód sprawcy
+  // (zdradza go fizyczna niemożliwość). Z samych akt nie da się więc wskazać fałszywki.
+  const weekend = P.forgeMode === 'cross';
+  const mode = weekend && rng.chance(0.56) ? 'self' : P.forgeMode;
   const JOINT_KINDS = ['receipt', 'photo', 'cinema'];
   // Rodzaj dowodu zarezerwowany na fałszywkę krzyżową i na prawdziwy wspólny dowód (zmyłkę).
   // Bilet do kina łatwiej „zgrać” w sprzeczność z pobytem Y, więc losujemy go rzadziej: wtedy rodzaj wspólnego
@@ -817,7 +824,11 @@ function generate(rng, opts) {
   // częściej przechodzą kontrolę jakości jako fałszywka (dobrane pomiarem na kilkuset dniach).
   let crossKind = null;
   let jointKind = null;
-  if (mode === 'cross') {
+  let jointKind2 = null;
+  if (weekend && mode === 'self') {
+    [jointKind, jointKind2] = rng.sample(JOINT_KINDS.filter((k) => kinds.includes(k)), 2);
+    for (const k of [jointKind, jointKind2]) kinds.splice(kinds.indexOf(k), 1);
+  } else if (mode === 'cross') {
     const pair = rng.sample(JOINT_KINDS.filter((k) => kinds.includes(k)), 2);
     const FW = { receipt: 1.35, photo: 1.05, cinema: 0.55 };
     const forgedFirst = rng.chance(FW[pair[0]] / (FW[pair[0]] + FW[pair[1]]));
@@ -831,8 +842,11 @@ function generate(rng, opts) {
   // Alibi krzyżowe: dwa symetryczne wspólne dowody. Fałszywy (sprawca + Y) i prawdziwy (zmyłka A + N2).
   // A nie ma innego dowodu z alibi (tak jak sprawca), a N2, tak jak Y, ma prawdziwy pobyt tylko
   // na zapieczętowanym nagraniu albo w rejestrze. Żeby wskazać fałszywkę, trzeba to sprawdzić.
-  const jointOwnerIdx = mode === 'cross' ? rng.pick(decoyIdx) : -1;
-  const jointPartnerIdx = mode === 'cross' ? neutralIdx[1] : -1;
+  const jointOwnerIdx = weekend ? rng.pick(decoyIdx) : -1;
+  const jointPartnerIdx = weekend ? neutralIdx[1] : -1;
+  // Drugi prawdziwy wspólny dowód (weekend bez alibi krzyżowego): druga zmyłka razem z Y.
+  const jointOwner2Idx = weekend && mode === 'self' ? decoyIdx.find((i) => i !== jointOwnerIdx) : -1;
+  const jointPartner2Idx = weekend && mode === 'self' ? neutralIdx[0] : -1;
   let forgedCard;
   let forgedEvents = [];
   if (mode === 'cross') {
@@ -868,13 +882,13 @@ function generate(rng, opts) {
     forgedEvents = res.events;
   }
   for (const i of decoyIdx) {
-    if (i === jointOwnerIdx) continue;
+    if (i === jointOwnerIdx || i === jointOwner2Idx) continue;
     const kind = kinds[kp++];
     attempt(suspects[i], () => makeClaim(kind, suspects[i], false));
   }
   for (const i of neutralIdx) {
     if (neutralPlace[i]) continue;
-    if (i === jointPartnerIdx) {
+    if (i === jointPartnerIdx || i === jointPartner2Idx) {
       noTip.add(suspects[i].id);
       neutralPlace[i] = attempt(suspects[i], () => makeNeutral(rng.pick(['cctv', 'cardlog']), suspects[i], 'clear')).place;
       noTip.delete(suspects[i].id);
@@ -887,39 +901,39 @@ function generate(rng, opts) {
     const kind = kinds[kp++];
     attempt(suspects[i], () => makeClaim(kind, suspects[i], false));
   }
-  // Prawdziwy wspólny dowód dwóch niewinnych osób.
-  let jointDone = false;
-  if (jointKind) {
-    const pool = innocents.filter((i) => !avoid[suspects[i].id]);
-    if (pool.length >= 2) {
-      const kind = jointKind;
-      for (let k = 0; k < 30; k++) {
-        const [ai, bi] = mode === 'cross' ? [jointOwnerIdx, jointPartnerIdx] : rng.sample(pool, 2);
-        const A = suspects[ai];
-        const B = suspects[bi];
-        const sn = snapshot();
-        try {
-          const res = makeClaim(kind, A, false, false, { withP: B });
-          if (fits(A.id, res.events) && fits(B.id, res.events)) {
-            events[A.id].push(...res.events);
-            events[B.id].push(...res.events);
-            jointDone = true;
-            break;
-          }
-          restore(sn, A);
-        } catch (e) {
-          if (!(e instanceof RetryError)) throw e;
-          restore(sn, A);
+  // Prawdziwe wspólne dowody dwóch niewinnych osób.
+  const makeJoint = (kind, pair) => {
+    for (let k = 0; k < 30; k++) {
+      const [ai, bi] = pair || rng.sample(innocents.filter((i) => !avoid[suspects[i].id]), 2);
+      const A = suspects[ai];
+      const B = suspects[bi];
+      const sn = snapshot();
+      try {
+        const res = makeClaim(kind, A, false, false, { withP: B });
+        if (fits(A.id, res.events) && fits(B.id, res.events)) {
+          events[A.id].push(...res.events);
+          events[B.id].push(...res.events);
+          return true;
         }
+        restore(sn, A);
+      } catch (e) {
+        if (!(e instanceof RetryError)) throw e;
+        restore(sn, A);
       }
     }
+    return false;
+  };
+  let jointDone = false;
+  if (jointKind && (weekend || innocents.filter((i) => !avoid[suspects[i].id]).length >= 2)) {
+    jointDone = makeJoint(jointKind, weekend ? [jointOwnerIdx, jointPartnerIdx] : null);
   }
+  if (jointKind2 && !makeJoint(jointKind2, [jointOwner2Idx, jointPartner2Idx])) retry();
   // W alibi krzyżowym zawsze leży też prawdziwy wspólny dowód: inaczej fałszywka byłaby jedynym takim dowodem.
-  if (mode === 'cross' && !jointDone) retry();
+  if (weekend && !jointDone) retry();
   // Karty-przykrywki: prawdziwe dowody bez alibi (godzina tuż poza zasięgiem) u sprawcy i u zmyłek,
   // żeby samo liczenie kart z alibi nie wskazywało sprawcy.
   const COVER_KINDS = ['receipt', 'parking', 'delivery'];
-  for (const i of [culpritIdx, ...decoyIdx]) {
+  for (const i of [culpritIdx, ...decoyIdx, ...(P.neutralCover ? neutralIdx : [])]) {
     if (!rng.chance(P.coverChance)) continue;
     const s = suspects[i];
     const kind = rng.pick(COVER_KINDS);
@@ -934,8 +948,8 @@ function generate(rng, opts) {
   // Kłamca ma niezależne alibi od świadka, kamery albo rejestru.
   let lieCard = null;
   if (lieKind) {
-    // W alibi krzyżowym kłamie zmyłka spoza wspólnych dowodów (inaczej kłamca zdradzałby, który wspólny dowód jest fałszywy).
-    const pool = mode === 'cross' ? decoyIdx.filter((i) => i !== jointOwnerIdx) : neutralIdx.filter((i) => !extraIdx.includes(i));
+    // W weekend kłamie jedna ze zmyłek (w obu odmianach tak samo, żeby kłamca nie zdradzał odmiany).
+    const pool = weekend ? decoyIdx : neutralIdx.filter((i) => !extraIdx.includes(i));
     const liar = suspects[rng.pick(pool.length ? pool : neutralIdx)];
     // Kłamstwo zwykle wygląda na alibi (godzina w zasięgu), a od fałszywki sprawcy odróżnia je to,
     // że kłamca ma inne, potwierdzone alibi. Czasem godzina wypada tuż poza zasięgiem.
@@ -948,6 +962,10 @@ function generate(rng, opts) {
   // Pułapka sprawcy jest na nagraniu (z ewentualnym zeznaniem-tropem) mniej więcej tak często jak pułapka
   // któregoś z niewinnych, żeby trop do kamery nie wskazywał ani sprawcy, ani niewinnych.
   else if (P.culpritTrap) attempt(culprit, () => makeNeutral(rng.chance(0.4) ? 'cctv' : rng.pick(['witness', 'cardlog']), culprit, 'trap'));
+
+  // W raporcie wybiera się fałszywkę spośród dowodów od podejrzanych: musi ich być co najmniej cztery,
+  // inaczej dałoby się ją po prostu zgadnąć.
+  if (cards.filter((k) => k.kind === 'supplied').length < 4) retry();
 
   // --- Karty urzędowe ze wspólnych tabel --------------------------------------
   const wantTable = (has) => has || rng.chance(P.noiseTableChance);

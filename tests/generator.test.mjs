@@ -227,6 +227,8 @@ test('od piątku: dwa fałszywe dowody, a kłamca ma inne potwierdzone alibi', (
 });
 
 test('od środy fałszywkę obala fizyczna niemożliwość, a w weekend alibi krzyżowe', () => {
+  let weekendCross = 0;
+  let weekendSelf = 0;
   for (const iso of dates) {
     const d = difficultyForDate(iso);
     if (d < 3) continue;
@@ -236,15 +238,28 @@ test('od środy fałszywkę obala fizyczna niemożliwość, a w weekend alibi kr
     assert.equal(f.physical, true, iso);
     assert.ok(f.proofRefs.length >= 1, iso);
     if (d >= 6) {
-      assert.equal(c.forgeMode, 'cross', iso);
-      assert.notEqual(f.about, c.solution.culprit, `${iso}: alibi krzyżowe dotyczy innej osoby`);
+      // Weekend: zawsze dwa wspólne dowody; fałszywką jest jeden z nich (alibi krzyżowe) albo zwykły dowód sprawcy.
+      assert.equal(res.evaluated.filter((e) => e.with.length).length, 2, `${iso}: wspólne dowody`);
       const card = c.cards.find((k) => k.id === c.solution.forged);
-      assert.ok(card.facts.find((x) => x.t === 'claim').with?.length === 1, `${iso}: wspólny dowód`);
+      const joint = card.facts.find((x) => x.t === 'claim').with?.length === 1;
+      if (c.forgeMode === 'cross') {
+        weekendCross++;
+        assert.ok(joint, `${iso}: wspólny dowód`);
+        assert.notEqual(f.about, c.solution.culprit, `${iso}: alibi krzyżowe dotyczy innej osoby`);
+      } else {
+        weekendSelf++;
+        assert.equal(c.forgeMode, 'self', iso);
+        assert.ok(!joint, `${iso}: zwykły dowód`);
+        assert.equal(f.about, c.solution.culprit, iso);
+      }
     } else {
       assert.equal(c.forgeMode, 'self', iso);
       assert.equal(f.about, c.solution.culprit, iso);
     }
   }
+  // Około 40% weekendów bez alibi krzyżowego: z akt nie widać, który z trzech dowodów jest fałszywy.
+  const share = weekendSelf / (weekendSelf + weekendCross);
+  assert.ok(share > 0.25 && share < 0.55, `weekend bez alibi krzyżowego: ${weekendSelf}/${weekendSelf + weekendCross}`);
 });
 
 test('głębokość dowodu: pn–wt co najmniej 2 karty, śr–czw co najmniej 3, pt–nd co najmniej 5', () => {
@@ -300,7 +315,7 @@ test('alibi krzyżowe: dwa symetryczne wspólne dowody, a kłamca nie jest osob�
     const decoy = joint.find((e) => e !== forged);
     assert.ok(forged && decoy, iso);
     // Właściciel prawdziwego wspólnego dowodu nie ma innego dowodu z alibi (tak jak sprawca).
-    const alibiCards = (who) => res.evaluated.filter((e) => e.who === who && e.sightings.some((st) => {
+    const alibiCards = (who) => res.evaluated.filter((e) => e.who === who && e.card !== c.lieCard && e.sightings.some((st) => {
       const tr = res.travel.get(st.place);
       return tr && st.from < c.window.to + tr.min && st.to > c.window.from - tr.min;
     })).length;
@@ -312,4 +327,12 @@ test('alibi krzyżowe: dwa symetryczne wspólne dowody, a kłamca nie jest osob�
     }
   }
   assert.ok(n > 50);
+});
+
+test('w raporcie zawsze co najmniej 4 dowody od podejrzanych do wyboru', () => {
+  for (const iso of dates) {
+    const c = buildDailyCase(iso);
+    const n = c.cards.filter((k) => k.kind === 'supplied').length;
+    assert.ok(n >= 4, `${iso}: tylko ${n} dowody`);
+  }
 });
