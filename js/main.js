@@ -3,9 +3,11 @@
 import { randomPracticeCode, DIFFICULTY_LABELS, EPOCH } from './generator.js';
 import { loadDailyCase, loadPracticeCase } from './cases.js';
 import { solveCase, investigationBudget } from './solver.js';
-import { TEAM_DESKS, DESK_DEFS, REASONS, PLACES, SCENES, rulesFor, hasTownMap } from './data.js';
+import { TEAM_DESKS, DESK_DEFS, REASONS, PLACES, SCENES, rulesFor, rulesShortFor, hasTownMap } from './data.js';
 import { renderTownSvg } from './map.js';
 import { icon } from './icons.js';
+import { portrait } from './portraits.js';
+import { cardLook, cardIcon, cardVisual } from './visuals.js';
 import { PLACE_CELLS, SCENE_CELLS, OFFICE_CELL, cellsApart, blocksText, MIN_PER_CELL } from './town.js';
 import { buildEpilogue } from './epilogue.js';
 import { fmt, localTodayIso, addDays } from './time.js';
@@ -601,7 +603,7 @@ function renderSuspects() {
     const chips = s.items.filter((id) => !inText.has(id)).map(chipFor).join(' ');
     return `
     <li class="suspect mark-${mark || 'none'}">
-      <span class="avatar" aria-hidden="true">${esc(initials(s.full))}</span>
+      <span class="avatar avatar-pic" aria-hidden="true">${portrait(s.full) || esc(initials(s.full))}</span>
       <div class="suspect-body">
         <div class="suspect-head">
           <b>${esc(s.full)}</b> <span class="role">${esc(s.role)}</span>
@@ -636,10 +638,14 @@ function renderAkta() {
     <h3 class="sec-label">Podejrzani i ich alibi</h3>
     <ul class="suspects">${renderSuspects()}</ul>
     ${team ? `<p class="muted small">Szare kody to karty z biurek innych graczy. Kliknij kod, żeby sprawdzić, kto ma tę kartę.</p>` : ''}
-    <details class="rules" open>
-      <summary>Zasady śledztwa</summary>
-      <ol>${rulesFor(c).map((r) => `<li>${esc(r)}</li>`).join('')}</ol>
-    </details>
+    <section class="rules-short" aria-label="Zasady w skrócie">
+      <h3 class="sec-label">Zasady w skrócie</h3>
+      <ul>${rulesShortFor(c).map(([ic, r]) => `<li><span class="rs-ico">${icon(ic)}</span><span>${esc(r)}</span></li>`).join('')}</ul>
+      <details class="rules">
+        <summary>Pełne zasady</summary>
+        <ol>${rulesFor(c).map((r) => `<li>${esc(r)}</li>`).join('')}</ol>
+      </details>
+    </section>
   </section>`;
 }
 
@@ -658,27 +664,30 @@ function renderCard(k, opts = {}) {
     <header class="card-head">
       <span class="card-id">${k.id}</span>
       <div class="card-titles">
-        <h4>${esc(k.title)}</h4>
+        <h4><span class="card-ico">${icon(cardIcon(k))}</span>${esc(k.title)}</h4>
         ${k.sub ? `<p class="card-sub">${esc(k.sub)}</p>` : ''}
       </div>
       <span class="card-kind">zapieczętowane</span>
     </header>
-    <p class="seal-action">${esc(k.action.label)}</p>
+    ${/^(Przejrzyj dokument|Zażądaj kopii dokumentu) „/.test(k.action.label) ? '' : `<p class="seal-action">${esc(k.action.label)}</p>`}
     <button class="btn btn-small${confirming ? ' btn-primary' : ''}" data-act="unlock" data-id="${k.id}">${confirming ? `Nadgodziny: +${fmtPenalty(extra)} do czasu rozwiązania. Zlecić?` : `Zleć · ${k.action.cost} min${overBudget ? ' (ponad budżet)' : ''}`}</button>
   </article>`;
   }
+  const look = cardLook(k);
+  const visual = cardVisual(k, { suspectById });
   return `
-  <article class="card card-${k.kind}${marked ? ' card-marked' : ''}${opts.highlight ? ' card-hl' : ''}" id="card-${k.id}" data-card="${k.id}">
+  <article class="card card-${k.kind}${look ? ` look-${look}` : ''}${marked ? ' card-marked' : ''}${opts.highlight ? ' card-hl' : ''}" id="card-${k.id}" data-card="${k.id}">
     <header class="card-head">
       <span class="card-id">${k.id}</span>
       <div class="card-titles">
-        <h4>${esc(k.title)}</h4>
+        <h4>${look === 'witness' ? '' : `<span class="card-ico">${icon(cardIcon(k))}</span>`}${esc(k.title)}</h4>
         ${k.sub ? `<p class="card-sub">${esc(k.sub)}</p>` : ''}
       </div>
       <span class="card-kind">${kindLabel}</span>
     </header>
-    ${by ? `<p class="stamp">${by.f ? 'Dostarczyła' : 'Dostarczył'}: ${esc(by.full)}</p>` : ''}
-    <div class="card-lines">${k.lines.map((l) => `<p>${esc(l).replace(/(\d)–(\d)/g, '$1\u2060–\u2060$2')}</p>`).join('')}</div>
+    ${by ? `<p class="stamp">${portrait(by.full, 'portrait portrait-stamp')}${by.f ? 'Dostarczyła' : 'Dostarczył'}: ${esc(by.full)}</p>` : ''}
+    ${look === 'witness' ? `<div class="wit-row">${visual}<div class="card-lines wit-bubble">${k.lines.map((l) => `<p>${esc(l)}</p>`).join('')}</div></div>` : visual}
+    ${look === 'witness' ? '' : `<div class="card-lines">${k.lines.map((l) => `<p>${esc(l).replace(/(\d)–(\d)/g, '$1\u2060–\u2060$2')}</p>`).join('')}</div>`}
     ${k.map && !opts.noActions && hasMapTab() ? `<p><button class="btn btn-small" data-act="tab" data-tab="plan">${icon('map')} Otwórz plan miasta</button></p>` : ''}
     ${opts.noActions ? '' : `
     <footer class="card-foot">

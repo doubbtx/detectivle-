@@ -258,6 +258,22 @@ export const RULE_MAP = 'Czasy dotarcia liczycie z planu Borowic (biurko „Mapa
 /** Czy sprawa ma plan miasta (karta z polami miejsc). */
 export const hasTownMap = (c) => c.cards.some((k) => (k.facts || []).some((f) => f.t === 'grid'));
 
+/** Zasady w skrócie (ikona Lucide + jedno zdanie); pełna treść w rulesFor(). */
+export function rulesShortFor(c) {
+  const map = hasTownMap(c);
+  return [
+    ['lock', 'Sprawca był w środku przez cały czas, od otwarcia do zamknięcia drzwi.'],
+    ['landmark', 'Urzędy, rejestry, kamery i świadkowie spoza piątki mówią prawdę.'],
+    c.innocentLie
+      ? ['ticket', 'Fałszywe są dwa dowody od podejrzanych: fałszywka sprawcy (dałaby mu alibi) i kłamstwo niewinnej osoby, która ma inne, potwierdzone alibi.']
+      : ['ticket', 'Dokładnie jeden dowód od podejrzanych jest fałszywy. Podrzucił go sprawca i dałby mu alibi.'],
+    map ? ['map', '1 przecznica = 2 min. Liczcie przecznice w poziomie i w pionie na planie miasta.'] : ['map', 'Czasy dotarcia są najkrótsze możliwe; między dwoma miejscami co najmniej różnica ich czasów.'],
+    ['search', 'Fałszywkę zdradza tabela urzędowa albo to, że ktoś był gdzie indziej i nie zdążyłby dotrzeć.'],
+    ['footprints', 'Prawdziwy dowód = ta osoba tam była. Kino: cały seans. Pociąg: potem nie było jej w mieście.'],
+    ['clock', 'Zegary są zgodne, rozkłady i godziny obowiązują dokładnie tak, jak na kartach.'],
+  ];
+}
+
 /** Zasady dla danej sprawy. */
 export function rulesFor(c) {
   const map = hasTownMap(c);
