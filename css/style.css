@@ -925,3 +925,9 @@ button.chip { cursor: pointer; }
 .bd-note { color: #6b6455; font-size: 0.72rem; }
 .link-btn.on-board { color: var(--olive); font-weight: 700; }
 .bd-fact { flex-wrap: wrap; text-align: left; justify-content: flex-start; }
+/* Teczki osób: deklaracje (jasne) i dopięte niezależne fakty (żółte) */
+.bd-fact.claim { background: var(--sheet); border-style: dashed; }
+.bd-dot.claim, .bd-bar.claim { background: var(--sheet); border: 2.5px solid var(--ink); }
+.bd-dot.claim.on, .bd-bar.claim.on { background: var(--olive); }
+.bd-role { font-size: 0.68rem; color: var(--ink-soft); line-height: 1.1; }
+.bd-alibi { font-size: 0.8rem; color: var(--ink-soft); margin: 0 0 0.3rem; font-style: italic; }

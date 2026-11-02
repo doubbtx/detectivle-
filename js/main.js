@@ -726,7 +726,7 @@ function renderCard(k, opts = {}) {
     ${opts.noActions ? '' : `
     <footer class="card-foot">
       <button class="link-btn" data-act="mark-card" data-id="${k.id}" aria-pressed="${Boolean(marked)}">${marked ? '★ Ważna' : '☆ Ważna'}</button>
-      ${isPinnable(k) ? `<button class="link-btn${(progress.pins || []).includes(k.id) ? ' on-board' : ''}" data-act="pin-card" data-id="${k.id}" aria-pressed="${(progress.pins || []).includes(k.id)}">${(progress.pins || []).includes(k.id) ? 'Na tablicy ✓' : 'Na tablicę'}</button>` : ''}
+      ${isPinnable(k) && k.kind !== 'supplied' && state.c.difficulty > 2 ? `<button class="link-btn${(progress.pins || []).includes(k.id) ? ' on-board' : ''}" data-act="pin-card" data-id="${k.id}" aria-pressed="${(progress.pins || []).includes(k.id)}">${(progress.pins || []).includes(k.id) ? 'Na tablicy ✓' : 'Na tablicę'}</button>` : ''}
       <button class="link-btn" data-act="aside-card" data-id="${k.id}">Odłóż</button>
       <button class="link-btn" data-act="copy-card" data-id="${k.id}">Kopiuj</button>
       ${state.mode === 'live' ? (onTable(k.id) ? `<span class="link-btn on-table">Na stole ✓</span>` : `<button class="link-btn" data-act="table" data-id="${k.id}">Połóż na stół</button>`) : ''}
@@ -811,7 +811,7 @@ function renderPlan() {
 function renderBoardTab() {
   const c = state.c;
   const canSee = (k) => myDesks().includes(k.desk) && !isSealed(k);
-  return renderBoard({ c, pins: progress.pins || [], sel: state.boardSel || [], canSee, hasMap: hasMapTab(), sceneCell: SCENE_CELLS[sceneIdOf(c)] });
+  return renderBoard({ c, pins: progress.pins || [], sel: state.boardSel || [], canSee, hasMap: hasMapTab(), sceneCell: SCENE_CELLS[sceneIdOf(c)], autoAll: c.difficulty <= 2 });
 }
 
 function renderNotes() {
@@ -850,7 +850,7 @@ function renderTopbar() {
 }
 
 function renderTabs() {
-  const tabs = [{ id: 'akta', label: 'Akta' }, ...(state.mode === 'live' ? [{ id: 'table', label: `Stół ${state.live?.rs?.table.length ?? 0}` }] : []), ...myDesks().map((d) => ({ id: d, label: deskName(d) })), { id: 'board', label: `Tablica${(progress.pins || []).length ? ` ${(progress.pins || []).length}` : ''}` }, ...(hasMapTab() ? [{ id: 'plan', label: 'Plan miasta' }] : []), { id: 'notes', label: 'Notatki' }];
+  const tabs = [{ id: 'akta', label: 'Akta' }, ...(state.mode === 'live' ? [{ id: 'table', label: `Stół ${state.live?.rs?.table.length ?? 0}` }] : []), ...myDesks().map((d) => ({ id: d, label: deskName(d) })), { id: 'board', label: 'Tablica' }, ...(hasMapTab() ? [{ id: 'plan', label: 'Plan miasta' }] : []), { id: 'notes', label: 'Notatki' }];
   return `
   <nav class="tabs" aria-label="Biurka">
     <div class="tabs-inner">

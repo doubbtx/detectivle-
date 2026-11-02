@@ -52,9 +52,15 @@ const when = (f) => (f.to === null ? fmt(f.from) : f.from === f.to ? fmt(f.from)
  * @param {(k) => boolean} o.canSee czy gracz widzi treść karty
  * @param {boolean} o.hasMap czy gracz ma plan miasta (w ekipie tylko osoba z biurkiem Mapa)
  * @param {string} o.sceneCell pole miejsca kradzieży
+ * @param {boolean} o.autoAll wpisać wszystkie jawne fakty (pn–wt: zagadka i tak jest w tabelach urzędowych)
  */
-export function renderBoard({ c, pins, sel, canSee, hasMap, sceneCell }) {
-  const facts = pins.map((id) => c.cards.find((k) => k.id === id)).filter((k) => k && canSee(k)).flatMap((k) => factsOfCard(k, { cards: c.cards, canSee }));
+export function renderBoard({ c, pins, sel, canSee, hasMap, sceneCell, autoAll = false }) {
+  // Teczki osób: to, co każda osoba twierdzi (jej własne dowody), jest wpisane od razu.
+  // Niezależne fakty (świadkowie, kamery, rejestry) gracz dopina sam, chyba że autoAll.
+  const visible = c.cards.filter((k) => canSee(k) && isPinnable(k));
+  const auto = visible.filter((k) => autoAll || k.kind === 'supplied').map((k) => k.id);
+  const ids = [...new Set([...auto, ...pins])];
+  const facts = ids.map((id) => c.cards.find((k) => k.id === id)).filter((k) => k && canSee(k)).flatMap((k) => factsOfCard(k, { cards: c.cards, canSee }).map((f) => ({ ...f, claim: k.kind === 'supplied' })));
   const byId = new Map(facts.map((f) => [f.id, f]));
   const chosen = sel.map((id) => byId.get(id)).filter(Boolean);
   // Oś czasu: od 17:00 do 24:00, poszerzana, jeśli coś wypada poza.
@@ -65,15 +71,15 @@ export function renderBoard({ c, pins, sel, canSee, hasMap, sceneCell }) {
   for (let h = Math.ceil(A / 60); h * 60 <= B; h++) hours.push(h);
   const win = `<span class="bd-window" style="left:${pct(c.window.from)}%;width:${pct(c.window.to) - pct(c.window.from)}%" title="drzwi otwarte ${fmt(c.window.from)}–${fmt(c.window.to)}"></span>`;
   const axis = `<div class="bd-axis">${hours.map((h) => `<span style="left:${pct(h * 60)}%">${h % 24}</span>`).join('')}</div>`;
-  const chip = (f) => `<button class="bd-fact${sel.includes(f.id) ? ' on' : ''}" data-act="board-pick" data-id="${f.id}" aria-pressed="${sel.includes(f.id)}"><span class="chip">${f.card}</span> ${esc(placeName(f.place))} <b>${when(f)}</b>${f.note ? ` <span class="bd-note">${esc(f.note)}</span>` : ''}</button>`;
+  const chip = (f) => `<button class="bd-fact${f.claim ? ' claim' : ''}${sel.includes(f.id) ? ' on' : ''}" data-act="board-pick" data-id="${f.id}" aria-pressed="${sel.includes(f.id)}"><span class="chip">${f.card}</span> ${esc(placeName(f.place))} <b>${when(f)}</b>${f.note ? ` <span class="bd-note">${esc(f.note)}</span>` : ''}</button>`;
   const lane = (list) => `<div class="bd-lane">${win}${list.map((f) => (f.to === null || f.to === f.from
-    ? `<button class="bd-dot${sel.includes(f.id) ? ' on' : ''}" style="left:${pct(f.from)}%" data-act="board-pick" data-id="${f.id}" title="${esc(placeName(f.place))} ${when(f)} (${f.card})" aria-label="${esc(placeName(f.place))} ${when(f)}"></button>`
-    : `<button class="bd-bar${sel.includes(f.id) ? ' on' : ''}" style="left:${pct(f.from)}%;width:${Math.max(1.5, pct(f.to) - pct(f.from))}%" data-act="board-pick" data-id="${f.id}" title="${esc(placeName(f.place))} ${when(f)} (${f.card})" aria-label="${esc(placeName(f.place))} ${when(f)}"></button>`)).join('')}</div>`;
+    ? `<button class="bd-dot${f.claim ? ' claim' : ''}${sel.includes(f.id) ? ' on' : ''}" style="left:${pct(f.from)}%" data-act="board-pick" data-id="${f.id}" title="${esc(placeName(f.place))} ${when(f)} (${f.card})" aria-label="${esc(placeName(f.place))} ${when(f)}"></button>`
+    : `<button class="bd-bar${f.claim ? ' claim' : ''}${sel.includes(f.id) ? ' on' : ''}" style="left:${pct(f.from)}%;width:${Math.max(1.5, pct(f.to) - pct(f.from))}%" data-act="board-pick" data-id="${f.id}" title="${esc(placeName(f.place))} ${when(f)} (${f.card})" aria-label="${esc(placeName(f.place))} ${when(f)}"></button>`)).join('')}</div>`;
   const rows = c.suspects.map((s) => {
     const list = facts.filter((f) => f.who.includes(s.id)).sort((a, b) => a.from - b.from);
     return `<div class="bd-row">
-      <div class="bd-who">${portrait(s.full, 'portrait bd-face')}<b>${esc(s.first)}</b></div>
-      <div class="bd-track">${lane(list)}<div class="bd-chips">${list.map(chip).join('') || '<span class="muted small">nic nie przypięto</span>'}</div></div>
+      <div class="bd-who">${portrait(s.full, 'portrait bd-face')}<b>${esc(s.first)}</b><span class="bd-role">${esc(s.role)}</span></div>
+      <div class="bd-track"><p class="bd-alibi">${esc(s.alibi.replace(/\s*\((?:bilety?|paragon|zdjęcie|zrzut ekranu|bilet): [A-Z]\d+\)/g, ''))}</p>${lane(list)}<div class="bd-chips">${list.map(chip).join('') || '<span class="muted small">brak dowodów z godziną</span>'}</div></div>
     </div>`;
   }).join('');
   const loose = facts.filter((f) => !f.who.length);
@@ -104,7 +110,7 @@ export function renderBoard({ c, pins, sel, canSee, hasMap, sceneCell }) {
   <section class="board" aria-label="Tablica śledcza">
     <header class="desk-head">
       <h2>${icon('footprints')} Tablica śledcza</h2>
-      <p class="muted small">Przypinaj karty przyciskiem „Na tablicę”. Fakty (kto, gdzie, kiedy) ułożą się tu same. Czerwony pas to czas, gdy drzwi były otwarte.</p>
+      <p class="muted small">${autoAll ? 'Wszystkie jawne fakty są już wpisane.' : 'Teczki osób: to, co każdy twierdzi, jest już wpisane (jasne karteczki). Świadków, nagrania i rejestry dopinasz przyciskiem „Na tablicę” (żółte karteczki).'} Czerwony pas to czas, gdy drzwi były otwarte.</p>
     </header>
     <div class="bd-compare" aria-live="polite">${compare}${sel.length ? '<p><button class="link-btn" data-act="board-clear">Wyczyść wybór</button></p>' : ''}</div>
     ${facts.length ? `<div class="bd-grid">${axis}${rows}${looseRow}</div>` : '<p class="muted">Tablica jest pusta. Na kartach z godziną i miejscem (bilety, paragony, zeznania, nagrania, rejestry) jest przycisk „Na tablicę”.</p>'}
