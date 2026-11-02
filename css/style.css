@@ -1044,8 +1044,8 @@ button.chip { cursor: pointer; }
 .sus-extra { margin-top: 0.25rem; font-size: var(--step--1); color: var(--ink-soft); display: flex; flex-wrap: wrap; gap: 0.2rem 0.6rem; align-items: baseline; }
 .sus-extra-label { font-weight: 600; }
 .sus-extra-item { color: var(--ink); }
-/* Linie dokumentów łamią się między fragmentami „ · ”, a nie w środku znaczenia. */
-.card-lines .ln-seg { display: inline-block; max-width: 100%; }
+/* Linie dokumentów łamią się między krótkimi fragmentami „ · ”, a nie w środku znaczenia (zob. lineHtml w main.js). */
+.card-lines .ln-seg { white-space: nowrap; }
 /* Karty w kolumnach bez dziur: wiersze po 4 px, miejsce każdej karty liczy layoutLanes() w main.js. */
 .cards.lanes { grid-auto-rows: 4px; row-gap: 0; }
 /* Meldunek: wyraźniejszy odnośnik. */
@@ -1057,9 +1057,8 @@ button.chip { cursor: pointer; }
 /* Tablica: deklaracje podejrzanych czytelne w ciemnym motywie, dłuższa rola nie wjeżdża w pas. */
 .bd-fact.claim { color: var(--ink); }
 .bd-fact.claim .bd-note { color: var(--ink-soft); }
-.bd-who { min-width: 0; }
-.bd-role { overflow-wrap: anywhere; hyphens: auto; }
-@media (min-width: 40rem) { .filter-row [data-id="marked"] { margin-left: auto; } }
+/* „Ważne” dosunięte do prawej tylko tam, gdzie wszystkie filtry mieszczą się w jednym rzędzie. */
+@media (min-width: 90rem) { .filter-row [data-id="marked"] { margin-left: auto; } }
 @media (min-width: 60rem) {
   /* Lewy panel bez własnego paska: przewija się ze stroną i przykleja dolną krawędzią, gdy jest wyższy niż okno. */
   .col-left {
@@ -1073,6 +1072,9 @@ button.chip { cursor: pointer; }
   .rules-short[open] > summary::after { content: '▾'; }
   .desk-label { color: var(--ink); border-bottom: 1px solid var(--rule); padding-bottom: 0.3rem; margin-bottom: 0.45rem; }
   .bd-row { grid-template-columns: 5.5rem minmax(0, 1fr); }
+  /* Na komputerze rola nie wychodzi poza kolumnę (na telefonie zostaje jak dawniej, z miękkim dzieleniem z board.js). */
+  .bd-who { min-width: 0; }
+  .bd-role { overflow-wrap: anywhere; }
 }
 /* Szeroki ekran: gra rośnie do 110rem (120rem od 150rem), lewy panel do 28rem, karty w 3 kolumnach. */
 @media (min-width: 90rem) {
@@ -1081,7 +1083,7 @@ button.chip { cursor: pointer; }
   .game.view-plan .col-left { display: block; }
   /* Zakładki stoją nad prawą kolumną, którą przełączają. */
   .tabs-inner { padding-left: calc(max(16px, env(safe-area-inset-left, 0px)) + 30rem); }
-  .cards { grid-template-columns: repeat(auto-fill, minmax(min(100%, 23rem), 1fr)); }
+  .game .cards { grid-template-columns: repeat(auto-fill, minmax(min(100%, 23rem), 1fr)); }
 }
 @media (min-width: 150rem) {
   .topbar-inner, .tabs-inner, .game { max-width: 120rem; }

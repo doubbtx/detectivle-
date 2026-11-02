@@ -716,7 +716,7 @@ function renderAkta() {
     <ul class="suspects">${renderSuspects()}</ul>
     ${team ? `<p class="muted small">Szare kody to karty z biurek innych graczy. Kliknij kod, żeby sprawdzić, kto ma tę kartę.</p>` : ''}
     <details class="rules-short" data-keep="rules"${keepOpen.rules || !isWide() ? ' open' : ''}>
-      <summary><h3 class="sec-label">Zasady w skrócie</h3></summary>
+      <summary${isWide() ? '' : ' tabindex="-1" aria-disabled="true"'}><h3 class="sec-label">Zasady w skrócie</h3></summary>
       <ul>${rulesShortFor(c).map(([ic, r]) => `<li><span class="rs-ico">${icon(ic)}</span><span>${esc(r)}</span></li>`).join('')}</ul>
       <details class="rules" data-keep="rules-full"${keepOpen['rules-full'] ? ' open' : ''}>
         <summary>Pełne zasady</summary>
@@ -727,17 +727,24 @@ function renderAkta() {
 }
 
 /**
- * Jedna linia dokumentu: łamie się tylko między fragmentami rozdzielonymi „ · ”, a liczba nie odrywa się od jednostki
- * („27,00 zł”, „60 min”) ani jednoliterowy wyraz od następnego. W wąskiej karcie nie ma już „27,00 / zł”.
+ * Jedna linia dokumentu: liczba nie odrywa się od jednostki („27,00 zł”, „60 min”), przedział od swoich końców
+ * („9-16”, „pn-pt”, „10–12”) ani jednoliterowy wyraz od następnego. Krótkie fragmenty rozdzielone „ · ” są
+ * nierozrywalne, więc łamanie wypada między nimi; dłuższy fragment łamie się normalnie, a separator zostaje
+ * przy nim (nie ma samotnego „9-16 ·” w osobnej linii).
  */
+const SEG_MAX = 22; // znaków: tyle mieści się w jednej linii najwęższej karty (telefon 360 px)
 function lineHtml(l) {
   const glue = (t) => t
-    .replace(/(\d)–(\d)/g, '$1\u2060–\u2060$2')
+    .replace(/(\d)([–-])(?=\d)/g, '$1\u2060$2\u2060')
+    .replace(/(^|[\s(])(\p{L}{1,3})-(\p{L}{1,3})(?=[\s,:;)]|$)/gu, '$1$2\u2060-\u2060$3')
     .replace(/(\d) (zł|gr|min|h|km|m|PLN)(?![\p{L}\d])/gu, '$1\u00a0$2')
     .replace(/(^|\s)([wzioauWZIOAU]) /g, '$1$2\u00a0');
   const parts = esc(l).split(' · ');
   if (parts.length < 2) return glue(parts[0]);
-  return parts.map((x, i) => `<span class="ln-seg">${glue(x)}${i < parts.length - 1 ? '\u00a0·' : ''}</span>`).join(' ');
+  return parts.map((x, i) => {
+    const t = glue(x) + (i < parts.length - 1 ? '\u00a0·' : '');
+    return x.length <= SEG_MAX ? `<span class="ln-seg">${t}</span>` : t;
+  }).join(' ');
 }
 
 function renderCard(k, opts = {}) {
@@ -1639,26 +1646,30 @@ let deskObserver = null;
 let deskFrame = 0;
 
 /**
- * Karty idą kolejno do kolumn (1, 2, 3, 1, 2…), więc rzędy czyta się jak w DOM (D1 D2 D3 / D4 D5),
- * a każda karta zajmuje tyle wierszy po 4 px, ile ma wysokości. Pod krótką kartą nie zostaje dziura.
- * Przy jednej kolumnie (telefon) siatka zostaje zwykła.
+ * Karty w kolumnach bez dziur: każda karta trafia do kolumny, która kończy się najwyżej (przy remisie do lewej),
+ * i zajmuje tyle wierszy po 4 px, ile ma wysokości. Górne krawędzie kart rosną w kolejności DOM, więc czytanie
+ * z góry na dół zgadza się z kolejnością Tab i czytnika ekranu, a kolumny kończą się na podobnej wysokości.
+ * Przy jednej kolumnie (telefon) i w ukrytej siatce układ zostaje zwykły.
  */
 function layoutLanes(grid) {
   const kids = [...grid.children];
-  const cols = getComputedStyle(grid).gridTemplateColumns.split(' ').filter((x) => x && x !== 'none').length;
-  if (cols < 2 || kids.length < 2) {
-    if (grid.classList.contains('lanes')) {
-      grid.classList.remove('lanes');
-      kids.forEach((k) => { k.style.gridColumn = ''; k.style.gridRow = ''; });
-    }
-    return;
-  }
-  const gap = parseFloat(getComputedStyle(grid).columnGap) || 0;
+  // Najpierw zwykła siatka: inline grid-column z poprzedniego układu tworzyłby kolumny niejawne,
+  // które getComputedStyle też liczy (po zwężeniu okna zostawałyby 3 kolumny).
+  grid.classList.remove('lanes');
+  kids.forEach((k) => { k.style.gridColumn = ''; k.style.gridRow = ''; });
+  if (!grid.getClientRects().length) return; // ukryta siatka (np. zakładka Sprawa na telefonie): nic nie mierzymy
+  const cs = getComputedStyle(grid);
+  // Tylko rozwinięte tory w px; nierozwinięte „repeat(auto-fill, …)” nie jest kolumną.
+  const cols = cs.gridTemplateColumns.split(' ').filter((x) => /px$/.test(x)).length;
+  if (cols < 2 || kids.length < 2) return;
+  const gap = parseFloat(cs.columnGap) || 0;
   const heights = kids.map((k) => k.getBoundingClientRect().height);
   grid.classList.add('lanes');
   const next = Array(cols).fill(1);
+  const TIE = 4; // wiersze (16 px): niemal równe kolumny traktujemy jak równe, żeby rząd szedł od lewej
   kids.forEach((k, i) => {
-    const col = i % cols;
+    const low = Math.min(...next);
+    const col = next.findIndex((n) => n <= low + TIE);
     const span = Math.max(1, Math.ceil((heights[i] + gap) / LANE_ROW));
     k.style.gridColumn = String(col + 1);
     k.style.gridRow = `${next[col]} / span ${span}`;
@@ -1677,9 +1688,10 @@ function watchDesk() {
   deskObserver?.disconnect();
   layoutDesk();
   if (typeof ResizeObserver === 'undefined') return;
-  const targets = [...app.querySelectorAll('.cards > *, .col-left')];
+  const targets = [...app.querySelectorAll('.cards, .cards > *, .col-left')];
   if (!targets.length) return;
-  // Zmiana szerokości okna, wczytanie czcionki albo obrazka zmienia wysokość kart: układamy ponownie.
+  // Zmiana szerokości okna, wczytanie czcionki albo obrazka zmienia wysokość kart, a odsłonięcie ukrytej siatki
+  // daje jej prawdziwe wymiary: układamy ponownie.
   deskObserver = new ResizeObserver(() => {
     cancelAnimationFrame(deskFrame);
     deskFrame = requestAnimationFrame(layoutDesk);
@@ -1792,6 +1804,8 @@ function gotoCard(id) {
 }
 
 app.addEventListener('click', (e) => {
+  // Na telefonie „Zasady w skrócie” są zawsze rozwinięte: Enter ani klik nie zwijają ich (dotyk nie mógłby ich rozwinąć).
+  if (!isWide() && e.target.closest('.rules-short > summary')) { e.preventDefault(); return; }
   const target = e.target.closest('[data-act]');
   if (!target) return;
   const act = target.dataset.act;
@@ -2094,6 +2108,7 @@ function routeFromHash(resume = false) {
 
 // Zdarzenie toggle nie bąbelkuje, więc słuchamy w fazie przechwytywania.
 app.addEventListener('toggle', (e) => {
+  if (!isWide() && e.target?.classList?.contains('rules-short') && !e.target.open) { e.target.open = true; return; }
   const key = e.target?.dataset?.keep;
   if (key) keepOpen[key] = e.target.open;
 }, true);

@@ -9,6 +9,10 @@ import { portrait } from './portraits.js';
 import { PLACE_CELLS, cellsApart, blocksText, MIN_PER_CELL } from './town.js';
 
 const esc = (s) => String(s).replace(/[&<>"]/g, (ch) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[ch]));
+// Najdłuższe role nie mieszczą się w wąskiej kolumnie tablicy na telefonie: miękki dywiz łamie je w miejscu sylaby
+// („rzeczo-/znawczyni”) zamiast wypychać w pas osi czasu. Krótsze role zostają bez zmian.
+const ROLE_SHY = { rzeczoznawczyni: 'rzeczo\u00adznawczyni', rzeczoznawca: 'rzeczo\u00adznawca' };
+const roleHtml = (role) => esc(role).replace(/\p{L}+/gu, (w) => ROLE_SHY[w] || w);
 const placeName = (key) => (key === '@pociag' ? 'pociąg (poza miastem)' : PLACES[key]?.name || key);
 
 /**
@@ -86,7 +90,7 @@ export function renderBoard({ c, pins, sel, canSee, hasMap, sceneCell, autoAll =
   const rows = c.suspects.map((s) => {
     const list = facts.filter((f) => f.who.includes(s.id)).sort((a, b) => a.from - b.from);
     return `<div class="bd-row">
-      <div class="bd-who">${portrait(s.full, 'portrait bd-face')}<b>${esc(s.first)}</b><span class="bd-role">${esc(s.role)}</span></div>
+      <div class="bd-who">${portrait(s.full, 'portrait bd-face')}<b>${esc(s.first)}</b><span class="bd-role">${roleHtml(s.role)}</span></div>
       <div class="bd-track"><p class="bd-alibi">${esc(s.alibi.replace(/\s*\((?:bilety?|paragon|zdjęcie|zrzut ekranu|bilet): [A-Z]\d+\)/g, ''))}</p>${lane(list)}<div class="bd-chips">${list.map(chip).join('') || '<span class="muted small">brak dowodów z godziną</span>'}</div></div>
     </div>`;
   }).join('');
