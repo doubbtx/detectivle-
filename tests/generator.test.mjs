@@ -257,3 +257,20 @@ test('w weekend kartę obalającą trzeba zlecić (zapieczętowane nagranie albo
   }
   assert.ok(n > 50);
 });
+
+test('etykieta nagrania podaje okno czasowe, w którym leży zapisana chwila', () => {
+  const toMin = (h, m) => Number(h) * 60 + Number(m);
+  let n = 0;
+  for (const iso of dates.slice(0, 120)) {
+    const c = buildDailyCase(iso);
+    for (const k of c.cards.filter((x) => x.title === 'Monitoring miejski' && x.action)) {
+      const t = /(\d{1,2}):(\d{2})/.exec(k.lines[1]);
+      const w = /(\d{1,2}):(\d{2})–(\d{1,2}):(\d{2})$/.exec(k.action.label);
+      assert.ok(t && w, `${iso} ${k.id}: ${k.action.label}`);
+      const tm = toMin(t[1], t[2]);
+      assert.ok(toMin(w[1], w[2]) <= tm && tm <= toMin(w[3], w[4]), `${iso} ${k.id}`);
+      n++;
+    }
+  }
+  assert.ok(n > 50);
+});

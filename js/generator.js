@@ -70,7 +70,9 @@ function params(diff) {
     // Pułapka fizyczna na zapieczętowanym nagraniu zamiast darmowego zeznania.
     sealedTrapChance: diff >= 5 ? 0.75 : 0.5,
     // Zeznanie bez godziny („widziałam go przy Rynku”), które naprowadza na nagranie z kamery.
-    tipChance: diff >= 3 ? 0.6 : 0.3,
+    tipChance: diff >= 3 ? 0.7 : 0.3,
+    // Prawdziwy dowód bez alibi (godzina poza zasięgiem): liczenie kart z alibi nie wskazuje sprawcy.
+    coverChance: diff >= 5 ? 0.8 : diff >= 3 ? 0.5 : 0,
     // Jak zdradza się fałszywka: 'table' – sprzeczność z tabelą urzędową; 'self' – sprawcę widziano
     // wtedy gdzie indziej (fizyczna niemożliwość); 'cross' – fałszywka obejmuje niewinną osobę,
     // której prawdziwy pobyt temu przeczy (alibi krzyżowe).
@@ -288,6 +290,8 @@ function generate(rng, opts) {
     return retry();
   };
 
+  const initialName = (p) => `${p.first[0]}. ${p.full.split(' ').slice(1).join(' ')}`;
+
   // --- Dowody dostarczone przez podejrzanych --------------------------------
   /** Godzina tuż poza zasięgiem: z tego miejsca dało się jeszcze zdążyć na kradzież (albo wrócić po niej). */
   const nearOut = (place) => {
@@ -382,7 +386,7 @@ function generate(rng, opts) {
             `${dShort} godz. ${fmt(t)}`,
             ...items.map(([n, pr]) => `${n} ${pr}`),
             `SUMA PLN ${total.toFixed(2).replace('.', ',')}`,
-            ...(withP ? [`Rachunek na 2 osoby (${s.first} i ${withP.first})`] : []),
+            ...(withP ? [`płatność dzielona, 2 karty: ${initialName(s)} (…${rng.int(1000, 9999)}), ${initialName(withP)} (…${rng.int(1000, 9999)})`] : []),
           ],
           facts: [{ t: 'claim', kind, who: by, place, time: t, ...(withP ? { with: [withP.id] } : {}) }],
         });
@@ -613,7 +617,7 @@ function generate(rng, opts) {
   const WITNESS_TEXT = {
     teatr: (s, w, ts) => (ts.length > 1
       ? `„${pan(s)} ${s.first} ${g(s, 'przyszedł', 'przyszła')} na spektakl o ${fmt(ts[0])}. W przerwie, o ${fmt(ts[1])}, ${g(s, 'kupił', 'kupiła')} u mnie program.”`
-      : `„${pan(s)} ${s.first} ${g(s, 'oddał', 'oddała')} płaszcz do szatni o ${fmt(ts[0])}, tuż przed spektaklem.”`),
+      : `„${pan(s)} ${s.first} ${g(s, 'kupił', 'kupiła')} u mnie w kasie bilety na przyszły tydzień. Było to o ${fmt(ts[0])}.”`),
     pub: (s, w, ts) => (ts.length > 1
       ? `„${pan(s)} ${s.first} ${g(s, 'siedział', 'siedziała')} przy barze. O ${fmt(ts[0])} ${g(s, 'zamówił', 'zamówiła')} herbatę z rumem, a o ${fmt(ts[1])} ${g(s, 'zapłacił', 'zapłaciła')} rachunek.”`
       : `„${pan(s)} ${s.first} ${g(s, 'grał', 'grała')} u nas w rzutki. O ${fmt(ts[0])} ${g(w, 'wpisałem', 'wpisałam')} wynik na tablicy.”`),
@@ -637,13 +641,19 @@ function generate(rng, opts) {
   const TIP_TEXTS = [
     (s, w, place) => `„${pan(s)} ${s.first} ${g(s, 'kręcił', 'kręciła')} się tamtego wieczoru ${PLACES[place].loc}. O której? Nie ${g(w, 'patrzyłem', 'patrzyłam')} na zegarek.”`,
     (s, w, place) => `„Jestem ${g(w, 'pewny', 'pewna')}, że ${pan(s).toLowerCase()} ${s.first} ${g(s, 'był', 'była')} wieczorem ${PLACES[place].loc}. Czy przed tą kradzieżą, czy po niej, tego nie wiem.”`,
-    (s, w, place) => `„${g(w, 'Mijałem', 'Mijałam')} ${PLACES[place].loc} kogoś bardzo podobnego do ${s.f ? 'pani' : 'pana'} ${s.gen}. Godziny nie pamiętam, ale tam wisi kamera, to się sprawdzi.”`,
+    (s, w, place) => `„${pan(s)} ${s.first} ${g(s, 'przeszedł', 'przeszła')} obok mnie ${PLACES[place].loc}. Godziny nie pamiętam, ale tam wisi kamera, to się sprawdzi.”`,
     (s, w, place) => `„${pan(s)} ${s.first}? Tak, ${g(w, 'widziałem', 'widziałam')} ${s.f ? 'ją' : 'go'} ${PLACES[place].loc}. To był ten wieczór, ale godziny nie podam.”`,
   ];
   /** Zeznanie bez godziny: naprowadza na nagranie z kamery, ale samo niczego nie dowodzi. */
+  const noTip = new Set();
+  let tipOrder = null;
+  let tipIdx = 0;
   function makeTip(s, place) {
+    if (noTip.has(s.id)) return;
+    if (!tipOrder) tipOrder = rng.shuffle(TIP_TEXTS.map((_, i) => i));
     const w = nextWitness();
-    addCard({ desk: 'S', kind: 'witness', title: `Zeznanie: ${w.full}`, sub: g(w, 'mieszkaniec okolicy', 'mieszkanka okolicy'), lines: [rng.pick(TIP_TEXTS)(s, w, place)] });
+    const text = TIP_TEXTS[tipOrder[tipIdx++ % tipOrder.length]](s, w, place);
+    addCard({ desk: 'S', kind: 'witness', title: `Zeznanie: ${w.full}`, sub: g(w, 'mieszkaniec okolicy', 'mieszkanka okolicy'), lines: [text] });
   }
 
   /**
@@ -689,7 +699,7 @@ function generate(rng, opts) {
           lines: [`Kamera nr ${rng.int(2, 19)} · ${PLACES[place].name}`, `Nagranie z godz. ${fmt(t)}`, `Wyraźnie widać: ${s.full} ${rng.pick(CCTV_DETAILS)}.`],
           facts: [{ t: 'seen', who: s.id, place, from: t, to: t }],
         });
-        makeTip(s, place);
+        if (rng.chance(P.tipChance)) makeTip(s, place);
       }
       events[s.id].push(ev);
       return;
@@ -784,7 +794,10 @@ function generate(rng, opts) {
     const Y = suspects[yIdx];
     // Prawdziwy pobyt Y jest na zapieczętowanym nagraniu albo w rejestrze wejść: trzeba go zlecić,
     // a trop jest logiczny (Y twierdzi, że był właśnie tam).
+    // Bez zeznania-tropu: Y sam mówi, gdzie był, a trop wprost do kamery Y zdradzałby fałszywkę.
+    noTip.add(Y.id);
     neutralPlace[yIdx] = attempt(Y, () => makeNeutral(rng.pick(['cctv', 'cardlog']), Y, 'clear')).place;
+    noTip.delete(Y.id);
     const yEvents = events[Y.id].slice();
     const res = attempt(culprit, () => makeClaim(forgedKind, culprit, false, false, { withP: Y, mustConflict: yEvents }));
     forgedCard = res.card;
@@ -841,6 +854,22 @@ function generate(rng, opts) {
       }
     }
   }
+  // W alibi krzyżowym zawsze leży też prawdziwy wspólny dowód: inaczej fałszywka byłaby jedynym takim dowodem.
+  if (mode === 'cross' && !jointDone) retry();
+  // Karty-przykrywki: prawdziwe dowody bez alibi (godzina tuż poza zasięgiem) u sprawcy i u zmyłek,
+  // żeby samo liczenie kart z alibi nie wskazywało sprawcy.
+  const COVER_KINDS = ['receipt', 'parking', 'delivery'];
+  for (const i of [culpritIdx, ...decoyIdx]) {
+    if (!rng.chance(P.coverChance)) continue;
+    const s = suspects[i];
+    const kind = rng.pick(COVER_KINDS);
+    try {
+      attempt(s, () => makeClaim(kind, s, false, true));
+    } catch (e) {
+      if (!(e instanceof RetryError)) throw e;
+    }
+  }
+
   // Kłamstwo niewinnej osoby: fałszywy dowód, a obok niego inne, prawdziwe alibi tej osoby.
   // Kłamca ma niezależne alibi od świadka, kamery albo rejestru.
   let lieCard = null;
@@ -1072,13 +1101,13 @@ function generate(rng, opts) {
       () => ({ title: `Zeznanie: ${owner.full}`, sub: scene.ownerRole, lines: [`„${g(owner, 'Wyszedłem', 'Wyszłam')} o ${fmt(closeT)}, ${g(owner, 'zamknąłem', 'zamknęłam')} drzwi i ${g(owner, 'uzbroiłem', 'uzbroiłam')} alarm. Rano ${g(owner, 'zauważyłem', 'zauważyłam')} kradzież.”`] }),
     ],
     M: [
-      () => ({ title: 'Plan miasta: objaśnienia', lines: ['Rzeka dzieli miasto na dwie części.', 'Dla aut jedyną przeprawą jest most przy Rynku.', 'Piesi mogą przejść także kładką przy bulwarze.'] }),
+      () => ({ title: 'Plan miasta: objaśnienia', lines: ['Rzeka dzieli miasto na dwie części, ale mostów i kładek jest kilkanaście.', 'Czasy dotarcia na kartach już to uwzględniają.'] }),
       () => ({ title: 'Komunikat drogowy', lines: ['Remont chodnika przy ul. Szpitalnej.', 'Ruch pieszy bez utrudnień.'] }),
-      () => ({ title: 'Mapa ścieżek rowerowych', lines: ['Ścieżka wzdłuż rzeki: od bulwaru do stadionu.', 'Stacje rowerów miejskich: Rynek, Dworzec, Park Zdrojowy.'] }),
+      () => ({ title: 'Mapa ścieżek rowerowych', lines: ['Ścieżka wzdłuż rzeki: od bulwaru do stadionu.', 'Wieczorem ścieżka nie jest oświetlona.'] }),
     ],
     Z: [
       () => ({ title: 'Zdjęcie z oględzin', lines: ['Puste miejsce po skradzionym przedmiocie.', 'Na blacie smuga po rękawiczce.'] }),
-      () => ({ title: 'Zdjęcie z oględzin', lines: ['Rozmyte ślady błota przy drzwiach.', 'Nie da się ustalić rozmiaru buta.'] }),
+      () => ({ title: 'Zdjęcie z oględzin', lines: ['Na wycieraczce ślady piasku z budowy obok.', 'Nie da się ustalić rozmiaru buta.'] }),
       () => ({ title: 'Zdjęcie klawiatury przy drzwiach', lines: ['Na klawiszach 1, 4, 7 i 9 starta farba.'] }),
       () => ({ title: 'Zdjęcie z jubileuszu lokalu', lines: ['Rok temu: cała piątka podejrzanych wśród gości.', 'Wszyscy uśmiechnięci, z kieliszkami w dłoniach.'] }),
       () => ({ title: 'Kamera sklepu naprzeciwko', lines: ['Kamera jest atrapą i nic nie nagrywa.'] }),
@@ -1098,7 +1127,7 @@ function generate(rng, opts) {
   const MOTIVES = [
     (s) => `„${s.first} od miesięcy ${g(s, 'narzekał', 'narzekała')} na brak pieniędzy.”`,
     (s) => `„W zeszłym tygodniu ${s.first} ${g(s, 'pokłócił', 'pokłóciła')} się ${scene.ownerIns} o pieniądze.”`,
-    (s) => `„${s.first} ${g(s, 'pytał', 'pytała')} mnie niedawno, ile jest wart najcenniejszy eksponat.”`,
+    (s) => `„${s.first} ${g(s, 'pytał', 'pytała')} mnie niedawno, ile można dostać za najcenniejsze rzeczy ${scene.inLoc}.”`,
     (s) => `„${s.first} ${g(s, 'kupił', 'kupiła')} ostatnio nowy samochód. Skąd ${g(s, 'miał', 'miała')} na to pieniądze?”`,
     (s) => `„${s.first} ${g(s, 'wiedział', 'wiedziała')}, że alarm ma tylko czujnik drzwi, bez kamer.”`,
   ];
@@ -1171,7 +1200,14 @@ function generate(rng, opts) {
     if (types.has('cardowner')) return { label: `Zażądaj wykazu kart: ${card.title.replace(/^Właściciele kart wejściowych: /, '')}`, cost: 30 };
     if (types.has('sunset')) return { label: 'Sprawdź kalendarz astronomiczny', cost: 15 };
     if (types.has('legend')) return { label: 'Poproś o objaśnienia znaków w rozkładach', cost: 15 };
-    if (card.title === 'Monitoring miejski') return { label: `Zabezpiecz nagranie: ${card.lines[0].charAt(0).toLowerCase()}${card.lines[0].slice(1)}`, cost: 60 };
+    if (card.title === 'Monitoring miejski') {
+      // Okno nagrania (45 min wokół zapisanej chwili): da się logicznie wybrać kamerę do sprawdzenia.
+      const m = /(\d{1,2}):(\d{2})/.exec(card.lines[1] || '');
+      const t = m ? Number(m[1]) * 60 + Number(m[2]) : null;
+      const a = t === null ? null : round5(t - rng.int(5, 40));
+      const win = t === null ? '' : `, ${fmt(a)}–${fmt(a + 45)}`;
+      return { label: `Zabezpiecz nagranie: ${card.lines[0].charAt(0).toLowerCase()}${card.lines[0].slice(1)}${win}`, cost: 60 };
+    }
     const inner = card.title.replace(/„([^”]*)”/g, '»$1«');
     if (card.desk === 'R') return { label: `Zażądaj kopii dokumentu „${inner}”`, cost: 30 };
     return { label: `Przejrzyj dokument „${inner}”`, cost: 15 };
