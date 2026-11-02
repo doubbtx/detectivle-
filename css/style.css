@@ -1037,3 +1037,52 @@ button.chip { cursor: pointer; }
 .bd-axis span:first-child { transform: none; }
 .bd-axis span:last-child { transform: translateX(-100%); }
 .bd-tick { position: absolute; top: 0; bottom: 0; width: 1px; background: color-mix(in srgb, var(--ink) 14%, transparent); }
+
+/* ---------- Komputer: szerszy układ, karty bez dziur, czytelne znaczki przy alibi ---------- */
+/* Znaczki przy alibi: nawias z kodem w jednej linii, pozostałe dokumenty osoby w osobnej, podpisanej linii. */
+.alibi-ref { white-space: nowrap; }
+.sus-extra { margin-top: 0.25rem; font-size: var(--step--1); color: var(--ink-soft); display: flex; flex-wrap: wrap; gap: 0.2rem 0.6rem; align-items: baseline; }
+.sus-extra-label { font-weight: 600; }
+.sus-extra-item { color: var(--ink); }
+/* Linie dokumentów łamią się między fragmentami „ · ”, a nie w środku znaczenia. */
+.card-lines .ln-seg { display: inline-block; max-width: 100%; }
+/* Karty w kolumnach bez dziur: wiersze po 4 px, miejsce każdej karty liczy layoutLanes() w main.js. */
+.cards.lanes { grid-auto-rows: 4px; row-gap: 0; }
+/* Meldunek: wyraźniejszy odnośnik. */
+.intro-more summary { color: var(--ink); }
+/* Zasady w skrócie: na telefonie zawsze rozwinięte jak dawniej, na komputerze zwinięte (krótszy lewy panel). */
+.rules-short > summary { list-style: none; }
+.rules-short > summary::-webkit-details-marker { display: none; }
+@media (max-width: 59.99rem) { .rules-short > summary { pointer-events: none; } }
+/* Tablica: deklaracje podejrzanych czytelne w ciemnym motywie, dłuższa rola nie wjeżdża w pas. */
+.bd-fact.claim { color: var(--ink); }
+.bd-fact.claim .bd-note { color: var(--ink-soft); }
+.bd-who { min-width: 0; }
+.bd-role { overflow-wrap: anywhere; hyphens: auto; }
+@media (min-width: 40rem) { .filter-row [data-id="marked"] { margin-left: auto; } }
+@media (min-width: 60rem) {
+  /* Lewy panel bez własnego paska: przewija się ze stroną i przykleja dolną krawędzią, gdy jest wyższy niż okno. */
+  .col-left {
+    max-height: none;
+    overflow: visible;
+    padding-right: 0;
+    top: min(calc(env(safe-area-inset-top, 0px) + var(--head-h, 6rem) + 1rem), calc(100vh - var(--left-h, 0px) - 1rem));
+  }
+  .rules-short > summary { cursor: pointer; display: flex; align-items: center; gap: 0.4rem; }
+  .rules-short > summary::after { content: '▸'; color: var(--ink-soft); margin-top: 0.5rem; }
+  .rules-short[open] > summary::after { content: '▾'; }
+  .desk-label { color: var(--ink); border-bottom: 1px solid var(--rule); padding-bottom: 0.3rem; margin-bottom: 0.45rem; }
+  .bd-row { grid-template-columns: 5.5rem minmax(0, 1fr); }
+}
+/* Szeroki ekran: gra rośnie do 110rem (120rem od 150rem), lewy panel do 28rem, karty w 3 kolumnach. */
+@media (min-width: 90rem) {
+  .topbar-inner, .tabs-inner, .game { max-width: 110rem; }
+  .game, .game.view-plan { grid-template-columns: minmax(22rem, 28rem) minmax(0, 1fr); column-gap: 2rem; }
+  .game.view-plan .col-left { display: block; }
+  /* Zakładki stoją nad prawą kolumną, którą przełączają. */
+  .tabs-inner { padding-left: calc(max(16px, env(safe-area-inset-left, 0px)) + 30rem); }
+  .cards { grid-template-columns: repeat(auto-fill, minmax(min(100%, 23rem), 1fr)); }
+}
+@media (min-width: 150rem) {
+  .topbar-inner, .tabs-inner, .game { max-width: 120rem; }
+}

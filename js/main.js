@@ -49,6 +49,12 @@ const cardById = (id) => state.c.cards.find((k) => k.id === id);
 const caseKey = (ref) => (ref.type === 'daily' ? ref.date : `T-${ref.code}`);
 const isCaptain = () => state.mode === 'solo' || state.mode === 'live' || state.seat === 1;
 const isTeamLike = () => state.mode === 'team' || state.mode === 'live';
+/** Układ dwukolumnowy (komputer); ten sam próg co w CSS. */
+const isWide = () => window.matchMedia('(min-width: 60rem)').matches;
+/** „zostały 3 próby”, „została 1 próba”, „zostało 5 prób”. */
+const attemptsLeftText = (n) => (n === 1 ? 'została 1 próba' : n % 10 >= 2 && n % 10 <= 4 && (n % 100 < 10 || n % 100 >= 20) ? `zostały ${n} próby` : `zostało ${n} prób`);
+/** Rozwinięte sekcje (<details data-keep>) przeżywają przerysowanie widoku. */
+const keepOpen = {};
 
 let loadToken = 0;
 
@@ -648,11 +654,18 @@ function renderSuspects() {
       return `<button class="chip${own ? '' : ' chip-away'}" data-act="goto-card" data-id="${id}" title="${esc(k.title)}">${id}</button>`;
     };
     const inText = new Set();
-    const alibiHtml = esc(s.alibi).replace(/\b([DSMZR]\d+)\)/g, (m0, id) => {
+    // Kod karty w nawiasie zostaje w jednej linii z poprzedzającym słowem: „(bilet: D5).” nie łamie się w środku.
+    const alibiHtml = esc(s.alibi).replace(/(\S*\s)?\b([DSMZR]\d+)\)(\.?)/g, (m0, lead, id, dot) => {
       inText.add(id);
-      return `${chipFor(id)})`;
+      return `<span class="alibi-ref">${lead || ''}${chipFor(id)})${dot}</span>`;
     });
-    const chips = s.items.filter((id) => !inText.has(id)).map(chipFor).join(' ');
+    // Pozostałe dokumenty od tej osoby: osobna, podpisana linia (sam znaczek po alibi wyglądał jak błąd).
+    const extra = s.items.filter((id) => !inText.has(id)).sort((a, b) => a.localeCompare(b, 'pl', { numeric: true }));
+    const shortTitle = (t) => (/^\p{Lu}\p{Ll}/u.test(t) ? t[0].toLowerCase() + t.slice(1) : t);
+    const extraHtml = extra.length ? `<p class="sus-extra"><span class="sus-extra-label">${s.f ? 'Dostarczyła' : 'Dostarczył'} też:</span> ${extra.map((id) => {
+      const k = cardById(id);
+      return `<span class="sus-extra-item">${chipFor(id)} ${mine.includes(k.desk) ? esc(shortTitle(k.title)) : '<span class="muted">(u innego gracza)</span>'}</span>`;
+    }).join(' ')}</p>` : '';
     return `
     <li class="suspect mark-${mark || 'none'}">
       <span class="avatar avatar-pic" aria-hidden="true">${portrait(s.full) || esc(initials(s.full))}</span>
@@ -660,7 +673,7 @@ function renderSuspects() {
         <div class="suspect-head">
           <b>${esc(s.full)}</b> <span class="role">${esc(s.role)}</span>
         </div>
-        <p class="alibi">${alibiHtml} ${chips}</p>
+        <p class="alibi">${alibiHtml}</p>${extraHtml}
       </div>
       <div class="mark-toggle" role="group" aria-label="Twoja ocena: ${esc(s.full)}">
         <button class="mk${mark === 'ok' ? ' on' : ''}" data-act="mark-sus" data-id="${s.id}" data-v="ok" aria-pressed="${mark === 'ok'}">alibi potwierdzone</button>
@@ -688,23 +701,43 @@ function renderAkta() {
         <div class="w-line" aria-hidden="true"></div>
         <div><span class="w-label">zamknięcie</span><span class="w-time">${fmt(c.window.to)}</span></div>
       </div>
-      <p class="w-note">${(c.intro.match(/o (\d{1,2}:\d{2}) i zamkn/) || [])[1] ? `${(c.intro.match(/o (\d{1,2}:\d{2}) i zamkn/))[1]} właściciel zamknął · ` : ''}sprawca w środku przez całe ${c.window.to - c.window.from} min</p>
-      <details class="intro-more"><summary>Czytaj meldunek</summary><p class="intro">${esc(c.intro)}</p></details>
+      <p class="w-note">${(() => {
+        // Godzina wyjścia właściciela z meldunku, z rodzajem zgodnym z osobą („właścicielka wyszła”).
+        const m = c.intro.match(/(wyszedł|wyszła) o (\d{1,2}:\d{2})/);
+        if (!m) return '';
+        const role = c.owner?.role || (m[1] === 'wyszła' ? 'właścicielka' : 'właściciel');
+        return `${m[2]} ${esc(role)} ${m[1]} · `;
+      })()}sprawca w środku przez całe ${c.window.to - c.window.from} min</p>
+      <details class="intro-more" data-keep="intro"${keepOpen.intro ? ' open' : ''}><summary>Czytaj meldunek</summary><p class="intro">${esc(c.intro)}</p></details>
       ${(() => { const used = usedMin(); const bud = budgetMin(); const pct = Math.min(100, Math.round((used / Math.max(1, bud)) * 100)); return `<div class="budget${used > bud ? ' over' : used >= bud * 0.8 ? ' warn' : ''}" title="${state.mode === 'team' ? 'W ekipie każdy ma własny budżet, a nadgodziny są tylko informacją.' : `Każde rozpoczęte pół godziny ponad budżet to +${fmtPenalty(OVERTIME_PENALTY)} do czasu.`}"><span class="budget-label">${icon('clock')} Śledztwo <b>${fmtHM(used)} / ${fmtHM(bud)} h</b></span><span class="budget-bar"><span style="width:${pct}%"></span></span><span class="budget-note">${state.mode === 'team' ? 'koperty kosztują czas' : `ponad budżet: +${fmtPenalty(OVERTIME_PENALTY)} za każde 30 min`}</span></div>`; })()}
       ${c.innocentLie ? '<details class="lie-stamp"><summary>Kłamią 2 osoby</summary><p>Jeden fałszywy dowód podrzucił sprawca. Drugi to kłamstwo niewinnej osoby, która ukrywała coś niezwiązanego z kradzieżą. Kłamca ma poza nim inne, potwierdzone alibi.</p></details>' : ''}
     </div>
     <h3 class="sec-label">Podejrzani i ich alibi</h3>
     <ul class="suspects">${renderSuspects()}</ul>
     ${team ? `<p class="muted small">Szare kody to karty z biurek innych graczy. Kliknij kod, żeby sprawdzić, kto ma tę kartę.</p>` : ''}
-    <section class="rules-short" aria-label="Zasady w skrócie">
-      <h3 class="sec-label">Zasady w skrócie</h3>
+    <details class="rules-short" data-keep="rules"${keepOpen.rules || !isWide() ? ' open' : ''}>
+      <summary><h3 class="sec-label">Zasady w skrócie</h3></summary>
       <ul>${rulesShortFor(c).map(([ic, r]) => `<li><span class="rs-ico">${icon(ic)}</span><span>${esc(r)}</span></li>`).join('')}</ul>
-      <details class="rules">
+      <details class="rules" data-keep="rules-full"${keepOpen['rules-full'] ? ' open' : ''}>
         <summary>Pełne zasady</summary>
         <ol>${rulesFor(c).map((r) => `<li>${esc(r)}</li>`).join('')}</ol>
       </details>
-    </section>
+    </details>
   </section>`;
+}
+
+/**
+ * Jedna linia dokumentu: łamie się tylko między fragmentami rozdzielonymi „ · ”, a liczba nie odrywa się od jednostki
+ * („27,00 zł”, „60 min”) ani jednoliterowy wyraz od następnego. W wąskiej karcie nie ma już „27,00 / zł”.
+ */
+function lineHtml(l) {
+  const glue = (t) => t
+    .replace(/(\d)–(\d)/g, '$1\u2060–\u2060$2')
+    .replace(/(\d) (zł|gr|min|h|km|m|PLN)(?![\p{L}\d])/gu, '$1\u00a0$2')
+    .replace(/(^|\s)([wzioauWZIOAU]) /g, '$1$2\u00a0');
+  const parts = esc(l).split(' · ');
+  if (parts.length < 2) return glue(parts[0]);
+  return parts.map((x, i) => `<span class="ln-seg">${glue(x)}${i < parts.length - 1 ? '\u00a0·' : ''}</span>`).join(' ');
 }
 
 function renderCard(k, opts = {}) {
@@ -753,7 +786,7 @@ function renderCard(k, opts = {}) {
     ${by ? `<p class="stamp" title="${by.f ? 'Dostarczyła' : 'Dostarczył'}: ${esc(by.full)}">${portrait(by.full, 'portrait portrait-stamp')}<span class="sr-only">${by.f ? 'Dostarczyła' : 'Dostarczył'}: </span>${esc(by.full)}</p>` : ''}
     ${look === 'witness' ? `<div class="card-lines wit-bubble">${k.lines.map((l) => `<p>${esc(l)}</p>`).join('')}</div>` : visual}
     ${look === 'witness' ? '' : (() => {
-      const linesHtml = `<div class="card-lines">${k.lines.map((l) => `<p>${esc(l).replace(/(\d)–(\d)/g, '$1\u2060–\u2060$2')}</p>`).join('')}</div>`;
+      const linesHtml = `<div class="card-lines">${k.lines.map((l) => `<p>${lineHtml(l)}</p>`).join('')}</div>`;
       // Bilet: same linie karty na kartoniku z perforacją (bez powtarzania danych w osobnym obrazku).
       return look === 'ticket' ? `<div class="tk-wrap"><span class="tk-ico">${(k.facts || []).some((f) => f.kind === 'parking') ? '<b>P</b>' : icon(cardIcon(k))}</span>${linesHtml}</div>` : linesHtml;
     })()}
@@ -891,7 +924,7 @@ function renderTopbar() {
       <div class="tb-actions">
         ${state.mode === 'team' && !isCaptain() ? '' : `<button class="btn btn-small" data-act="open-hints" aria-label="Podpowiedź, użyto ${progress.hints} z 3"><span class="tb-long">Podpowiedź</span><span class="tb-short" aria-hidden="true">?</span> <span class="pill">${progress.hints}/3</span></button>`}
         ${isCaptain()
-          ? `<button class="btn btn-small btn-primary" data-act="open-accuse">Raport <span class="pill">${left}</span></button>`
+          ? `<button class="btn btn-small btn-primary" data-act="open-accuse" aria-label="Raport, ${attemptsLeftText(left)}" title="Raport: ${attemptsLeftText(left)}">Raport <span class="pill">${left}</span></button>`
           : `<button class="btn btn-small" data-act="open-end">Koniec</button>`}
       </div>
     </div>
@@ -956,9 +989,10 @@ function renderEvidence() {
     const cards = own.filter((k) => k.desk === d);
     const open = cards.filter((k) => !isSealed(k));
     const sealed = cards.filter((k) => isSealed(k));
-    return `<h3 class="sec-label desk-label">${icon(cardIcon(cards[0] || {}))} ${esc(deskName(d))} <span class="muted small">${cards.length}</span></h3>
+    // Gdy w kategorii są same koperty, drugi nagłówek „Koperty do zlecenia” tylko by dublował pierwszy.
+    return `<h3 class="sec-label desk-label">${icon(cardIcon(cards[0] || {}))} ${esc(deskName(d))} <span class="muted small">${cards.length}${!open.length && sealed.length ? ' · wszystkie w kopertach' : ''}</span></h3>
       ${open.length ? `<div class="cards">${open.map((k) => renderCard(k)).join('')}</div>` : ''}
-      ${sealed.length ? `<p class="env-label">${icon('lock')} Koperty do zlecenia · ${sealed.length}</p><div class="env-grid">${sealed.map((k) => renderCard(k)).join('')}</div>` : ''}`;
+      ${sealed.length ? `${open.length ? `<p class="env-label">${icon('lock')} Koperty do zlecenia · ${sealed.length}</p>` : ''}<div class="env-grid">${sealed.map((k) => renderCard(k)).join('')}</div>` : ''}`;
   };
   const body = f === 'all' ? mine.map(deskBlock).join('') : f === 'marked'
     ? `<div class="cards">${marked.map((k) => renderCard(k)).join('') || '<p class="muted">Nic jeszcze nie oznaczono. Użyj „☆ Ważna” na karcie.</p>'}</div>`
@@ -1597,6 +1631,62 @@ function findByKey(key) {
   return [...app.querySelectorAll(`[data-act="${act}"]`)].find((el) => (el.dataset.id || el.dataset.place || '') === id && (el.dataset.tab || '') === tab && (el.dataset.n || '') === n && (el.dataset.mode || '') === mode && (el.dataset.v || '') === v) || null;
 }
 
+// ---------------------------------------------------------------------------
+// Układ na komputerze: karty w kolumnach bez dziur i lewy panel bez własnego paska przewijania
+
+const LANE_ROW = 4; // px: wysokość jednego wiersza siatki w trybie kolumn
+let deskObserver = null;
+let deskFrame = 0;
+
+/**
+ * Karty idą kolejno do kolumn (1, 2, 3, 1, 2…), więc rzędy czyta się jak w DOM (D1 D2 D3 / D4 D5),
+ * a każda karta zajmuje tyle wierszy po 4 px, ile ma wysokości. Pod krótką kartą nie zostaje dziura.
+ * Przy jednej kolumnie (telefon) siatka zostaje zwykła.
+ */
+function layoutLanes(grid) {
+  const kids = [...grid.children];
+  const cols = getComputedStyle(grid).gridTemplateColumns.split(' ').filter((x) => x && x !== 'none').length;
+  if (cols < 2 || kids.length < 2) {
+    if (grid.classList.contains('lanes')) {
+      grid.classList.remove('lanes');
+      kids.forEach((k) => { k.style.gridColumn = ''; k.style.gridRow = ''; });
+    }
+    return;
+  }
+  const gap = parseFloat(getComputedStyle(grid).columnGap) || 0;
+  const heights = kids.map((k) => k.getBoundingClientRect().height);
+  grid.classList.add('lanes');
+  const next = Array(cols).fill(1);
+  kids.forEach((k, i) => {
+    const col = i % cols;
+    const span = Math.max(1, Math.ceil((heights[i] + gap) / LANE_ROW));
+    k.style.gridColumn = String(col + 1);
+    k.style.gridRow = `${next[col]} / span ${span}`;
+    next[col] += span;
+  });
+}
+
+function layoutDesk() {
+  app.querySelectorAll('.cards').forEach(layoutLanes);
+  const left = app.querySelector('.col-left');
+  // Wysokość lewego panelu: dłuższy panel przykleja się dolną krawędzią (zob. .col-left w CSS).
+  document.documentElement.style.setProperty('--left-h', `${left ? left.offsetHeight : 0}px`);
+}
+
+function watchDesk() {
+  deskObserver?.disconnect();
+  layoutDesk();
+  if (typeof ResizeObserver === 'undefined') return;
+  const targets = [...app.querySelectorAll('.cards > *, .col-left')];
+  if (!targets.length) return;
+  // Zmiana szerokości okna, wczytanie czcionki albo obrazka zmienia wysokość kart: układamy ponownie.
+  deskObserver = new ResizeObserver(() => {
+    cancelAnimationFrame(deskFrame);
+    deskFrame = requestAnimationFrame(layoutDesk);
+  });
+  targets.forEach((el) => deskObserver.observe(el));
+}
+
 function render() {
   clearInterval(timerHandle);
   const active = document.activeElement;
@@ -1624,6 +1714,7 @@ function render() {
   document.body.classList.toggle('in-game', state.screen === 'game');
   const head = app.querySelector('.sticky-head');
   if (head) document.documentElement.style.setProperty('--head-h', `${head.offsetHeight}px`);
+  watchDesk();
   const tabsEl = app.querySelector('.tabs-inner');
   if (tabsEl) {
     if (tabsX !== null) tabsEl.scrollLeft = tabsX;
@@ -2000,6 +2091,12 @@ function routeFromHash(resume = false) {
   }
   return false;
 }
+
+// Zdarzenie toggle nie bąbelkuje, więc słuchamy w fazie przechwytywania.
+app.addEventListener('toggle', (e) => {
+  const key = e.target?.dataset?.keep;
+  if (key) keepOpen[key] = e.target.open;
+}, true);
 
 window.addEventListener('resize', () => {
   const head = app.querySelector('.sticky-head');
