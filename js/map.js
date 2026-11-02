@@ -126,10 +126,23 @@ function block(x, y, label) {
 function routePath(a, b) {
   const [ax, ay] = parseCell(a);
   const [bx, by] = parseCell(b);
-  const sy = by > ay ? Y(ay + 1) : Y(ay);
-  if (ay === by) return `M ${cx(ax)} ${cy(ay)} L ${cx(ax)} ${Y(ay + 1)} L ${cx(bx)} ${Y(ay + 1)} L ${cx(bx)} ${cy(by)}`;
+  // Ulica pozioma przy kwartale A w stronę B; wzdłuż rzeki ulicy nie ma, więc wtedy bierzemy drugą stronę kwartału.
+  let j = by < ay ? ay : ay + 1;
+  if (j === RIVER) j = j === ay + 1 ? ay : ay + 1;
+  const sy = Y(j);
   const sx = bx > ax ? X(bx) : X(bx + 1);
-  return `M ${cx(ax)} ${cy(ay)} L ${cx(ax)} ${sy} L ${sx} ${sy} L ${sx} ${cy(by)} L ${cx(bx)} ${cy(by)}`;
+  const pts = ay === by
+    ? [[cx(ax), cy(ay)], [cx(ax), sy], [cx(bx), sy], [cx(bx), cy(by)]]
+    : [[cx(ax), cy(ay)], [cx(ax), sy], [sx, sy], [sx, cy(by)], [cx(bx), cy(by)]];
+  // Etykieta na środku najdłuższego odcinka trasy.
+  let best = 0;
+  for (let k = 1; k < pts.length; k++) {
+    const len = Math.abs(pts[k][0] - pts[k - 1][0]) + Math.abs(pts[k][1] - pts[k - 1][1]);
+    const bl = Math.abs(pts[best + 1][0] - pts[best][0]) + Math.abs(pts[best + 1][1] - pts[best][1]);
+    if (len > bl) best = k - 1;
+  }
+  const mid = [(pts[best][0] + pts[best + 1][0]) / 2, (pts[best][1] + pts[best + 1][1]) / 2];
+  return { d: `M ${pts.map((p) => p.join(' ')).join(' L ')}`, mid };
 }
 
 /**
@@ -189,14 +202,21 @@ export function renderTownSvg({ places, scene, sceneLabel = 'Miejsce kradzieży'
   if (selected.length === 2 && cellOf(selected[0]) && cellOf(selected[1])) {
     const a = cellOf(selected[0]);
     const b = cellOf(selected[1]);
-    p.push(`<path class="m-route-casing" d="${routePath(a, b)}"/><path class="m-route" d="${routePath(a, b)}"/>`);
+    const route = routePath(a, b);
+    p.push(`<path class="m-route-casing" d="${route.d}"/><path class="m-route" d="${route.d}"/>`);
     const n = cellsApart(a, b);
-    const [bx, by] = parseCell(b);
-    const tx = Math.min(Math.max(cx(bx), PAD + 70), W - PAD - 70);
-    const ty = by > 1 ? cy(by) - 44 : cy(by) + 44;
-    p.push(`<g class="m-route-tag"><rect x="${tx - 70}" y="${ty - 13}" width="140" height="24" rx="12"/><text x="${tx}" y="${ty + 4}" text-anchor="middle">${blocksText(n)} · ${n * MIN_PER_CELL} min</text></g>`);
+    // Etykieta na zakręcie trasy (z dala od pinezek na jej końcach)
+    const tx = Math.min(Math.max(route.mid[0], PAD + 74), W - PAD - 74);
+    const ty = Math.min(Math.max(route.mid[1], PAD + 16), H - PAD - 16);
+    p.push(`<g class="m-route-tag"><rect x="${tx - 72}" y="${ty - 13}" width="144" height="26" rx="13"/><text x="${tx}" y="${ty + 4}" text-anchor="middle">${blocksText(n)} · ${n * MIN_PER_CELL} min</text></g>`);
   }
 
+  // Podpis miejsca kradzieży pod pinezkami miejsc (żeby ich nie zasłaniał); krótka nazwa z cudzysłowu.
+  const sceneShort = (sceneLabel.match(/„[^”]+”/) || [sceneLabel.replace(/ Regionalne$/, '')])[0];
+  if (scene && SCENE_CELLS[scene]) {
+    const [x, y] = parseCell(SCENE_CELLS[scene]);
+    p.push(`<circle class="t-scene-halo" cx="${cx(x)}" cy="${cy(y) - 17}" r="24"/><text class="t-scene-label" x="${cx(x)}" y="${cy(y) + 21}" text-anchor="middle">${esc(sceneShort)}</text>`);
+  }
   // Miejsca: najpierw przygaszone, potem te ze sprawy (na wierzchu)
   const isOn = (k) => !active || active.has(k);
   const order = Object.keys(PLACE_CELLS).sort((a, b) => Number(isOn(a)) - Number(isOn(b)));
@@ -210,7 +230,7 @@ export function renderTownSvg({ places, scene, sceneLabel = 'Miejsce kradzieży'
     const head = on
       ? `<path class="t-pin" d="M ${mx} ${my + 6} C ${mx - 4} ${my}, ${mx - 13} ${my - 6}, ${mx - 13} ${my - 15} A 13 13 0 1 1 ${mx + 13} ${my - 15} C ${mx + 13} ${my - 6}, ${mx + 4} ${my}, ${mx} ${my + 6} Z"/>${markerInner(key, places[key], mx, my - 15, 15)}`
       : `<circle class="t-dot" cx="${mx}" cy="${my - 2}" r="9"/>${markerInner(key, places[key], mx, my - 2, 11)}`;
-    p.push(`<g class="t-place${on ? ' on' : ''}${sel ? ' sel' : ''}" data-act="map-pick" data-place="${key}" tabindex="0" role="button" aria-label="${esc(name)}, pole ${PLACE_CELLS[key]}">${head}<text class="t-label" x="${mx}" y="${my + 17}" text-anchor="middle">${esc(MAP_LABELS[key] || key)}</text></g>`);
+    p.push(`<g class="t-place${on ? ' on' : ''}${sel ? ' sel' : ''}" data-act="map-pick" data-place="${key}" tabindex="${on ? 0 : -1}" role="button" aria-pressed="${sel}" aria-label="${esc(name)}, pole ${PLACE_CELLS[key]}"><circle class="t-hit" cx="${mx}" cy="${my - 6}" r="19"/>${head}<text class="t-label" x="${mx}" y="${my + 18}" text-anchor="middle">${esc(MAP_LABELS[key] || key)}</text></g>`);
   }
   // Miejsce kradzieży
   if (scene && SCENE_CELLS[scene]) {
@@ -218,11 +238,11 @@ export function renderTownSvg({ places, scene, sceneLabel = 'Miejsce kradzieży'
     const mx = cx(x);
     const my = cy(y);
     const sel = selected.includes('scene');
-    p.push(`<g class="t-scene${sel ? ' sel' : ''}" data-act="map-pick" data-place="scene" tabindex="0" role="button" aria-label="${esc(sceneLabel)}, pole ${SCENE_CELLS[scene]}">`
-      + `<circle class="t-scene-halo" cx="${mx}" cy="${my - 17}" r="24"/>`
+    p.push(`<g class="t-scene${sel ? ' sel' : ''}" data-act="map-pick" data-place="scene" tabindex="0" role="button" aria-pressed="${sel}" aria-label="Miejsce kradzieży: ${esc(sceneLabel)}, pole ${SCENE_CELLS[scene]}">`
+      + `<circle class="t-hit" cx="${mx}" cy="${my - 14}" r="22"/>`
       + `<path d="M ${mx} ${my + 8} C ${mx - 5} ${my + 1}, ${mx - 16} ${my - 7}, ${mx - 16} ${my - 18} A 16 16 0 1 1 ${mx + 16} ${my - 18} C ${mx + 16} ${my - 7}, ${mx + 5} ${my + 1}, ${mx} ${my + 8} Z"/>`
       + icon('search', mx, my - 18, 17, 't-scene-ico')
-      + `<text class="t-scene-label" x="${mx}" y="${my + 21}" text-anchor="middle">${esc(sceneLabel)}</text></g>`);
+      + '</g>');
   }
   p.push('</svg>');
   return p.join('');

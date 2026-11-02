@@ -22,7 +22,7 @@ Część kart urzędowych (rozkłady, rejestry, nagrania z kamer, pogoda, godzin
 
 Każdy otwiera grę na swoim telefonie lub komputerze, klika **Graj z ekipą**, wybiera tę samą liczbę osób i **inny numer gracza**. Każdy widzi tylko swoje biurka, więc trzeba rozmawiać: na Discordzie, przez telefon albo przy stole. Karty można wklejać na czat przyciskiem „Kopiuj”. Oskarżenie składa gracz 1 (kapitan), a jego czas jest wynikiem ekipy.
 
-Biurka są podzielone tak, że fałszywka i karty potrzebne do jej obalenia nigdy nie leżą w całości u jednej osoby (co najmniej jedną z nich, np. czasy dotarcia, ma ktoś inny). Nikt nie rozwiąże sprawy sam.
+Biurka są podzielone tak, że fałszywka i karta, która ją obala (rozkład, rejestr, nagranie z kamery albo zeznanie z tej sprawy), zawsze trafiają do różnych osób. Plan miasta się nie liczy, bo jest co dzień ten sam. Nikt nie rozwiąże sprawy sam.
 
 Pomyłka przy wyborze liczby osób albo numeru? Na stronie głównej jest „Zmień ekipę lub numer”. Każde ustawienie ma osobny zapis postępu. Po przeładowaniu strony gra wraca prosto do rozpoczętej sprawy.
 

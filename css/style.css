@@ -715,7 +715,7 @@ button.chip { cursor: pointer; }
 .town .m-river-name { fill: color-mix(in srgb, #2f5d86 80%, var(--m-paper)); font: italic 600 11px var(--font-body); letter-spacing: 0.25em; }
 .town .m-rail { fill: none; stroke: color-mix(in srgb, var(--m-ink) 60%, var(--m-paper)); stroke-width: 2; }
 .town .m-rail-ties { fill: none; stroke: color-mix(in srgb, var(--m-ink) 60%, var(--m-paper)); stroke-width: 7; stroke-dasharray: 1.5 6; }
-.town .m-street-name { fill: color-mix(in srgb, var(--m-ink) 70%, var(--m-paper)); font: 500 7.5px var(--font-body); letter-spacing: 0.04em; }
+.town .m-street-name { fill: color-mix(in srgb, var(--m-ink) 70%, var(--m-paper)); font: 500 8px var(--font-body); letter-spacing: 0.04em; }
 .town .m-street-name.main { font-weight: 700; font-size: 8.5px; }
 .town .m-index { fill: var(--m-ink-soft); font: 700 12px var(--font-display); }
 .town .m-frame { fill: none; stroke: color-mix(in srgb, var(--m-ink) 50%, var(--m-paper)); stroke-width: 1.2; }
@@ -723,14 +723,14 @@ button.chip { cursor: pointer; }
 .town .t-dot { fill: color-mix(in srgb, #fffdf6 80%, var(--m-paper)); stroke: color-mix(in srgb, var(--m-ink) 45%, var(--m-paper)); stroke-width: 1; }
 .town .t-place:not(.on) .t-ico { color: color-mix(in srgb, var(--m-ink) 55%, var(--m-paper)); }
 .town .t-place:not(.on) .t-glyph { fill: color-mix(in srgb, var(--m-ink) 55%, var(--m-paper)); font-size: 10px; }
-.town .t-place:not(.on) .t-label { fill: color-mix(in srgb, var(--m-ink) 60%, var(--m-paper)); font-weight: 500; font-size: 8.5px; }
+.town .t-place:not(.on) .t-label { fill: color-mix(in srgb, var(--m-ink) 60%, var(--m-paper)); font-weight: 500; font-size: 9px; }
 .town .t-pin { fill: var(--m-ink); stroke: color-mix(in srgb, #fffdf6 85%, var(--m-paper)); stroke-width: 1.5; }
 .town .t-place.on .t-ico { color: #fffdf6; }
 .town .t-glyph { fill: #fffdf6; font: 700 13px var(--font-display); }
-.town .t-label { fill: var(--m-ink); font: 700 9.5px var(--font-body); paint-order: stroke; stroke: color-mix(in srgb, #fffdf6 85%, var(--m-paper)); stroke-width: 3px; stroke-linejoin: round; }
+.town .t-label { fill: var(--m-ink); font: 700 10.5px var(--font-body); paint-order: stroke; stroke: color-mix(in srgb, #fffdf6 85%, var(--m-paper)); stroke-width: 3px; stroke-linejoin: round; }
 .town .t-place.sel .t-pin, .town .t-place.sel .t-dot { fill: var(--m-olive); stroke: #fffdf6; }
 .town .t-place.sel .t-ico { color: var(--m-on-olive); }
-.town .t-place:focus { outline: none; }
+.town .t-place:focus, .town .t-scene:focus { outline: none; }
 .town .t-place:focus-visible .t-pin, .town .t-place:focus-visible .t-dot, .town .t-scene:focus-visible path { stroke: var(--focus); stroke-width: 3; }
 .town .t-scene { cursor: pointer; }
 .town .t-scene path { fill: var(--m-stamp); stroke: #fffdf6; stroke-width: 1.8; }
@@ -752,3 +752,6 @@ button.chip { cursor: pointer; }
 .plan-info p { margin: 0.2rem 0; }
 .plan-place { font-size: var(--step-1); }
 .ico { width: 1em; height: 1em; vertical-align: -0.15em; }
+.town .t-hit { fill: transparent; }
+.town .t-scene-label { pointer-events: none; }
+.plan .plan-info { margin: 0.5rem 0 0.6rem; }

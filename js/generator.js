@@ -71,7 +71,7 @@ function params(diff) {
     // Jak często kłamstwo wygląda na alibi (godzina w zasięgu); w pozostałych sprawach wypada tuż poza zasięgiem.
     lieAlibiChance: 0.7,
     // Pułapka fizyczna na zapieczętowanym nagraniu zamiast darmowego zeznania.
-    sealedTrapChance: diff >= 5 ? 0.75 : 0.5,
+    sealedTrapChance: diff >= 5 ? 0.85 : 0.75,
     // Zeznanie bez godziny („widziałam go przy Rynku”), które naprowadza na nagranie z kamery.
     tipChance: diff >= 3 ? 0.7 : 0.3,
     // Prawdziwy dowód bez alibi (godzina poza zasięgiem): liczenie kart z alibi nie wskazuje sprawcy.
@@ -706,7 +706,9 @@ function generate(rng, opts) {
       } else {
         const D = between(place, F.place);
         if (place === F.place || D < 10) continue;
-        t = rng.int(F.from - (D - 5), F.to + (D - 5));
+        // Przy bilecie kolejowym tylko przed odjazdem: „po odjeździe” zdradzałaby sama zasada o wyjeździe, bez liczenia.
+        const train = forgedEvs.some((e) => e.place === AWAY);
+        t = rng.int(F.from - (D - 5), train ? F.from - 3 : F.to + (D - 5));
       }
       if (!(t <= W1 - d - 3 || t >= W2 + d + 3)) continue;
       if (t < 17 * 60 || t > 23 * 60 + 30) continue;
@@ -725,7 +727,7 @@ function generate(rng, opts) {
         });
       } else {
         addCard({
-          desk: 'Z', kind: 'official', title: 'Monitoring miejski',
+          desk: 'R', kind: 'official', title: 'Monitoring miejski',
           lines: [`Kamera nr ${rng.int(2, 19)} · ${PLACES[place].name}`, `Nagranie z godz. ${fmt(t)}`, `Wyraźnie widać: ${s.full} ${rng.pick(CCTV_DETAILS)}.`],
           facts: [{ t: 'seen', who: s.id, place, from: t, to: t }],
         });
@@ -765,7 +767,7 @@ function generate(rng, opts) {
       const place = takePlace((p) => p.cctv);
       const t = mode === 'clear' ? timeIn(place) : trapTime(place).t;
       addCard({
-        desk: 'Z', kind: 'official', title: 'Monitoring miejski',
+        desk: 'R', kind: 'official', title: 'Monitoring miejski',
         lines: [
           `Kamera nr ${rng.int(2, 19)} · ${PLACES[place].name}`,
           `Nagranie z godz. ${fmt(t)}`,
@@ -830,7 +832,7 @@ function generate(rng, opts) {
     for (const k of [jointKind, jointKind2]) kinds.splice(kinds.indexOf(k), 1);
   } else if (mode === 'cross') {
     const pair = rng.sample(JOINT_KINDS.filter((k) => kinds.includes(k)), 2);
-    const FW = { receipt: 1.35, photo: 1.05, cinema: 0.55 };
+    const FW = { receipt: 1.2, photo: 1.7, cinema: 0.6 };
     const forgedFirst = rng.chance(FW[pair[0]] / (FW[pair[0]] + FW[pair[1]]));
     [crossKind, jointKind] = forgedFirst ? pair : [pair[1], pair[0]];
     for (const k of pair) kinds.splice(kinds.indexOf(k), 1);
@@ -869,7 +871,7 @@ function generate(rng, opts) {
     // Fałszywka „fizyczna”: rodzaj losujemy z wagami, bo niektóre rodzaje częściej przechodzą kontrolę
     // jakości. Dzięki temu żaden rodzaj dowodu nie jest „zawsze prawdziwy” ani „zwykle fałszywy”.
     if (mode === 'self') {
-      const W = { receipt: 3.4, photo: 2.6, train: 1.15, parking: 2.4, bus: 1.4, delivery: 0.9, cinema: 1.0 };
+      const W = { receipt: 3.2, photo: 3.8, train: 1.45, parking: 2.3, bus: 1.3, delivery: 0.9, cinema: 0.7 };
       const avail = kinds.slice(kp);
       let x = rng.next() * avail.reduce((sum, k) => sum + (W[k] || 1), 0);
       const pick = avail.find((k) => (x -= W[k] || 1) < 0) || avail[avail.length - 1];
@@ -1183,7 +1185,7 @@ function generate(rng, opts) {
       () => ({ title: `Zeznanie: ${owner.full}`, sub: scene.ownerRole, lines: [`„${g(owner, 'Wyszedłem', 'Wyszłam')} o ${fmt(closeT)}, ${g(owner, 'zamknąłem', 'zamknęłam')} drzwi i ${g(owner, 'uzbroiłem', 'uzbroiłam')} alarm. Rano ${g(owner, 'zauważyłem', 'zauważyłam')} kradzież.”`] }),
     ],
     M: [
-      () => ({ title: 'Plan miasta: objaśnienia', lines: ['Rzeka dzieli miasto na dwie części, ale mostów i kładek jest kilkanaście.', 'Czasy dotarcia na kartach już to uwzględniają.'] }),
+      () => ({ title: 'Plan miasta: objaśnienia', lines: ['Rzeka Borówka dzieli miasto na dwie części.', 'Most prowadzi przez nią na każdej ulicy, więc czasu dotarcia to nie wydłuża.'] }),
       () => ({ title: 'Komunikat drogowy', lines: ['Remont chodnika przy ul. Szpitalnej.', 'Ruch pieszy bez utrudnień.'] }),
       () => ({ title: 'Mapa ścieżek rowerowych', lines: ['Ścieżka wzdłuż rzeki: od bulwaru do stadionu.', 'Wieczorem ścieżka nie jest oświetlona.'] }),
     ],
@@ -1192,10 +1194,10 @@ function generate(rng, opts) {
       () => ({ title: 'Zdjęcie z oględzin', lines: ['Na wycieraczce ślady piasku z budowy obok.', 'Nie da się ustalić rozmiaru buta.'] }),
       () => ({ title: 'Zdjęcie klawiatury przy drzwiach', lines: ['Na klawiszach 1, 4, 7 i 9 starta farba.'] }),
       () => ({ title: 'Zdjęcie z jubileuszu lokalu', lines: ['Rok temu: cała piątka podejrzanych wśród gości.', 'Wszyscy uśmiechnięci, z kieliszkami w dłoniach.'] }),
-      () => ({ title: 'Kamera sklepu naprzeciwko', lines: ['Kamera jest atrapą i nic nie nagrywa.'] }),
-      () => ({ title: 'Monitoring miejski', lines: [`Kamera nr ${rng.int(2, 19)} · ${rng.pick(['Rynek', 'Plac Wolności', 'Dworzec kolejowy'])}`, `Nagranie z godz. ${fmt(rng.int(19 * 60, 21 * 60 + 30))}`, 'Widać parę z psem.'] }),
     ],
     R: [
+      () => ({ title: 'Kamera sklepu naprzeciwko', lines: ['Kamera jest atrapą i nic nie nagrywa.'] }),
+      () => ({ title: 'Monitoring miejski', lines: [`Kamera nr ${rng.int(2, 19)} · ${rng.pick(['Rynek', 'Plac Wolności', 'Dworzec kolejowy'])}`, `Nagranie z godz. ${fmt(rng.int(19 * 60, 21 * 60 + 30))}`, 'Widać parę z psem.'] }),
       () => ({ title: 'Rejestr systemu alarmowego', lines: [`${fmt(closeT)} uzbrojony przez ${g(owner, 'właściciela', 'właścicielkę')}`, `${fmt(W1)} rozbrojony kodem`, `${fmt(W2)} uzbrojony kodem`] }),
       () => ({ title: 'Rejestr zgłoszeń straży miejskiej', lines: [`${fmt(rng.int(19 * 60, 20 * 60))} głośna muzyka, Osiedle Leśne`, `${fmt(rng.int(20 * 60, 21 * 60 + 30))} pies bez smyczy, Park Zdrojowy`] }),
       () => {

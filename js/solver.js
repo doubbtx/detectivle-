@@ -396,38 +396,52 @@ export function solveCase(c) {
     for (const pid of people) {
       for (const e of f.events) for (const o of trueEvents(pid, falseCards)) if (conflict(e, o)) proofSets.add(o.refs.join('+'));
     }
+    // Zbieramy wszystkie sprzeczności i wybieramy tę, której udowodnienie wymaga najmniej kart:
+    // nakładanie się w czasie albo wyjazd pociągiem nie potrzebują planu miasta.
+    const options = [];
     for (const pid of people) {
-      const person = suspects.get(pid);
-      const gp = (m, fm) => (person.f ? fm : m);
       for (const e of f.events) {
         for (const o of trueEvents(pid, falseCards)) {
           if (!conflict(e, o)) continue;
-          const when = (x) => (x.from === x.to ? `o ${fmt(x.from)}` : `od ${fmt(x.from)} do ${fmt(x.to)}`);
-          const oRefs = o.refs.filter(Boolean);
-          let reason;
-          const travelRefs = [];
-          if (e.place === AWAY) {
-            reason = `według dowodu [${f.card}] ${person.full} ${gp('wyjechał', 'wyjechała')} pociągiem o ${fmt(e.from - 1)}, a karta ${oRefs.map((r) => `[${r}]`).join(' i ')} pokazuje tę osobę ${placeLoc(o.place)} ${when(o)}, kiedy już nie ${gp('powinien', 'powinna')} być w mieście`;
-          } else {
-            const ta = travel.get(e.place);
-            const tb = travel.get(o.place);
-            if (ta) travelRefs.push(ta.ref);
-            if (tb && tb.ref !== ta?.ref) travelRefs.push(tb.ref);
-            const D = ta && tb ? between(e.place, o.place) : null;
-            const how = grid
-              ? `${blocksText(cellsApart(ta.cell, tb.cell))} na planie miasta (${ta.cell} → ${tb.cell}), czyli ${D} min drogi [${[...new Set(travelRefs)].join(', ')}]`
-              : `co najmniej ${D} min drogi (czasy dotarcia ${ta?.min} i ${tb?.min} min [${[...new Set(travelRefs)].join(', ')}])`;
-            reason = `według karty ${oRefs.map((r) => `[${r}]`).join(' i ')} ${person.full} ${gp('był', 'była')} ${placeLoc(o.place)} ${when(o)}, a dowód [${f.card}] umieszcza tę osobę ${placeLoc(e.place)} ${when(e)}`
-              + (D !== null ? `; między tymi miejscami jest ${how}` : '');
-          }
-          explain.forged = {
-            card: f.card, kind: f.kind, reason, reasonCodes: [pid === f.who ? 'physical' : 'physical-other'],
-            refs: [f.card, ...oRefs, ...new Set(travelRefs)], proofRefs: oRefs, physical: true, about: pid, proofCount: proofSets.size,
-          };
-          return;
+          const overlap = e.place === AWAY || o.place === AWAY || (e.from <= o.to && o.from <= e.to);
+          options.push({ pid, e, o, overlap });
         }
       }
     }
+    if (!options.length) return;
+    options.sort((a, b) => Number(b.overlap) - Number(a.overlap));
+    const { pid, e, o, overlap } = options[0];
+    const person = suspects.get(pid);
+    const gp = (m, fm) => (person.f ? fm : m);
+    const when = (x) => (x.from === x.to ? `o ${fmt(x.from)}` : `od ${fmt(x.from)} do ${fmt(x.to)}`);
+    const oRefs = o.refs.filter(Boolean);
+    // Karty potrzebne, żeby z dowodu odczytać pobyt (np. repertuar z długością filmu).
+    const ownRefs = f.kind === 'cinema' ? [...new Set((f.refs || []).filter((r) => r !== f.card))] : [];
+    let reason;
+    const travelRefs = [];
+    if (e.place === AWAY) {
+      reason = `według dowodu [${f.card}] ${person.full} ${gp('wyjechał', 'wyjechała')} pociągiem o ${fmt(e.from - 1)}, a karta ${oRefs.map((r) => `[${r}]`).join(' i ')} pokazuje tę osobę ${placeLoc(o.place)} ${when(o)}, kiedy już nie ${gp('powinien', 'powinna')} być w mieście`;
+    } else if (overlap) {
+      reason = `według karty ${oRefs.map((r) => `[${r}]`).join(' i ')} ${person.full} ${gp('był', 'była')} ${placeLoc(o.place)} ${when(o)}, a dowód [${f.card}] umieszcza tę osobę ${placeLoc(e.place)} ${when(e)}${ownRefs.length ? ` (${ownRefs.map((r) => `[${r}]`).join(', ')})` : ''}; nikt nie jest w dwóch miejscach naraz`;
+    } else {
+      const ta = travel.get(e.place);
+      const tb = travel.get(o.place);
+      if (ta) travelRefs.push(ta.ref);
+      if (tb && tb.ref !== ta?.ref) travelRefs.push(tb.ref);
+      const D = ta && tb ? between(e.place, o.place) : null;
+      let how = '';
+      if (D !== null) {
+        how = grid
+          ? `${blocksText(cellsApart(ta.cell, tb.cell))} na planie miasta (${ta.cell} → ${tb.cell}), czyli ${D} min drogi [${[...new Set(travelRefs)].join(', ')}]`
+          : `co najmniej ${D} min drogi (czasy dotarcia ${ta.min} i ${tb.min} min [${[...new Set(travelRefs)].join(', ')}])`;
+      }
+      reason = `według karty ${oRefs.map((r) => `[${r}]`).join(' i ')} ${person.full} ${gp('był', 'była')} ${placeLoc(o.place)} ${when(o)}, a dowód [${f.card}] umieszcza tę osobę ${placeLoc(e.place)} ${when(e)}`
+        + (how ? `; między tymi miejscami jest ${how}` : '');
+    }
+    explain.forged = {
+      card: f.card, kind: f.kind, reason, reasonCodes: [pid === f.who ? 'physical' : 'physical-other'],
+      refs: [...new Set([f.card, ...oRefs, ...ownRefs, ...travelRefs])], proofRefs: oRefs, physical: true, about: pid, proofCount: proofSets.size,
+    };
   }
 
   return {
@@ -481,6 +495,8 @@ export function qualityIssues(c, res = solveCase(c)) {
     if (!res.explain.forged.physical) issues.push('brak fizycznej sprzeczności obalającej fałszywkę');
     else if (res.explain.forged.proofCount !== 1) issues.push(`fałszywkę obala ${res.explain.forged.proofCount} różnych kart`);
     if (mode === 'cross' && res.explain.forged.about === c.solution.culprit) issues.push('alibi krzyżowe powinno obalać pobyt innej osoby');
+    // Od środy obalenie wymaga zestawienia co najmniej trzech kart (np. kamera + plan miasta), a nie jednej.
+    if (new Set(res.explain.forged.refs).size < 3) issues.push('fałszywkę obala jedna karta bez liczenia czasu');
   }
   // Prawdziwe karty nie mogą sobie przeczyć: świadek w lokalu tylko w godzinach otwarcia.
   const dtq = dayType(c.crimeDate.weekday);
@@ -507,7 +523,10 @@ export function qualityIssues(c, res = solveCase(c)) {
   // Współpraca: sfałszowana karta i karta, która ją obala, muszą być u różnych graczy.
   const deskOf = (id) => c.cards.find((k) => k.id === id)?.desk;
   const forgedDesk = deskOf(c.solution.forged);
-  const refDesks = res.explain.forged.refs.filter((r) => r !== c.solution.forged).map(deskOf);
+  // Plan miasta jest stały (można go znać na pamięć), więc liczą się tylko karty z tej sprawy.
+  const isMap = (id) => c.cards.find((k) => k.id === id)?.map;
+  const proofOnly = res.explain.forged.physical ? res.explain.forged.proofRefs : res.explain.forged.refs;
+  const refDesks = proofOnly.filter((r) => r !== c.solution.forged && !isMap(r)).map(deskOf);
   for (const size of [2, 3, 4, 5]) {
     const seatOf = (desk) => TEAM_DESKS[size].findIndex((ds) => ds.includes(desk));
     if (!refDesks.some((d) => seatOf(d) !== seatOf(forgedDesk))) issues.push(`przy ${size} graczach jedna osoba ma i fałszywkę, i jej obalenie`);

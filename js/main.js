@@ -70,6 +70,7 @@ function resetCaseUi() {
   state.showAll = false;
   state.tab = 'akta';
   state.mapSel = [];
+  state.mapScroll = null;
   state.modal = null;
   state.confirm = null;
 }
@@ -723,8 +724,8 @@ function renderPlan() {
       <h2>Plan Borowic</h2>
       <p class="muted small">1 przecznica = ${MIN_PER_CELL} min · pinezki: miejsca z akt (karta ${mc.id}) · lupa: miejsce kradzieży</p>
     </header>
+    <div class="plan-info">${info}${sel.length ? '<p><button class="link-btn" data-act="map-clear">Wyczyść wybór</button></p>' : ''}</div>
     <div class="town-wrap">${svg}</div>
-    <div class="plan-info" aria-live="polite">${info}${sel.length ? '<p><button class="link-btn" data-act="map-clear">Wyczyść wybór</button></p>' : ''}</div>
   </section>`;
 }
 
@@ -1332,13 +1333,13 @@ let modalOpener = null;
 function focusKeyOf(el) {
   if (!el || !el.dataset || !el.dataset.act) return null;
   const d = el.dataset;
-  return [d.act, d.id || '', d.tab || '', d.n || '', d.mode || '', d.v || ''].join('|');
+  return [d.act, d.id || d.place || '', d.tab || '', d.n || '', d.mode || '', d.v || ''].join('|');
 }
 
 function findByKey(key) {
   if (!key) return null;
   const [act, id, tab, n, mode, v] = key.split('|');
-  return [...app.querySelectorAll(`[data-act="${act}"]`)].find((el) => (el.dataset.id || '') === id && (el.dataset.tab || '') === tab && (el.dataset.n || '') === n && (el.dataset.mode || '') === mode && (el.dataset.v || '') === v) || null;
+  return [...app.querySelectorAll(`[data-act="${act}"]`)].find((el) => (el.dataset.id || el.dataset.place || '') === id && (el.dataset.tab || '') === tab && (el.dataset.n || '') === n && (el.dataset.mode || '') === mode && (el.dataset.v || '') === v) || null;
 }
 
 function render() {
@@ -1347,7 +1348,8 @@ function render() {
   const focusKey = app.contains(active) ? focusKeyOf(active) : null;
   const modalScroll = app.querySelector('.modal')?.scrollTop ?? 0;
   const mapWrap = app.querySelector('.town-wrap');
-  const mapScroll = mapWrap ? [mapWrap.scrollLeft, mapWrap.scrollTop] : null;
+  if (mapWrap) state.mapScroll = [mapWrap.scrollLeft, mapWrap.scrollTop];
+  const mapScroll = state.mapScroll || null;
   const caret = active && app.contains(active) && typeof active.selectionStart === 'number' ? [active.selectionStart, active.selectionEnd] : null;
   if (state.modal && !lastModal) modalOpener = focusKey;
   let html = '';

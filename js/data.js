@@ -221,9 +221,9 @@ export const PHOTO_POSES = [
 export const DESK_DEFS = [
   { id: 'D', name: 'Dokumenty', hint: 'bilety, paragony, akta' },
   { id: 'S', name: 'Świadkowie', hint: 'zeznania' },
-  { id: 'M', name: 'Mapa i rozkłady', hint: 'czasy dotarcia, rozkłady jazdy' },
-  { id: 'Z', name: 'Zdjęcia', hint: 'monitoring, zdjęcia, zrzuty ekranu' },
-  { id: 'R', name: 'Rejestry', hint: 'godziny otwarcia, pogoda, karty wejściowe' },
+  { id: 'M', name: 'Mapa i rozkłady', hint: 'plan miasta, rozkłady jazdy' },
+  { id: 'Z', name: 'Zdjęcia', hint: 'zdjęcia, zrzuty ekranu' },
+  { id: 'R', name: 'Rejestry', hint: 'nagrania z kamer, godziny otwarcia, pogoda, karty wejściowe' },
 ];
 
 /**
