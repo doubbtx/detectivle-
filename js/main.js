@@ -811,7 +811,8 @@ function renderPlan() {
 function renderBoardTab() {
   const c = state.c;
   const canSee = (k) => myDesks().includes(k.desk) && !isSealed(k);
-  return renderBoard({ c, pins: progress.pins || [], sel: state.boardSel || [], canSee, hasMap: hasMapTab(), sceneCell: SCENE_CELLS[sceneIdOf(c)], autoAll: c.difficulty <= 2 });
+  const noMapText = !hasTownMap(c) ? 'czasy dotarcia są na biurku „Mapa i rozkłady”' : 'zapytaj osobę z planem miasta';
+  return renderBoard({ c, pins: progress.pins || [], sel: state.boardSel || [], canSee, hasMap: hasMapTab(), sceneCell: SCENE_CELLS[sceneIdOf(c)], autoAll: c.difficulty <= 2, noMapText });
 }
 
 function renderNotes() {
@@ -837,7 +838,7 @@ function renderTopbar() {
   <div class="topbar">
     <div class="topbar-inner">
       <button class="btn btn-ghost btn-icon" data-act="leave" aria-label="Wyjdź do strony głównej">←</button>
-      <div class="tb-title"><b>${esc(label)}</b><span>${esc(who)} · śledztwo <span class="nw${usedMin() > budgetMin() ? ' over' : ''}">${fmtHM(usedMin())}/${fmtHM(budgetMin())} h</span></span></div>
+      <div class="tb-title"><b>${esc(label)}</b><span><span class="tb-mode">${esc(who)} · </span>${state.mode === 'live' && state.live?.status !== 'open' ? `<span class="tb-live">${state.live?.status === 'stopped' ? 'rozłączono' : 'łączenie…'} · </span>` : ''}<span class="tb-budget">śledztwo <span class="nw${usedMin() > budgetMin() ? ' over' : ''}">${fmtHM(usedMin())}/${fmtHM(budgetMin())} h</span></span></span></div>
       <div class="tb-clock" aria-live="off"><span id="clock">${fmtClock(elapsedSec())}</span>${totalPenalty() ? `<small>w tym +${fmtPenalty(totalPenalty())}</small>` : ''}</div>
       <div class="tb-actions">
         <button class="btn btn-small" data-act="open-hints" aria-label="Podpowiedź, użyto ${progress.hints} z 3"><span class="tb-long">Podpowiedź</span><span class="tb-short" aria-hidden="true">?</span> <span class="pill">${progress.hints}/3</span></button>

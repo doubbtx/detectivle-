@@ -53,8 +53,9 @@ const when = (f) => (f.to === null ? fmt(f.from) : f.from === f.to ? fmt(f.from)
  * @param {boolean} o.hasMap czy gracz ma plan miasta (w ekipie tylko osoba z biurkiem Mapa)
  * @param {string} o.sceneCell pole miejsca kradzieży
  * @param {boolean} o.autoAll wpisać wszystkie jawne fakty (pn–wt: zagadka i tak jest w tabelach urzędowych)
+ * @param {string} [o.noMapText] co napisać zamiast drogi, gdy gracz nie ma planu
  */
-export function renderBoard({ c, pins, sel, canSee, hasMap, sceneCell, autoAll = false }) {
+export function renderBoard({ c, pins, sel, canSee, hasMap, sceneCell, autoAll = false, noMapText = 'zapytaj osobę z planem miasta' }) {
   // Teczki osób: to, co każda osoba twierdzi (jej własne dowody), jest wpisane od razu.
   // Niezależne fakty (świadkowie, kamery, rejestry) gracz dopina sam, chyba że autoAll.
   const visible = c.cards.filter((k) => canSee(k) && isPinnable(k));
@@ -88,7 +89,7 @@ export function renderBoard({ c, pins, sel, canSee, hasMap, sceneCell, autoAll =
   // Zestawienie wybranych faktów: same liczby, bez werdyktu.
   const cellOf = (place) => (place === 'scene' ? sceneCell : PLACE_CELLS[place]);
   const route = (a, b) => {
-    if (!hasMap) return 'drogę policzy osoba z planem miasta';
+    if (!hasMap) return noMapText;
     if (a === b) return 'to samo miejsce';
     const n = cellsApart(cellOf(a), cellOf(b));
     return `droga ${blocksText(n)} = <b>${n * MIN_PER_CELL} min</b>`;
@@ -97,14 +98,14 @@ export function renderBoard({ c, pins, sel, canSee, hasMap, sceneCell, autoAll =
   if (chosen.length === 1) {
     const f = chosen[0];
     compare = `<p><span class="chip">${f.card}</span> ${esc(placeName(f.place))} <b>${when(f)}</b>${hasMap ? ` · pole ${cellOf(f.place)}` : ''}</p>
-      <p class="small">Do miejsca kradzieży: ${hasMap ? `${blocksText(cellsApart(cellOf(f.place), sceneCell))} = <b>${cellsApart(cellOf(f.place), sceneCell) * MIN_PER_CELL} min</b>` : 'zapytaj osobę z planem miasta'} · drzwi otwarte ${fmt(c.window.from)}–${fmt(c.window.to)}</p>`;
+      <p class="small">Do miejsca kradzieży: ${hasMap ? `${blocksText(cellsApart(cellOf(f.place), sceneCell))} = <b>${cellsApart(cellOf(f.place), sceneCell) * MIN_PER_CELL} min</b>` : noMapText} · drzwi otwarte ${fmt(c.window.from)}–${fmt(c.window.to)}</p>`;
   } else if (chosen.length === 2) {
     const [x, y] = [...chosen].sort((a, b) => a.from - b.from);
     const xEnd = x.to ?? x.from;
     const gap = y.from - xEnd;
-    const overlap = y.from <= xEnd && x.to !== null;
+    // Same liczby (odstęp może być ujemny, gdy drugi fakt wypada w trakcie pierwszego); wniosek należy do gracza.
     compare = `<p><span class="chip">${x.card}</span> ${esc(placeName(x.place))} <b>${when(x)}</b> → <span class="chip">${y.card}</span> ${esc(placeName(y.place))} <b>${when(y)}</b></p>
-      <p class="small">${overlap ? 'Te pobyty nakładają się w czasie.' : `Odstęp: <b>${gap} min</b>${x.to === null ? ` (od ${x.note}, ${fmt(x.from)})` : ''}`} · ${route(x.place, y.place)}</p>`;
+      <p class="small">Odstęp: <b>${gap} min</b>${x.to === null ? ` (od ${x.note}, ${fmt(x.from)})` : ''} · ${route(x.place, y.place)}</p>`;
   }
   return `
   <section class="board" aria-label="Tablica śledcza">
@@ -112,7 +113,7 @@ export function renderBoard({ c, pins, sel, canSee, hasMap, sceneCell, autoAll =
       <h2>${icon('footprints')} Tablica śledcza</h2>
       <p class="muted small">${autoAll ? 'Wszystkie jawne fakty są już wpisane.' : 'Teczki osób: to, co każdy twierdzi, jest już wpisane (jasne karteczki). Świadków, nagrania i rejestry dopinasz przyciskiem „Na tablicę” (żółte karteczki).'} Czerwony pas to czas, gdy drzwi były otwarte.</p>
     </header>
-    <div class="bd-compare" aria-live="polite">${compare}${sel.length ? '<p><button class="link-btn" data-act="board-clear">Wyczyść wybór</button></p>' : ''}</div>
+    <div class="bd-compare" aria-live="polite">${compare}<p class="bd-clear"${sel.length ? '' : ' style="visibility:hidden"'}><button class="link-btn" data-act="board-clear"${sel.length ? '' : ' tabindex="-1" aria-hidden="true"'}>Wyczyść wybór</button></p></div>
     ${facts.length ? `<div class="bd-grid">${axis}${rows}${looseRow}</div>` : '<p class="muted">Tablica jest pusta. Na kartach z godziną i miejscem (bilety, paragony, zeznania, nagrania, rejestry) jest przycisk „Na tablicę”.</p>'}
   </section>`;
 }

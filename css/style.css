@@ -931,3 +931,16 @@ button.chip { cursor: pointer; }
 .bd-dot.claim.on, .bd-bar.claim.on { background: var(--olive); }
 .bd-role { font-size: 0.68rem; color: var(--ink-soft); line-height: 1.1; }
 .bd-alibi { font-size: 0.8rem; color: var(--ink-soft); margin: 0 0 0.3rem; font-style: italic; }
+/* Poprawki z przeglądu: pasek górny i tablica na telefonie */
+.tb-live { color: var(--stamp); font-weight: 700; }
+@media (max-width: 40rem) {
+  .tb-title > span { white-space: normal; overflow: visible; }
+  .tb-mode { display: none; }
+  .tb-clock small { white-space: nowrap; right: 0; transform: translateY(1rem); }
+  .bd-compare { position: fixed; left: 0; right: 0; bottom: 0; top: auto; margin: 0; border-radius: 12px 12px 0 0; z-index: 30; max-height: 32vh; overflow: auto; padding: 0.5rem 1rem calc(0.5rem + env(safe-area-inset-bottom, 0px)); box-shadow: 0 -4px 14px rgba(41, 36, 79, 0.18); }
+  .board { padding-bottom: 9rem; }
+}
+.bd-compare { min-height: 4.9rem; }
+.bd-clear { margin: 0.1rem 0 0; }
+.bd-dot::before, .bd-bar::before { content: ''; position: absolute; inset: -6px; }
+@media (max-width: 40rem) { body:has(.bd-compare) .toast { bottom: 9.5rem; } }
