@@ -442,8 +442,22 @@ function playedLine(mode) {
 
 function renderHow() {
   return `
-  <details class="how" ${store.get('seenHow') ? '' : 'open'}>
-    <summary>Jak grać</summary>
+  <section class="how-pics" aria-label="Jak grać w skrócie">
+    <div class="how-pic">
+      <div class="hp-art hp-faces" aria-hidden="true">${['Halina Wrona', 'Bruno Kalinowski', 'Zofia Pawlak', 'Igor Malinowski', 'Lena Dąbrowska'].map((n) => portrait(n)).join('')}</div>
+      <p><b>Pięć osób znało kod.</b> Każda ma alibi.</p>
+    </div>
+    <div class="how-pic">
+      <div class="hp-art" aria-hidden="true"><span class="hp-ticket">${icon('ticket')}<b>?</b></span></div>
+      <p><b>Jeden dowód jest fałszywy.</b> Podrzucił go sprawca.</p>
+    </div>
+    <div class="how-pic">
+      <div class="hp-art" aria-hidden="true"><span class="hp-pair">${icon('cctv')}${icon('map')}${icon('clock')}</span></div>
+      <p><b>Znajdź kartę, która go obala,</b> i złóż raport.</p>
+    </div>
+  </section>
+  <details class="how">
+    <summary>Jak grać: szczegóły</summary>
     <ol class="how-list">
       <li>Pięcioro podejrzanych ma alibi. Jedno z nich jest fałszywe: sprawca dostarczył <b>dokładnie jeden sfałszowany dowód</b>.</li>
       <li>Dowody leżą na pięciu biurkach: Dokumenty, Świadkowie, Mapa i rozkłady, Zdjęcia, Rejestry. Żadne biurko samo nie wystarczy: do obalenia fałszywki zawsze potrzebna jest karta z innego biurka (rozkład, rejestr, kamera albo czasy dotarcia).</li>
@@ -625,15 +639,21 @@ function renderAkta() {
   <section class="akta" aria-label="Akta sprawy">
     <div class="akta-head">
       <h2 class="akta-title">${esc(c.title)}</h2>
-      <p class="intro">${esc(c.intro)}</p>
+      <div class="facts-row">
+        <span class="fchip">${icon('clock')}${esc(c.crimeDate.label.replace(/ \d{4}$/, ''))}</span>
+        <span class="fchip">${icon('map-pin')}${esc(c.scene.name)}${sceneIdOf(c) && SCENE_CELLS[sceneIdOf(c)] && hasTownMap(c) ? ` · ${SCENE_CELLS[sceneIdOf(c)]}` : ''}</span>
+        <span class="fchip">${icon('lock')}kod znało 5 osób</span>
+        ${c.stolen?.nom ? `<span class="fchip">${icon('search')}${esc(c.stolen.nom)}</span>` : ''}
+      </div>
       <div class="window" aria-label="Drzwi były otwarte od ${fmt(c.window.from)} do ${fmt(c.window.to)}">
         <div><span class="w-label">otwarcie</span><span class="w-time">${fmt(c.window.from)}</span></div>
         <div class="w-line" aria-hidden="true"></div>
         <div><span class="w-label">zamknięcie</span><span class="w-time">${fmt(c.window.to)}</span></div>
       </div>
-      <p class="w-note">Sprawca był w środku przez cały ten czas (${c.window.to - c.window.from} min).</p>
-      <p class="seal-note">Część kart urzędowych jest zapieczętowana. Zlecasz czynności śledcze, np. pobranie rozkładu albo zabezpieczenie nagrania. Masz <span class="nw">${fmtHM(budgetMin())} h</span> śledztwa. ${state.mode === 'team' ? 'W ekipie każdy ma własny budżet, a nadgodziny są tylko informacją.' : `${state.mode === 'live' ? 'Budżet jest wspólny dla całej ekipy. ' : ''}Każde rozpoczęte pół godziny nadgodzin to +${fmtPenalty(OVERTIME_PENALTY)} do czasu rozwiązania.`}</p>
-      ${c.innocentLie ? '<p class="lie-badge"><b>Uwaga: w tej sprawie kłamią dwie osoby.</b> Jeden fałszywy dowód podrzucił sprawca. Drugi to kłamstwo niewinnej osoby, która ukrywała coś niezwiązanego z kradzieżą. Kłamca ma poza nim inne, potwierdzone alibi.</p>' : ''}
+      <p class="w-note">${(c.intro.match(/o (\d{1,2}:\d{2}) i zamkn/) || [])[1] ? `${(c.intro.match(/o (\d{1,2}:\d{2}) i zamkn/))[1]} właściciel zamknął · ` : ''}sprawca w środku przez całe ${c.window.to - c.window.from} min</p>
+      <details class="intro-more"><summary>Czytaj meldunek</summary><p class="intro">${esc(c.intro)}</p></details>
+      ${(() => { const used = usedMin(); const bud = budgetMin(); const pct = Math.min(100, Math.round((used / Math.max(1, bud)) * 100)); return `<div class="budget${used > bud ? ' over' : used >= bud * 0.8 ? ' warn' : ''}" title="${state.mode === 'team' ? 'W ekipie każdy ma własny budżet, a nadgodziny są tylko informacją.' : `Każde rozpoczęte pół godziny ponad budżet to +${fmtPenalty(OVERTIME_PENALTY)} do czasu.`}"><span class="budget-label">${icon('clock')} Śledztwo <b>${fmtHM(used)} / ${fmtHM(bud)} h</b></span><span class="budget-bar"><span style="width:${pct}%"></span></span><span class="budget-note">${state.mode === 'team' ? 'koperty kosztują czas' : `ponad budżet: +${fmtPenalty(OVERTIME_PENALTY)} za każde 30 min`}</span></div>`; })()}
+      ${c.innocentLie ? '<details class="lie-stamp"><summary>Kłamią 2 osoby</summary><p>Jeden fałszywy dowód podrzucił sprawca. Drugi to kłamstwo niewinnej osoby, która ukrywała coś niezwiązanego z kradzieżą. Kłamca ma poza nim inne, potwierdzone alibi.</p></details>' : ''}
     </div>
     <h3 class="sec-label">Podejrzani i ich alibi</h3>
     <ul class="suspects">${renderSuspects()}</ul>
@@ -652,7 +672,14 @@ function renderAkta() {
 function renderCard(k, opts = {}) {
   const by = k.by ? suspectById(k.by) : null;
   const marked = progress?.marks?.[k.id];
-  const kindLabel = k.kind === 'witness' ? 'zeznanie' : k.kind === 'supplied' ? 'od podejrzanego' : 'urzędowe';
+  if (!opts.noActions && progress?.aside?.[k.id]) {
+    return `
+  <article class="card card-aside" id="card-${k.id}" data-card="${k.id}">
+    <button class="aside-row" data-act="aside-card" data-id="${k.id}" aria-label="Pokaż odłożoną kartę ${k.id}">
+      <span class="card-id">${k.id}</span><span class="card-ico">${icon(cardIcon(k))}</span><span class="aside-title">${esc(k.title)}</span><span class="aside-tag">odłożona · pokaż</span>
+    </button>
+  </article>`;
+  }
   const sealed = !opts.noActions && isSealed(k);
   if (sealed) {
     const after = usedMin() + k.action.cost;
@@ -667,10 +694,11 @@ function renderCard(k, opts = {}) {
         <h4><span class="card-ico">${icon(cardIcon(k))}</span>${esc(k.title)}</h4>
         ${k.sub ? `<p class="card-sub">${esc(k.sub)}</p>` : ''}
       </div>
-      <span class="card-kind">zapieczętowane</span>
+      <span class="env-cost" aria-label="koszt ${k.action.cost} min">−${fmtHM(k.action.cost)}</span>
     </header>
+    <span class="env-seal" aria-hidden="true">${icon('lock')}</span>
     ${/^(Przejrzyj dokument|Zażądaj kopii dokumentu) „/.test(k.action.label) ? '' : `<p class="seal-action">${esc(k.action.label)}</p>`}
-    <button class="btn btn-small${confirming ? ' btn-primary' : ''}" data-act="unlock" data-id="${k.id}">${confirming ? `Nadgodziny: +${fmtPenalty(extra)} do czasu rozwiązania. Zlecić?` : `Zleć · ${k.action.cost} min${overBudget ? ' (ponad budżet)' : ''}`}</button>
+    <button class="btn btn-small${confirming ? ' btn-primary' : ''}" data-act="unlock" data-id="${k.id}">${confirming ? `Nadgodziny: +${fmtPenalty(extra)} do czasu rozwiązania. Zlecić?` : `Otwórz kopertę${overBudget ? ' (ponad budżet)' : ''}`}</button>
   </article>`;
   }
   const look = cardLook(k);
@@ -683,15 +711,20 @@ function renderCard(k, opts = {}) {
         <h4>${look === 'witness' ? '' : `<span class="card-ico">${icon(cardIcon(k))}</span>`}${esc(k.title)}</h4>
         ${k.sub ? `<p class="card-sub">${esc(k.sub)}</p>` : ''}
       </div>
-      <span class="card-kind">${kindLabel}</span>
+      ${marked ? '<span class="card-star" aria-label="zaznaczona">★</span>' : ''}
     </header>
-    ${by ? `<p class="stamp">${portrait(by.full, 'portrait portrait-stamp')}${by.f ? 'Dostarczyła' : 'Dostarczył'}: ${esc(by.full)}</p>` : ''}
+    ${by ? `<p class="stamp" title="${by.f ? 'Dostarczyła' : 'Dostarczył'}: ${esc(by.full)}">${portrait(by.full, 'portrait portrait-stamp')}<span class="sr-only">${by.f ? 'Dostarczyła' : 'Dostarczył'}: </span>${esc(by.full)}</p>` : ''}
     ${look === 'witness' ? `<div class="wit-row">${visual}<div class="card-lines wit-bubble">${k.lines.map((l) => `<p>${esc(l)}</p>`).join('')}</div></div>` : visual}
-    ${look === 'witness' ? '' : `<div class="card-lines">${k.lines.map((l) => `<p>${esc(l).replace(/(\d)–(\d)/g, '$1\u2060–\u2060$2')}</p>`).join('')}</div>`}
+    ${look === 'witness' ? '' : (() => {
+      const linesHtml = `<div class="card-lines">${k.lines.map((l) => `<p>${esc(l).replace(/(\d)–(\d)/g, '$1\u2060–\u2060$2')}</p>`).join('')}</div>`;
+      // Bilet: same linie karty na kartoniku z perforacją (bez powtarzania danych w osobnym obrazku).
+      return look === 'ticket' ? `<div class="tk-wrap"><span class="tk-ico">${(k.facts || []).some((f) => f.kind === 'parking') ? '<b>P</b>' : icon(cardIcon(k))}</span>${linesHtml}</div>` : linesHtml;
+    })()}
     ${k.map && !opts.noActions && hasMapTab() ? `<p><button class="btn btn-small" data-act="tab" data-tab="plan">${icon('map')} Otwórz plan miasta</button></p>` : ''}
     ${opts.noActions ? '' : `
     <footer class="card-foot">
-      <button class="link-btn" data-act="mark-card" data-id="${k.id}" aria-pressed="${Boolean(marked)}">${marked ? '★ Zaznaczona' : '☆ Zaznacz'}</button>
+      <button class="link-btn" data-act="mark-card" data-id="${k.id}" aria-pressed="${Boolean(marked)}">${marked ? '★ Ważna' : '☆ Ważna'}</button>
+      <button class="link-btn" data-act="aside-card" data-id="${k.id}">Odłóż</button>
       <button class="link-btn" data-act="copy-card" data-id="${k.id}">Kopiuj</button>
       ${state.mode === 'live' ? (onTable(k.id) ? `<span class="link-btn on-table">Na stole ✓</span>` : `<button class="link-btn" data-act="table" data-id="${k.id}">Połóż na stół</button>`) : ''}
     </footer>`}
@@ -1520,6 +1553,14 @@ app.addEventListener('click', (e) => {
     case 'mark-sus': {
       const { id, v } = target.dataset;
       progress.sus[id] = progress.sus[id] === v ? '' : v;
+      saveProgress();
+      render();
+      break;
+    }
+    case 'aside-card': {
+      const id = target.dataset.id;
+      progress.aside = progress.aside || {};
+      progress.aside[id] = !progress.aside[id];
       saveProgress();
       render();
       break;

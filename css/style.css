@@ -822,3 +822,63 @@ button.chip { cursor: pointer; }
 .rs-ico { flex: none; display: grid; place-items: center; width: 1.9rem; height: 1.9rem; border-radius: 50%; background: color-mix(in srgb, var(--olive) 14%, var(--sheet)); color: var(--olive); }
 .rs-ico .ico { width: 1.05rem; height: 1.05rem; }
 .suspect .avatar-pic { width: 3.2rem; height: 3.2rem; }
+
+/* ---------- Druga tura: teczka, karty bez obudowy, koperty, odłożone ---------- */
+.facts-row { display: flex; flex-wrap: wrap; gap: 0.35rem; margin: 0.5rem 0 0.7rem; }
+.fchip { display: inline-flex; align-items: center; gap: 0.3rem; padding: 0.2rem 0.55rem; border-radius: 999px; background: var(--sheet-alt); border: 1px solid var(--rule); font-size: var(--step--1); }
+.fchip .ico { width: 0.95rem; height: 0.95rem; color: var(--ink-soft); }
+.intro-more { margin: 0.5rem 0; }
+.intro-more summary { cursor: pointer; font-size: var(--step--1); color: var(--ink-soft); font-weight: 600; }
+.budget { display: grid; grid-template-columns: 1fr; gap: 0.25rem; margin: 0.6rem 0 0.3rem; font-size: var(--step--1); }
+.budget-label { display: inline-flex; align-items: center; gap: 0.35rem; }
+.budget-label .ico { width: 1rem; height: 1rem; }
+.budget-bar { height: 0.45rem; border-radius: 999px; background: var(--sheet-alt); border: 1px solid var(--rule); overflow: hidden; }
+.budget-bar span { display: block; height: 100%; background: var(--olive); }
+.budget.warn .budget-bar span { background: #c98a1b; }
+.budget.over .budget-bar span { background: var(--stamp); }
+.budget-note { color: var(--ink-soft); }
+.lie-stamp { margin: 0.6rem 0 0; }
+.lie-stamp summary { display: inline-block; cursor: pointer; list-style: none; font: 700 1rem var(--font-display); letter-spacing: 0.08em; text-transform: uppercase; color: var(--stamp); border: 2.5px solid var(--stamp); border-radius: 4px; padding: 0.1rem 0.6rem; transform: rotate(-2deg); }
+.lie-stamp summary::-webkit-details-marker { display: none; }
+.lie-stamp p { font-size: var(--step--1); margin-top: 0.4rem; }
+.card-star { color: #c98a1b; font-size: 1.1rem; }
+.stamp { font-size: 0.78rem; padding: 0.05rem 0.5rem 0.05rem 0.15rem; }
+/* Bilet */
+.tk-wrap { display: flex; gap: 0.65rem; align-items: stretch; margin-top: 0.45rem; border: 1.5px dashed color-mix(in srgb, var(--ink) 35%, var(--sheet)); border-radius: 8px; background: color-mix(in srgb, var(--olive) 7%, var(--sheet)); padding: 0.5rem 0.65rem; }
+.tk-wrap .tk-ico { align-self: center; }
+.tk-wrap .card-lines { margin: 0; padding-left: 0.65rem; border-left: 2px dotted color-mix(in srgb, var(--ink) 30%, var(--sheet)); }
+/* Koperta z pieczęcią */
+.card-sealed { position: relative; background: linear-gradient(160deg, #e8d9b5, #dcc79a) !important; border-color: #c4ab78 !important; color: #3b2f1b; }
+.card-sealed .card-titles h4, .card-sealed .card-sub, .card-sealed .seal-action { color: #3b2f1b; }
+.env-cost { font: 700 1rem var(--font-display); color: #7a2f1d; background: #fff6e2; border: 1.5px solid #c4ab78; border-radius: 999px; padding: 0 0.5rem; white-space: nowrap; }
+.env-seal { position: absolute; right: 0.8rem; bottom: 0.7rem; width: 2.4rem; height: 2.4rem; border-radius: 50%; background: radial-gradient(circle at 35% 35%, #c4453a, #8e1f17); color: #ffe9d6; display: grid; place-items: center; box-shadow: 0 1px 3px rgba(0,0,0,0.3); }
+.env-seal .ico { width: 1.1rem; height: 1.1rem; }
+/* Odłożona karta */
+.card-aside { padding: 0 !important; opacity: 0.75; }
+.aside-row { display: flex; align-items: center; gap: 0.5rem; width: 100%; padding: 0.45rem 0.7rem; background: none; border: 0; cursor: pointer; text-align: left; color: inherit; font: inherit; }
+.aside-title { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--step--1); }
+.aside-tag { font-size: 0.72rem; color: var(--ink-soft); white-space: nowrap; }
+/* Ciaśniejsza teczka na telefonie: podejrzani widoczni na pierwszym ekranie */
+.facts-row { gap: 0.3rem; margin: 0.35rem 0 0.5rem; }
+.fchip { font-size: 0.78rem; padding: 0.12rem 0.5rem; }
+.akta-head .window { margin: 0.2rem 0; }
+.akta-head .w-time { font-size: clamp(1.7rem, 7vw, 2.6rem); }
+.akta-head .w-note { margin: 0.15rem 0 0.2rem; font-size: 0.8rem; }
+.intro-more { margin: 0.25rem 0; }
+.budget { grid-template-columns: auto 1fr; align-items: center; column-gap: 0.6rem; margin: 0.35rem 0 0; }
+.budget-note { grid-column: 1 / -1; font-size: 0.74rem; }
+.lie-stamp { margin-top: 0.45rem; }
+/* Jak grać: trzy obrazki */
+.how-pics { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 0.5rem; margin: 1rem 0 0.5rem; }
+.how-pic { background: var(--sheet); border: 1px solid var(--rule); border-radius: var(--radius); padding: 0.6rem 0.5rem; text-align: center; box-shadow: var(--shadow); }
+.how-pic p { font-size: 0.8rem; line-height: 1.3; margin: 0.4rem 0 0; }
+.hp-art { height: 3.4rem; display: grid; place-items: center; }
+.hp-faces { display: flex; justify-content: center; }
+.hp-faces .portrait { width: 2.1rem; height: 2.1rem; margin-left: -0.7rem; border: 2px solid var(--sheet); border-radius: 50%; }
+.hp-faces .portrait:first-child { margin-left: 0; }
+.hp-ticket { position: relative; display: inline-grid; place-items: center; width: 3.6rem; height: 2.5rem; border: 2px dashed var(--ink-soft); border-radius: 6px; color: var(--ink-soft); }
+.hp-ticket .ico { width: 1.4rem; height: 1.4rem; }
+.hp-ticket b { position: absolute; right: -0.55rem; top: -0.7rem; width: 1.4rem; height: 1.4rem; border-radius: 50%; background: var(--stamp); color: #fff; display: grid; place-items: center; font: 700 0.95rem var(--font-display); }
+.hp-pair { display: inline-flex; gap: 0.3rem; color: var(--olive); }
+.hp-pair .ico { width: 1.5rem; height: 1.5rem; }
+@media (min-width: 40rem) { .how-pic p { font-size: var(--step--1); } }

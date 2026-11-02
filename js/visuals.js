@@ -103,12 +103,6 @@ export function cardVisual(k, { suspectById }) {
   if (look === 'photo' && cl) {
     return `<figure class="ph-polaroid">${photoScene(cl)}<figcaption>${esc(PLACES[cl.place]?.name || '')} · ${fmt(cl.time)}</figcaption></figure>`;
   }
-  if (look === 'ticket' && cl) {
-    const time = cl.kind === 'cinema' ? cl.start : cl.time;
-    const what = cl.kind === 'train' ? 'pociąg' : cl.kind === 'bus' ? `autobus ${cl.line || ''}` : cl.kind === 'cinema' ? 'kino „Mewa”' : 'parking';
-    const where = cl.kind === 'train' ? 'Dworzec Borowice' : cl.kind === 'cinema' ? `„${cl.film}”` : PLACES[cl.place || cl.stop]?.name || '';
-    return `<div class="tk-stub"><span class="tk-ico">${cl.kind === 'parking' ? '<b>P</b>' : icon(cardIcon(k))}</span><span class="tk-main"><span class="tk-time">${fmt(time)}</span><span class="tk-what">${esc(what)} · ${esc(where)}</span></span>${cl.with?.length ? '<span class="tk-two">×2</span>' : ''}</div>`;
-  }
   if (look === 'weather') {
     // Pasek 16:00–24:00 z zaznaczonym deszczem (godziny zostają w liniach karty).
     const rains = (k.facts || []).filter((f) => f.t === 'rain');
