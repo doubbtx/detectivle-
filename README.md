@@ -16,7 +16,7 @@ Trudność rośnie w ciągu tygodnia: poniedziałek to około 25 kart i 2 dowody
 
 ### Czynności śledcze
 
-Część kart urzędowych (rozkłady, rejestry, nagrania z kamer, pogoda, godziny otwarcia) jest na start zapieczętowana. Widać tylko tytuł i czynność, np. „Zabezpiecz nagranie: kamera nr 7 · Rynek” (60 min). Każdy gracz ma budżet godzin śledztwa wyliczony z tego, co naprawdę trzeba sprawdzić. Każde rozpoczęte pół godziny nadgodzin dodaje minutę do czasu rozwiązania. W grze zespołowej każdy ma własny budżet, a godziny są tylko informacją (wynikiem jest czas kapitana). Zeznania świadków, czasy dotarcia i dowody od podejrzanych są odkryte od początku.
+Część kart urzędowych (rozkłady, rejestry, nagrania z kamer, pogoda, godziny otwarcia) jest na start zapieczętowana. Widać tylko tytuł i czynność, np. „Zabezpiecz nagranie: kamera nr 7 · Rynek” (60 min). Każdy gracz ma budżet godzin śledztwa wyliczony z tego, co naprawdę trzeba sprawdzić. Każde rozpoczęte pół godziny nadgodzin dodaje 2 minuty do czasu rozwiązania. Kartą obalającą w raporcie może być tylko otwarta karta. Po pierwszej pomyłce gra mówi tylko „raport nietrafny”, a dopiero po drugiej, która część była zła. Gra w innym trybie po podejrzeniu rozwiązania albo próbach to „powtórka” bez serii i statystyk. W grze zespołowej każdy ma własny budżet, a godziny są tylko informacją (wynikiem jest czas kapitana). Zeznania świadków, czasy dotarcia i dowody od podejrzanych są odkryte od początku.
 
 ### Gra z ekipą (2–5 osób)
 

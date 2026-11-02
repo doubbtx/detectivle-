@@ -16,7 +16,7 @@ const placeName = (key) => (key === '@pociag' ? 'pociąg (poza miastem)' : PLACE
  * Fakty z jednej karty (tylko to, co jest dosłownie na karcie).
  * @returns {{id: string, card: string, who: string[], place: string, from: number, to: number|null, note: string}[]}
  */
-export function factsOfCard(k, { cards, canSee }) {
+export function factsOfCard(k, { cards, canSee, c = null }) {
   const out = [];
   const add = (who, place, from, to, note) => out.push({ id: `${k.id}#${out.length}`, card: k.id, who, place, from, to, note });
   for (const f of k.facts || []) {
@@ -24,7 +24,8 @@ export function factsOfCard(k, { cards, canSee }) {
     if (f.t === 'claim') {
       const who = [f.who, ...(f.with || [])];
       // Wspólny dowód: przy drugiej osobie widać, kto go dostarczył.
-      const byNote = f.with?.length ? ' (wspólny)' : '';
+      const owner = f.with?.length ? (c?.suspects?.find((x) => x.id === f.who)?.first || '') : '';
+      const byNote = f.with?.length ? ` (wspólny, wg dowodu: ${owner})` : '';
       if (f.kind === 'delivery') for (const st of f.stops) add(who, st.place, st.time, st.time, 'doręczenie');
       else if (f.kind === 'cinema') add(who, 'kino', f.start, null, `seans „${f.film}”${byNote}`);
       else if (f.kind === 'train') add(who, 'dworzec', f.time, null, 'odjazd pociągu');
@@ -63,7 +64,7 @@ export function renderBoard({ c, pins, sel, canSee, hasMap, sceneCell, autoAll =
   const visible = c.cards.filter((k) => canSee(k) && isPinnable(k));
   const auto = visible.filter((k) => autoAll || k.kind === 'supplied').map((k) => k.id);
   const ids = [...new Set([...auto, ...pins])];
-  const facts = ids.map((id) => c.cards.find((k) => k.id === id)).filter((k) => k && canSee(k)).flatMap((k) => factsOfCard(k, { cards: c.cards, canSee }).map((f) => ({ ...f, claim: k.kind === 'supplied' })));
+  const facts = ids.map((id) => c.cards.find((k) => k.id === id)).filter((k) => k && canSee(k)).flatMap((k) => factsOfCard(k, { cards: c.cards, canSee, c }).map((f) => ({ ...f, claim: k.kind === 'supplied' })));
   const byId = new Map(facts.map((f) => [f.id, f]));
   const chosen = sel.map((id) => byId.get(id)).filter(Boolean);
   // Oś czasu: od 17:00 do 24:00, poszerzana, jeśli coś wypada poza.

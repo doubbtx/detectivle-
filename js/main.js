@@ -142,7 +142,7 @@ function freshProgress() {
 // Czynności śledcze: zapieczętowane karty i godziny śledztwa
 
 const OVERTIME_STEP = 30; // minut nadgodzin
-const OVERTIME_PENALTY = 60; // sekund kary za każde rozpoczęte pół godziny nadgodzin
+const OVERTIME_PENALTY = 120; // sekund kary za każde rozpoczęte pół godziny nadgodzin
 
 function usedMin() {
   const u = progress?.unlocked || {};
@@ -281,7 +281,7 @@ function renderTown() {
   return `
   <section class="town-home" aria-label="Borowice">
     <h2 class="sec-label">Borowice · twoje miasto</h2>
-    <p class="muted small">Nowe zgłoszenie: <b>${esc(c.title)}</b> (pole ${SCENE_CELLS[scene] || '–'}). ${list.length ? `Gwiazdki to rozwiązane już sprawy (${list.length}); najedź albo przytrzymaj, żeby zobaczyć, co się tam stało.` : 'Każda rozwiązana sprawa zostawi na planie gwiazdkę w miejscu zdarzenia.'}</p>
+    <p class="muted small">${['solved', 'failed', 'revealed'].includes(savedProgress('solo')?.status) || ['solved', 'failed', 'revealed'].includes(savedProgress('team')?.status) ? 'Dzisiejsza sprawa zamknięta:' : 'Nowe zgłoszenie:'} <b>${esc(c.title)}</b> (pole ${SCENE_CELLS[scene] || '–'}). ${list.length ? `Gwiazdki to rozwiązane już sprawy (${list.length}); najedź albo przytrzymaj, żeby zobaczyć, co się tam stało.` : 'Każda rozwiązana sprawa zostawi na planie gwiazdkę w miejscu zdarzenia.'}</p>
     <div class="town-wrap town-wrap-home" data-scroll-key="home">${svg}</div>
   </section>`;
 }
@@ -874,7 +874,7 @@ function renderTopbar() {
       <div class="tb-title"><b>${esc(label)}</b><span><span class="tb-mode">${esc(who)} · </span>${state.mode === 'live' && state.live?.status !== 'open' ? `<span class="tb-live">${state.live?.status === 'stopped' ? 'rozłączono' : 'łączenie…'} · </span>` : ''}<span class="tb-budget">śledztwo <span class="nw${usedMin() > budgetMin() ? ' over' : ''}">${fmtHM(usedMin())}/${fmtHM(budgetMin())} h</span></span></span></div>
       <div class="tb-clock" aria-live="off"><span id="clock">${fmtClock(elapsedSec())}</span>${totalPenalty() ? `<small>w tym +${fmtPenalty(totalPenalty())}</small>` : ''}</div>
       <div class="tb-actions">
-        <button class="btn btn-small" data-act="open-hints" aria-label="Podpowiedź, użyto ${progress.hints} z 3"><span class="tb-long">Podpowiedź</span><span class="tb-short" aria-hidden="true">?</span> <span class="pill">${progress.hints}/3</span></button>
+        ${state.mode === 'team' && !isCaptain() ? '' : `<button class="btn btn-small" data-act="open-hints" aria-label="Podpowiedź, użyto ${progress.hints} z 3"><span class="tb-long">Podpowiedź</span><span class="tb-short" aria-hidden="true">?</span> <span class="pill">${progress.hints}/3</span></button>`}
         ${isCaptain()
           ? `<button class="btn btn-small btn-primary" data-act="open-accuse">Raport <span class="pill">${left}</span></button>`
           : `<button class="btn btn-small" data-act="open-end">Koniec</button>`}
@@ -943,8 +943,15 @@ function hintTexts() {
   const forged = sol.explain.forged;
   const refDesk = cardById((forged.proofRefs || forged.refs).find((r) => r !== forged.card))?.desk;
   out.push(`Fałszywkę obala karta z biurka „${deskName(refDesk)}”.${isTeamLike() ? ` Ma je gracz ${seatOfDesk(refDesk)}.` : ''}`);
-  const keyRef = (forged.proofRefs || forged.refs).find((r) => r !== forged.card);
-  out.push(`${isTeamLike() ? 'Porównajcie' : 'Porównaj'} dokładnie kartę ${keyRef} z dowodami dostarczonymi przez podejrzanych.`);
+  // Podpowiedź 3 wskazuje trop (czyj pobyt albo jaka tabela), ale nie numer karty.
+  const keyCard = cardById((forged.proofRefs || forged.refs).find((r) => r !== forged.card));
+  if (forged.physical && forged.about) {
+    const who = suspectById(forged.about);
+    const src = keyCard?.title === 'Monitoring miejski' ? 'nagranie z kamery' : keyCard?.kind === 'witness' ? 'zeznanie świadka' : 'rejestr';
+    out.push(`${isTeamLike() ? 'Sprawdźcie' : 'Sprawdź'}, gdzie naprawdę ${who.f ? 'była' : 'był'} ${who.full}: kluczowe jest ${src}, zestawione z planem miasta.`);
+  } else {
+    out.push(`${isTeamLike() ? 'Porównajcie' : 'Porównaj'} dowody podejrzanych z kartą „${keyCard?.title || 'tabela urzędowa'}”.`);
+  }
   return out;
 }
 
@@ -979,8 +986,10 @@ function renderModal() {
     body = `
       <h2 tabindex="-1">Raport z dochodzenia</h2>
       <p class="muted small">Pozostałe próby: ${left}. Pomyłka dodaje ${fmtPenalty(CONFIG.wrongPenalty)} do czasu.</p>
-      ${a.last ? `<p class="feedback" role="status"><span class="fb"><span class="sq ${sq(a.last[0])}"></span> fałszywka: ${a.last[0] ? 'trafiona' : 'pudło'}</span> <span class="fb"><span class="sq ${sq(a.last[1])}"></span> obalenie: ${a.last[1] === null ? 'nie sprawdzono' : a.last[1] ? 'trafione' : 'pudło'}</span></p>` : ''}
-      ${progress.attempts.length ? `<div class="history"><span class="history-label">Wcześniejsze próby:</span> ${progress.attempts.map((t) => `<span class="fb"><span class="chip">${t.forged}</span> + <span class="chip">${t.proof}</span> <span class="sq ${sq(t.ok[0])}"></span><span class="sq ${sq(t.ok[1])}"></span></span>`).join(' ')}</div>` : ''}
+      ${a.last ? (progress.attempts.length >= 2
+        ? `<p class="feedback" role="status"><span class="fb"><span class="sq ${sq(a.last[0])}"></span> fałszywka: ${a.last[0] ? 'trafiona' : 'pudło'}</span> <span class="fb"><span class="sq ${sq(a.last[1])}"></span> obalenie: ${a.last[1] === null ? 'nie sprawdzono' : a.last[1] ? 'trafione' : 'pudło'}</span></p>`
+        : '<p class="feedback" role="status"><span class="fb"><span class="sq bad"></span> Raport nietrafny.</span> Po drugiej pomyłce dowiesz się, która część była zła.</p>') : ''}
+      ${progress.attempts.length ? `<div class="history"><span class="history-label">Wcześniejsze próby:</span> ${progress.attempts.map((t, i) => `<span class="fb"><span class="chip">${t.forged}</span> + <span class="chip">${t.proof}</span> ${i === 0 && progress.attempts.length < 2 ? '<span class="sq bad"></span>' : `<span class="sq ${sq(t.ok[0])}"></span><span class="sq ${sq(t.ok[1])}"></span>`}</span>`).join(' ')}</div>` : ''}
       <fieldset class="pick">
         <legend>1. Sfałszowany dowód</legend>
         <div class="pick-list">
@@ -1056,7 +1065,7 @@ function reportQuality(a) {
   const innocents = state.c.suspects.filter((x) => x.id !== state.c.solution.culprit);
   const alibiCorrect = innocents.filter((x) => a.alibis[x.id] && alibiCards(x.id).has(a.alibis[x.id])).length;
   const reasonOk = f.reasonCodes.includes(a.reason);
-  const firstTry = !isReplay() && (state.mode === 'live' ? progress.attempts.length === 0 : progress.attempts.length === 1);
+  const firstTry = !isReplay() && progress.hints < 3 && (state.mode === 'live' ? progress.attempts.length === 0 : progress.attempts.length === 1);
   const stars = Number(reasonOk) + Number(alibiCorrect === innocents.length) + Number(firstTry);
   return { reasonOk, alibiCorrect, alibiTotal: innocents.length, firstTry, stars };
 }
@@ -1115,7 +1124,8 @@ function shareText() {
   const c = state.c;
   const head = c.kind === 'daily' ? `Fałszywe Alibi nr ${c.number}` : `Fałszywe Alibi · trening ${c.code}`;
   const mode = state.mode === 'solo' ? 'solo' : `ekipa${state.mode === 'live' ? ' na żywo' : ''} · ${state.teamSize} ${state.teamSize === 5 ? 'osób' : 'osoby'}`;
-  const rows = progress.attempts.map((a) => a.ok.map((x) => (x === null ? '⬜' : x ? '🟩' : '🟥')).join('')).join('\n');
+  // Pierwsza pomyłka bez szczegółów (tak jak w grze): jeden czerwony kwadrat.
+  const rows = progress.attempts.map((a, i) => (i === 0 && !(a.ok[0] && a.ok[1]) ? '🟥' : a.ok.map((x) => (x === null ? '⬜' : x ? '🟩' : '🟥')).join(''))).join('\n');
   const tail = progress.status === 'solved'
     ? `⏱ ${fmtClock(elapsedSec())} · 💡 ${progress.hints} · 🔎 ${fmtHM(usedMin())}/${fmtHM(budgetMin())} h${progress.report ? ` · raport ${starsText(progress.report.stars)}` : ''}`
     : 'Sprawa nierozwiązana';
@@ -1409,7 +1419,7 @@ function renderLobby() {
       </ul>
       <ul class="setup-notes">
         <li>Każdy dostaje inne biurka (w kolejności wejścia do pokoju). Zegar, podpowiedzi, próby i godziny śledztwa są wspólne.</li>
-        <li>Karty możecie kłaść na wspólny stół, a ustalenia zapisywać na tablicy. Raport może złożyć każdy.</li>
+        <li>Karty możecie kłaść na wspólny stół, a ustalenia zapisywać na stole. Raport może złożyć każdy.</li>
       </ul>
       <button class="btn btn-primary btn-wide" data-act="live-start" ${online.length >= 2 && rs?.status === 'lobby' && !fpMismatch ? '' : 'disabled'}>Zaczynamy${online.length < 2 ? ' (potrzeba 2 osób)' : ''}</button>
     </section>
@@ -1628,6 +1638,7 @@ app.addEventListener('click', (e) => {
       break;
     }
     case 'map-clear': state.mapSel = []; render(); break;
+    case 'plaque': showToast(target.dataset.info.replace(/ \| /g, ' · ')); break;
     case 'home-case': app.querySelector('.case-file .actions .btn')?.focus(); app.querySelector('.case-file')?.scrollIntoView({ behavior: 'smooth', block: 'start' }); break;
     case 'mark-sus': {
       const { id, v } = target.dataset;

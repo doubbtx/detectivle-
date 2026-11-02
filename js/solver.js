@@ -552,7 +552,10 @@ export function investigationProfile(c, res = solveCase(c)) {
   const cost = (id) => byId.get(id)?.action?.cost || 0;
   const need = new Set();
   for (const e of res.evaluated) for (const r of e.refs) if (cost(r)) need.add(r);
-  for (const items of res.neutralClears.values()) for (const it of items) for (const r of it.refs) if (cost(r)) need.add(r);
+  // Osoba bez żadnego dostarczonego dowodu jest niewinna z samej zasady 3 (nie miała czego sfałszować),
+  // więc sprawdzanie jej alibi nie wchodzi do budżetu.
+  const hasSupplied = new Set(c.cards.filter((k) => k.kind === 'supplied').map((k) => k.by));
+  for (const [who, items] of res.neutralClears) if (hasSupplied.has(who)) for (const it of items) for (const r of it.refs) if (cost(r)) need.add(r);
   const minimal = new Set();
   for (const ex of [res.explain.forged, ...(res.explain.lies || [])]) {
     if (ex) for (const r of ex.refs) if (cost(r)) minimal.add(r);

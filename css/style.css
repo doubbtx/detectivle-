@@ -944,3 +944,6 @@ button.chip { cursor: pointer; }
 .bd-clear { margin: 0.1rem 0 0; }
 .bd-dot::before, .bd-bar::before { content: ''; position: absolute; inset: -6px; }
 @media (max-width: 40rem) { body:has(.bd-compare) .toast { bottom: 9.5rem; } }
+.tb-clock { min-width: 4.4rem; flex: none; }
+.town .t-plaque { cursor: pointer; }
+@media (max-width: 380px) { .tb-title > span { display: none; } }

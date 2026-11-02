@@ -240,7 +240,7 @@ export function renderTownSvg({ places, scene, sceneLabel = 'Miejsce kradzieży'
     const [x, y] = parseCell(pl.cell);
     const bx = cx(x) + 13;
     const by = cy(y) - 30;
-    p.push(`<g class="t-plaque"><title>${esc(pl.items.join('\n'))}</title><circle cx="${bx}" cy="${by}" r="9"/>${icon('star', bx, by, 11, 't-plaque-ico')}${pl.items.length > 1 ? `<text x="${bx + 9}" y="${by - 6}" class="t-plaque-n">${pl.items.length}</text>` : ''}</g>`);
+    p.push(`<g class="t-plaque" data-act="plaque" data-info="${esc(pl.items.join(' | '))}" role="button" tabindex="0" aria-label="${esc(pl.items.join('; '))}"><title>${esc(pl.items.join('\n'))}</title><circle cx="${bx}" cy="${by}" r="9"/>${icon('star', bx, by, 11, 't-plaque-ico')}${pl.items.length > 1 ? `<text x="${bx + 9}" y="${by - 6}" class="t-plaque-n">${pl.items.length}</text>` : ''}</g>`);
   }
   // Biuro detektywa
   if (office) {

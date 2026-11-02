@@ -631,7 +631,7 @@ function generate(rng, opts) {
           facts: [{ t: 'claim', kind, who: by, stop: place, line, time: t }],
         });
         evs = [{ place, from: t, to: t }];
-        card.alibi = (id) => `Twierdzi, że ${g(s, 'wracał', 'wracała')} do domu autobusem linii ${line} (bilet: ${id}).`;
+        card.alibi = (id) => `Twierdzi, że ${g(s, 'jechał', 'jechała')} autobusem linii ${line} (bilet: ${id}).`;
         break;
       }
       default:
@@ -833,7 +833,7 @@ function generate(rng, opts) {
   // (alibi krzyżowe), w pozostałych oba wspólne dowody są prawdziwe, a fałszywką jest zwykły dowód sprawcy
   // (zdradza go fizyczna niemożliwość). Z samych akt nie da się więc wskazać fałszywki.
   const weekend = P.forgeMode === 'cross';
-  const mode = weekend && rng.chance(0.56) ? 'self' : P.forgeMode;
+  const mode = weekend && rng.chance(0.63) ? 'self' : P.forgeMode;
   const JOINT_KINDS = ['receipt', 'photo', 'cinema'];
   // Rodzaj dowodu zarezerwowany na fałszywkę krzyżową i na prawdziwy wspólny dowód (zmyłkę).
   // Bilet do kina łatwiej „zgrać” w sprzeczność z pobytem Y, więc losujemy go rzadziej: wtedy rodzaj wspólnego
@@ -981,7 +981,7 @@ function generate(rng, opts) {
     const lieNoAlibi = !rng.chance(P.lieAlibiChance);
     lieCard = attempt(liar, () => makeClaim(lieKind, liar, true, lieNoAlibi)).card;
     // Kłamca czasem podaje kłamstwo jako swoje alibi (inaczej kłamstwa nigdy nie byłoby w zeznaniach).
-    if (!lieNoAlibi && rng.chance(0.5)) liar.claimCard = lieCard;
+    if (!lieNoAlibi && rng.chance(0.8)) liar.claimCard = lieCard;
   }
   // Pułapki niewinnych są na nagraniu tak samo często jak pułapka sprawcy, żeby kamera z zeznaniem-tropem go nie zdradzała.
   for (const i of rng.sample(innocents, P.traps)) attempt(suspects[i], () => makeNeutral(rng.chance(P.sealedTrapChance) ? 'cctv' : rng.pick(['witness', 'cardlog']), suspects[i], 'trap'));
