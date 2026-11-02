@@ -436,7 +436,7 @@ export function solveCase(c) {
           : `co najmniej ${D} min drogi (czasy dotarcia ${ta.min} i ${tb.min} min [${[...new Set(travelRefs)].join(', ')}])`;
       }
       reason = `według karty ${oRefs.map((r) => `[${r}]`).join(' i ')} ${person.full} ${gp('był', 'była')} ${placeLoc(o.place)} ${when(o)}, a dowód [${f.card}] umieszcza tę osobę ${placeLoc(e.place)} ${when(e)}`
-        + (how ? `; między tymi miejscami jest ${how}` : '');
+        + (how ? `; droga między tymi miejscami to ${how}` : '');
     }
     explain.forged = {
       card: f.card, kind: f.kind, reason, reasonCodes: [pid === f.who ? 'physical' : 'physical-other'],

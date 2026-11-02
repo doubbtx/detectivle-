@@ -92,21 +92,49 @@ function progressKey(mode = state.mode, ref = state.ref, size = state.teamSize, 
   return mode === 'team' ? `p:${caseKey(ref)}:team:${size}:${seat}` : `p:${caseKey(ref)}:solo`;
 }
 
+/**
+ * Wspólny dla wszystkich trybów zapis tego, co już wiadomo o sprawie na tym urządzeniu. Każdy tryb
+ * ma własny postęp i 3 próby, więc bez tego dałoby się podejrzeć rozwiązanie (albo wypróbować karty)
+ * w jednym trybie i „rozwiązać” sprawę za pierwszym razem w drugim.
+ */
+function caseSeen(ref = state.ref) {
+  return store.get(`seen:${caseKey(ref)}`) || { revealedBy: null, triedBy: [] };
+}
+function markSeen(kind) {
+  if (state.mode === 'live') return;
+  const s = caseSeen();
+  const me = progressKey();
+  if (kind === 'reveal' && !s.revealedBy) s.revealedBy = me;
+  if (kind === 'try' && !s.triedBy.includes(me)) s.triedBy.push(me);
+  store.set(`seen:${caseKey(state.ref)}`, s);
+}
+/** Czy ta gra jest powtórką (rozwiązanie albo próby były już w innym trybie na tym urządzeniu). */
+function isReplay() {
+  if (state.mode === 'live') return false;
+  const s = caseSeen();
+  const me = progressKey();
+  return Boolean((s.revealedBy && s.revealedBy !== me) || s.triedBy.some((k) => k !== me));
+}
+
 /** Ostatnio używane ustawienie ekipy dla tej sprawy: { size, seat }. */
 function lastTeam(ref = state.ref) {
   return store.get(`lastTeam:${caseKey(ref)}`);
 }
 
+/** Zapis postępu pasuje do sprawy tylko z tym samym odciskiem (np. po ponownym wydaniu akt stary zapis znika). */
+const fitsCase = (p) => (p && p.fp && state.c && p.fp === state.c.fingerprint ? p : null);
+
 function savedProgress(mode, ref = state.ref) {
-  if (mode === 'solo') return store.get(progressKey('solo', ref));
+  if (mode === 'solo') return fitsCase(store.get(progressKey('solo', ref)));
   const lt = lastTeam(ref);
-  return lt ? store.get(progressKey('team', ref, lt.size, lt.seat)) : null;
+  return lt ? fitsCase(store.get(progressKey('team', ref, lt.size, lt.seat))) : null;
 }
 
 function freshProgress() {
   return {
     startedAt: null, endedAt: null, penalty: 0, hints: 0, attempts: [],
     status: 'playing', marks: {}, sus: {}, notes: '', teamSize: state.teamSize, seat: state.seat, unlocked: {},
+    fp: state.c?.fingerprint || null, pins: [], aside: {},
   };
 }
 
@@ -146,7 +174,7 @@ const isSealed = (k) => isSealedNow(k) && state.screen === 'game';
 function saveProgress() {
   if (!progress) return;
   if (state.mode === 'live') {
-    if (state.live?.room) store.set(`live:${state.live.room}`, { marks: progress.marks, sus: progress.sus, notes: progress.notes });
+    if (state.live?.room) store.set(`live:${state.live.room}`, { marks: progress.marks, sus: progress.sus, notes: progress.notes, pins: progress.pins || [], aside: progress.aside || {} });
     return;
   }
   store.set(progressKey(), progress);
@@ -168,8 +196,11 @@ function fmtClock(sec) {
   return h ? `${h}:${mm}:${ss}` : `${mm}:${ss}`;
 }
 
+/** Kara czasowa: „1 min”, „5 min”, „1 min 30 s” (żeby nie mylić z godzinami śledztwa „1:00 h”). */
 function fmtPenalty(sec) {
-  return `${Math.floor(sec / 60)}:${String(sec % 60).padStart(2, '0')}`;
+  const m = Math.floor(sec / 60);
+  const r = sec % 60;
+  return r ? `${m} min ${r} s` : `${m} min`;
 }
 
 function showToast(text) {
@@ -259,6 +290,8 @@ function recordResult(solved) {
   // Do serii liczą się tylko sprawy dnia (dzisiejsza albo wczorajsza, jeśli gra przeszła przez północ).
   if (state.ref.type !== 'daily') return;
   if (solved) addPlaque();
+  // Powtórka po podejrzeniu rozwiązania albo próbach w innym trybie nie liczy się do statystyk i serii.
+  if (isReplay()) return;
   const statsMode = state.mode === 'live' ? 'team' : state.mode;
   const today = localTodayIso();
   const startedDay = progress.startedAt ? localTodayIso(new Date(progress.startedAt)) : today;
@@ -375,7 +408,7 @@ function changeTeam() {
 }
 
 function startTeam() {
-  const saved = store.get(progressKey('team'));
+  const saved = fitsCase(store.get(progressKey('team')));
   progress = saved || freshProgress();
   store.set(`lastTeam:${caseKey(state.ref)}`, { size: state.teamSize, seat: state.seat });
   if (progress.status !== 'playing') return go('result');
@@ -462,7 +495,7 @@ function renderHow() {
     <summary>Jak grać: szczegóły</summary>
     <ol class="how-list">
       <li>Pięcioro podejrzanych ma alibi. Jedno z nich jest fałszywe: sprawca dostarczył <b>dokładnie jeden sfałszowany dowód</b>.</li>
-      <li>Dowody leżą na pięciu biurkach: Dokumenty, Świadkowie, Mapa i rozkłady, Zdjęcia, Rejestry. Żadne biurko samo nie wystarczy: do obalenia fałszywki zawsze potrzebna jest karta z innego biurka (rozkład, rejestr, kamera albo czasy dotarcia).</li>
+      <li>Dowody leżą na pięciu biurkach: Dokumenty, Świadkowie, Mapa i rozkłady, Zdjęcia, Rejestry. Żadne biurko samo nie wystarczy: do obalenia fałszywki zawsze potrzebna jest karta z innego biurka (rozkład, rejestr, nagranie albo zeznanie).</li>
       <li>Część kart urzędowych (rozkłady, rejestry, nagrania z kamer, pogoda) jest <b>zapieczętowana</b>. Widzisz tylko tytuł i czynność, np. „Pobierz rozkład jazdy” (30 min). Masz budżet godzin śledztwa, a nadgodziny dodają czas. Zlecaj tylko to, co może coś wyjaśnić.</li>
       <li>Od środy fałszywka zgadza się z rozkładami i rejestrami. Zdradza ją dopiero to, że ktoś był wtedy gdzie indziej i nie zdążyłby dotrzeć. W weekend dowody mogą dotyczyć dwóch osób naraz.</li>
       <li>Od piątku kłamią <b>dwie osoby</b>: sprawca i ktoś niewinny, kto ukrywał coś innego. Pierwsza znaleziona sprzeczność może być tym drugim kłamstwem. Kłamca zawsze ma inne, potwierdzone alibi, a sprawca poza fałszywką nie ma żadnego.</li>
@@ -823,7 +856,7 @@ function renderNotes() {
     <label class="sr-only" for="notes">Notatki</label>
     <textarea id="notes" data-act="notes" rows="12" placeholder="np. Halina: teatr 19:40 + 25 min → czysta">${esc(progress.notes)}</textarea>
     <h3 class="sec-label">Zaznaczone karty</h3>
-    <div class="cards">${state.c.cards.filter((k) => progress.marks[k.id] && myDesks().includes(k.desk)).map((k) => renderCard(k)).join('') || '<p class="muted small">Nic jeszcze nie zaznaczono. Użyj „☆ Zaznacz” na karcie.</p>'}</div>
+    <div class="cards">${state.c.cards.filter((k) => progress.marks[k.id] && myDesks().includes(k.desk)).map((k) => renderCard(k)).join('') || '<p class="muted small">Nic jeszcze nie zaznaczono. Użyj „☆ Ważna” na karcie.</p>'}</div>
   </section>`;
 }
 
@@ -896,10 +929,13 @@ function renderGame() {
 function hintTexts() {
   const sol = state.sol;
   const out = [];
-  const neutral = Object.entries(sol.explain.suspects).find(([, items]) => items.some((i) => i.type === 'neutral'));
+  // Podpowiedź 1 nie może wskazywać karty, która obala fałszywkę (w weekend to często pobyt drugiej osoby).
+  const proofIds = proofSet();
+  const safe = (i) => i.type === 'neutral' && !i.refs.some((r) => proofIds.has(r));
+  const neutral = Object.entries(sol.explain.suspects).find(([, items]) => items.some(safe));
   if (neutral) {
     const [id, items] = neutral;
-    const it = items.find((i) => i.type === 'neutral');
+    const it = items.find(safe);
     out.push(`${suspectById(id).full} ma alibi potwierdzone przez niezależne źródło. Zobacz karty ${it.refs.slice(0, -1).join(', ')} i ${it.refs[it.refs.length - 1]}.`);
   } else {
     out.push(`${isTeamLike() ? 'Zacznijcie' : 'Zacznij'} od czasów dotarcia na biurku „Mapa i rozkłady”.`);
@@ -1020,7 +1056,7 @@ function reportQuality(a) {
   const innocents = state.c.suspects.filter((x) => x.id !== state.c.solution.culprit);
   const alibiCorrect = innocents.filter((x) => a.alibis[x.id] && alibiCards(x.id).has(a.alibis[x.id])).length;
   const reasonOk = f.reasonCodes.includes(a.reason);
-  const firstTry = state.mode === 'live' ? progress.attempts.length === 0 : progress.attempts.length === 1;
+  const firstTry = !isReplay() && (state.mode === 'live' ? progress.attempts.length === 0 : progress.attempts.length === 1);
   const stars = Number(reasonOk) + Number(alibiCorrect === innocents.length) + Number(firstTry);
   return { reasonOk, alibiCorrect, alibiTotal: innocents.length, firstTry, stars };
 }
@@ -1029,6 +1065,13 @@ function submitAccusation() {
   const a = state.accuse;
   // Po pomyłce karta-obalenie jest czyszczona, więc podwójne kliknięcie nie wyśle drugiej próby.
   if (!a.forged || !a.proof || !a.reason || progress.status !== 'playing') return;
+  // Kartą obalającą może być tylko karta, którą ktoś już widział (koperta otwarta).
+  // (W ekipie bez serwera widać tylko własne koperty, więc karty z cudzych biurek nie sprawdzamy.)
+  const proofCard = cardById(a.proof);
+  if (isSealedNow(proofCard) && (state.mode !== 'team' || myDesks().includes(proofCard.desk))) {
+    showToast(`Karta ${a.proof} jest jeszcze w zamkniętej kopercie. Najpierw ją otwórz.`);
+    return;
+  }
   if (progress.attempts.some((t) => t.forged === a.forged && t.proof === a.proof)) return;
   const sol = state.c.solution;
   const forgedOk = a.forged === sol.forged;
@@ -1049,6 +1092,7 @@ function submitAccusation() {
     return;
   }
   progress.attempts.push({ forged: a.forged, proof: a.proof, reason: a.reason, alibis: { ...a.alibis }, ok });
+  markSeen('try');
   a.last = ok;
   if (ok[0] && ok[1]) {
     progress.report = reportQuality(a);
@@ -1056,6 +1100,7 @@ function submitAccusation() {
   }
   progress.penalty += CONFIG.wrongPenalty;
   a.proof = null;
+  state.modalTop = true; // wynik próby jest na górze okna raportu, więc tam przewijamy
   saveProgress();
   if (progress.attempts.length >= CONFIG.maxAttempts) return finish('failed');
   render();
@@ -1074,7 +1119,7 @@ function shareText() {
   const tail = progress.status === 'solved'
     ? `⏱ ${fmtClock(elapsedSec())} · 💡 ${progress.hints} · 🔎 ${fmtHM(usedMin())}/${fmtHM(budgetMin())} h${progress.report ? ` · raport ${starsText(progress.report.stars)}` : ''}`
     : 'Sprawa nierozwiązana';
-  return [`${head} · ${mode}`, rows, tail, CONFIG.shareUrl].filter(Boolean).join('\n');
+  return [`${head} · ${mode}${isReplay() ? ' · powtórka' : ''}`, rows, tail, CONFIG.shareUrl].filter(Boolean).join('\n');
 }
 
 /** Ile zostało do następnej sprawy dnia (liczone od daty sprawy na ekranie). */
@@ -1307,7 +1352,12 @@ function syncLiveProgress() {
   state.seat = me?.seat || 1;
   const local = store.get(`live:${rs.code}`, { marks: {}, sus: {}, notes: '' });
   const off = live.conn?.offset || 0;
+  // Stan tylko tego gracza (tablica, odłożone karty) zostaje między aktualizacjami z serwera.
+  const keepPins = progress?.pins || local.pins || [];
+  const keepAside = progress?.aside || local.aside || {};
   progress = {
+    pins: keepPins,
+    aside: keepAside,
     marks: local.marks || {},
     sus: local.sus || {},
     notes: local.notes || '',
@@ -1486,7 +1536,8 @@ function render() {
   if (state.modal && state.modal !== lastModal) {
     modal?.querySelector('h2')?.focus({ preventScroll: true });
   } else {
-    if (modal && state.modal === lastModal) modal.scrollTop = modalScroll;
+    if (modal && state.modal === lastModal) modal.scrollTop = state.modalTop ? 0 : modalScroll;
+    state.modalTop = false;
     const target = findByKey(!state.modal && lastModal ? modalOpener : focusKey);
     if (target) {
       target.focus({ preventScroll: true });
@@ -1697,6 +1748,7 @@ app.addEventListener('click', (e) => {
         render();
         break;
       }
+      markSeen('reveal');
       finish('revealed');
       break;
     case 'copy-share': copyText(shareText(), 'Skopiowano wynik'); break;

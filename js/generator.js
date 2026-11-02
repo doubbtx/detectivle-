@@ -73,7 +73,7 @@ function params(diff) {
     // Pułapka fizyczna na zapieczętowanym nagraniu zamiast darmowego zeznania.
     sealedTrapChance: diff >= 5 ? 0.85 : 0.75,
     // Zeznanie bez godziny („widziałam go przy Rynku”), które naprowadza na nagranie z kamery.
-    tipChance: diff >= 3 ? 0.7 : 0.3,
+    tipChance: diff >= 3 ? 0.7 : 0,
     // Prawdziwy dowód bez alibi (godzina poza zasięgiem): liczenie kart z alibi nie wskazuje sprawcy.
     coverChance: diff >= 5 ? 0.8 : 0.5,
     // Pn–czw przykrywki dostają też osoby z alibi od świadka (więcej kart w raporcie, ale łatwe do odrzucenia).
@@ -304,6 +304,22 @@ function generate(rng, opts) {
     usedMeters.add(n);
     return n;
   };
+  // „razem z Haliną”, ale „razem ze Stanisławem” (przed zbitką spółgłosek na s/z/ś/ź/ż/w/f).
+  // Pozy na zdjęciach pasujące do miejsca (ratusz jest tylko na Rynku, barierka na bulwarze).
+  const POSES_ONE = {
+    rynek: ['pozuje na tle ratusza', 'trzyma kubek z herbatą', 'robi minę do aparatu'],
+    plac: ['stoi przy pomniku', 'trzyma kubek z herbatą', 'robi minę do aparatu'],
+    bulwar: ['stoi przy barierce nad rzeką', 'trzyma kubek z herbatą', 'robi minę do aparatu'],
+    park: ['siedzi na ławce pod drzewami', 'stoi przy alejce', 'robi minę do aparatu'],
+  };
+  const POSES_TWO = {
+    rynek: ['pozują na tle ratusza', 'trzymają kubki z herbatą'],
+    plac: ['stoją przy pomniku', 'trzymają kubki z herbatą'],
+    bulwar: ['stoją przy barierce nad rzeką', 'trzymają kubki z herbatą'],
+    park: ['siedzą na ławce pod drzewami', 'stoją przy alejce'],
+    any: ['trzymają kubki z herbatą', 'uśmiechają się do obiektywu'],
+  };
+  const zIns = (ins) => (/^[sSzZśŚźŹżŻwWfF][^aeiouyąęóAEIOUYĄĘÓ]/.test(ins) ? `ze ${ins}` : `z ${ins}`);
   const initialName = (p) => `${p.first[0]}. ${p.full.split(' ').slice(1).join(' ')}`;
 
   // --- Dowody dostarczone przez podejrzanych --------------------------------
@@ -405,7 +421,7 @@ function generate(rng, opts) {
           facts: [{ t: 'claim', kind, who: by, place, time: t, ...(withP ? { with: [withP.id] } : {}) }],
         });
         evs = [{ place, from: t, to: t }];
-        card.alibi = (id) => `Twierdzi, że ${g(s, 'był', 'była')} ${PLACES[place].loc}${withP ? ` razem z ${withP.ins}` : ''} (paragon: ${id}).`;
+        card.alibi = (id) => `Twierdzi, że ${g(s, 'był', 'była')} ${PLACES[place].loc}${withP ? ` razem ${zIns(withP.ins)}` : ''} (paragon: ${id}).`;
         break;
       }
       case 'photo': {
@@ -455,13 +471,13 @@ function generate(rng, opts) {
           desk: 'Z', kind: 'supplied', by, title: 'Zdjęcie z telefonu',
           lines: [
             `${PLACES[place].name} · metadane pliku: ${dShort}, ${fmt(t)}`,
-            withP ? `Na zdjęciu: ${s.first} i ${withP.first} ${rng.pick(['uśmiechają się do obiektywu przy fontannie', 'pozują na tle ratusza', 'stoją przy barierce', 'trzymają kubki z herbatą'])}.` : `Na zdjęciu: ${s.first} ${rng.pick(PHOTO_POSES)}.`,
+            withP ? `Na zdjęciu: ${s.first} i ${withP.first} ${rng.pick(POSES_TWO[place] || POSES_TWO.any)}.` : `Na zdjęciu: ${s.first} ${rng.pick(POSES_ONE[place] || PHOTO_POSES)}.`,
             `W tle: ${skyText}; ${groundText}.`,
           ],
           facts: [{ t: 'claim', kind, who: by, place, time: t, sky, ground, ...(withP ? { with: [withP.id] } : {}) }],
         });
         evs = [{ place, from: t, to: t }];
-        card.alibi = (id) => `Twierdzi, że ${g(s, 'spacerował', 'spacerowała')} ${PLACES[place].walk}${withP ? ` razem z ${withP.ins}` : ''} (zdjęcie: ${id}).`;
+        card.alibi = (id) => `Twierdzi, że ${g(s, 'spacerował', 'spacerowała')} ${PLACES[place].walk}${withP ? ` razem ${zIns(withP.ins)}` : ''} (zdjęcie: ${id}).`;
         break;
       }
       case 'cinema': {
@@ -491,7 +507,7 @@ function generate(rng, opts) {
           facts: [{ t: 'claim', kind, who: by, film, start, ...(withP ? { with: [withP.id] } : {}) }],
         });
         evs = [{ place: 'kino', from: start, to: start + dur }];
-        card.alibi = (id) => `Twierdzi, że ${g(s, 'był', 'była')} w kinie „Mewa”${withP ? ` razem z ${withP.ins}` : ''} na filmie „${film}” (bilet${withP ? 'y' : ''}: ${id}).`;
+        card.alibi = (id) => `Twierdzi, że ${g(s, 'był', 'była')} w kinie „Mewa”${withP ? ` razem ${zIns(withP.ins)}` : ''} na filmie „${film}” (bilet${withP ? 'y' : ''}: ${id}).`;
         break;
       }
       case 'delivery': {
@@ -623,7 +639,8 @@ function generate(rng, opts) {
     }
     if (opts.mustConflict && !evs.some((e) => opts.mustConflict.some((E) => clash(e, E, -4)))) retry();
     s.items.push(card);
-    if (!s.claimCard) s.claimCard = card;
+    // Karta-przykrywka (bez alibi) nigdy nie jest tą, którą osoba podaje jako swoje alibi.
+    if (!s.claimCard && !opts.cover) s.claimCard = card;
     return { card, events: evs };
   }
 
@@ -845,16 +862,18 @@ function generate(rng, opts) {
   // A nie ma innego dowodu z alibi (tak jak sprawca), a N2, tak jak Y, ma prawdziwy pobyt tylko
   // na zapieczętowanym nagraniu albo w rejestrze. Żeby wskazać fałszywkę, trzeba to sprawdzić.
   const jointOwnerIdx = weekend ? rng.pick(decoyIdx) : -1;
-  const jointPartnerIdx = weekend ? neutralIdx[1] : -1;
+  // Kolejność Y i N2 losowa: inaczej fałszywka zawsze dotyczyłaby osoby wyżej na liście.
+  const wkN = weekend ? rng.shuffle(neutralIdx) : neutralIdx;
+  const jointPartnerIdx = weekend ? wkN[1] : -1;
   // Drugi prawdziwy wspólny dowód (weekend bez alibi krzyżowego): druga zmyłka razem z Y.
   const jointOwner2Idx = weekend && mode === 'self' ? decoyIdx.find((i) => i !== jointOwnerIdx) : -1;
-  const jointPartner2Idx = weekend && mode === 'self' ? neutralIdx[0] : -1;
+  const jointPartner2Idx = weekend && mode === 'self' ? wkN[0] : -1;
   let forgedCard;
   let forgedEvents = [];
   if (mode === 'cross') {
     // Alibi krzyżowe: sprawca pokazuje wspólny dowód z niewinną osobą Y, a prawdziwy pobyt Y temu przeczy.
     const forgedKind = crossKind;
-    const yIdx = neutralIdx[0];
+    const yIdx = wkN[0];
     const Y = suspects[yIdx];
     // Prawdziwy pobyt Y jest na zapieczętowanym nagraniu albo w rejestrze wejść: trzeba go zlecić,
     // a trop jest logiczny (Y twierdzi, że był właśnie tam).
@@ -938,9 +957,13 @@ function generate(rng, opts) {
   for (const i of [culpritIdx, ...decoyIdx, ...(P.neutralCover ? neutralIdx : [])]) {
     if (!rng.chance(P.coverChance)) continue;
     const s = suspects[i];
-    const kind = rng.pick(COVER_KINDS);
+    // Przykrywka pasuje do historii: kto wracał autobusem albo pociągiem, nie parkował; aplikacja kurierska
+    // tylko u osoby, która twierdzi, że rozwoziła paczki.
+    const own = s.claimCard?.facts?.find((f) => f.t === 'claim')?.kind;
+    const kinds2 = COVER_KINDS.filter((k) => (k !== 'parking' || !['bus', 'train'].includes(own)) && (k !== 'delivery' || own === 'delivery'));
+    const kind = rng.pick(kinds2.length ? kinds2 : ['receipt']);
     try {
-      attempt(s, () => makeClaim(kind, s, false, true));
+      attempt(s, () => makeClaim(kind, s, false, true, { cover: true }));
     } catch (e) {
       if (!(e instanceof RetryError)) throw e;
     }
@@ -957,6 +980,8 @@ function generate(rng, opts) {
     // że kłamca ma inne, potwierdzone alibi. Czasem godzina wypada tuż poza zasięgiem.
     const lieNoAlibi = !rng.chance(P.lieAlibiChance);
     lieCard = attempt(liar, () => makeClaim(lieKind, liar, true, lieNoAlibi)).card;
+    // Kłamca czasem podaje kłamstwo jako swoje alibi (inaczej kłamstwa nigdy nie byłoby w zeznaniach).
+    if (!lieNoAlibi && rng.chance(0.5)) liar.claimCard = lieCard;
   }
   // Pułapki niewinnych są na nagraniu tak samo często jak pułapka sprawcy, żeby kamera z zeznaniem-tropem go nie zdradzała.
   for (const i of rng.sample(innocents, P.traps)) attempt(suspects[i], () => makeNeutral(rng.chance(P.sealedTrapChance) ? 'cctv' : rng.pick(['witness', 'cardlog']), suspects[i], 'trap'));

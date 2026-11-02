@@ -27,7 +27,7 @@ function confession(code, p, weekday) {
     'bus-no-departure': `Bilet ${g('skasowałem', 'skasowałam')} kiedy indziej i ${g('przerobiłem', 'przerobiłam')} godzinę. O tej porze żaden autobus stamtąd nie odjeżdżał.`,
   };
   T.physical = `Ten dowód ${g('przygotowałem', 'przygotowałam')} wcześniej. Nie ${g('przewidziałem', 'przewidziałam')}, że ktoś zobaczy mnie wtedy zupełnie gdzie indziej.`;
-  T['physical-other'] = `${g('Myślałem', 'Myślałam')}, że wspólny dowód będzie mocniejszy. Nie ${g('wiedziałem', 'wiedziałam')}, że tej drugiej osoby nikt nie musi kryć, bo ma własne alibi.`;
+  T['physical-other'] = `${g('Myślałem', 'Myślałam')}, że dowód na dwie osoby będzie mocniejszy, bo nikt nie sprawdzi obu. Nie ${g('pomyślałem', 'pomyślałam')}, że tamtą osobę widziano wtedy zupełnie gdzie indziej.`;
   return T[code] || `Ten dowód ${g('podrobiłem', 'podrobiłam')}, żeby mieć alibi.`;
 }
 

@@ -268,7 +268,7 @@ export function rulesShortFor(c) {
       ? ['ticket', 'Fałszywe są dwa dowody od podejrzanych: fałszywka sprawcy (dałaby mu alibi) i kłamstwo niewinnej osoby, która ma inne, potwierdzone alibi.']
       : ['ticket', 'Dokładnie jeden dowód od podejrzanych jest fałszywy. Podrzucił go sprawca i dałby mu alibi.'],
     map ? ['map', '1 przecznica = 2 min. Liczcie przecznice w poziomie i w pionie na planie miasta.'] : ['map', 'Czasy dotarcia są najkrótsze możliwe; między dwoma miejscami co najmniej różnica ich czasów.'],
-    ['search', 'Fałszywkę zdradza tabela urzędowa albo to, że ktoś był gdzie indziej i nie zdążyłby dotrzeć.'],
+    ['search', 'Fałszywkę zdradza tabela urzędowa albo to, że ktoś był gdzie indziej i nie zdążyłby dotrzeć. Wspólny dowód dwóch osób jest prawdziwy tylko wtedy, gdy obie naprawdę tam były.'],
     ['footprints', 'Prawdziwy dowód = ta osoba tam była. Kino: cały seans. Pociąg: potem nie było jej w mieście.'],
     ['clock', 'Zegary są zgodne, rozkłady i godziny obowiązują dokładnie tak, jak na kartach.'],
   ];
