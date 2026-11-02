@@ -3,7 +3,8 @@
 import { randomPracticeCode, DIFFICULTY_LABELS } from './generator.js';
 import { loadDailyCase, loadPracticeCase } from './cases.js';
 import { solveCase } from './solver.js';
-import { TEAM_DESKS, RULES, DESK_DEFS } from './data.js';
+import { TEAM_DESKS, RULES, DESK_DEFS, REASONS } from './data.js';
+import { buildEpilogue } from './epilogue.js';
 import { fmt, localTodayIso, addDays } from './time.js';
 import { store } from './storage.js';
 import { CONFIG } from './config.js';
@@ -20,7 +21,7 @@ const state = {
   seat: 1,
   tab: 'akta',
   modal: null, // null | 'accuse' | 'hints' | 'end'
-  accuse: { forged: null, proof: null, last: null },
+  accuse: { forged: null, proof: null, reason: null, alibis: {}, last: null },
   confirm: null,
   showAll: false,
   toast: '',
@@ -57,7 +58,7 @@ async function loadCase(ref) {
 const isArchive = () => state.ref?.type === 'daily' && state.ref.date < addDays(localTodayIso(), -1);
 
 function resetCaseUi() {
-  state.accuse = { forged: null, proof: null, last: null };
+  state.accuse = { forged: null, proof: null, reason: null, alibis: {}, last: null };
   state.showAll = false;
   state.tab = 'akta';
   state.modal = null;
@@ -338,7 +339,7 @@ function renderHow() {
       <li>Pięcioro podejrzanych ma alibi. Jedno z nich jest fałszywe: sprawca dostarczył <b>dokładnie jeden sfałszowany dowód</b>.</li>
       <li>Dowody leżą na pięciu biurkach: Dokumenty, Świadkowie, Mapa i rozkłady, Zdjęcia, Rejestry. Fałszywkę zawsze obala karta z <b>innego</b> biurka.</li>
       <li>Liczcie czasy. Jeśli kogoś widziano o 19:40 w teatrze, a z teatru na miejsce zbrodni najszybciej dociera się w 25 minut, to nie mógł być w środku o 19:52.</li>
-      <li>Oskarżenie to dwie karty: <b>sfałszowany dowód</b> i <b>karta, która go obala</b>. Kto dostarczył fałszywkę, ten jest sprawcą. Masz ${CONFIG.maxAttempts} próby, każda pomyłka to +${fmtPenalty(CONFIG.wrongPenalty)}, a podpowiedź +${fmtPenalty(CONFIG.hintPenalty)}.</li>
+      <li>Na koniec składasz <b>raport z dochodzenia</b>: sfałszowany dowód, karta, która go obala, i co ta karta pokazuje. Kto dostarczył fałszywkę, ten jest sprawcą. Masz ${CONFIG.maxAttempts} próby, każda pomyłka to +${fmtPenalty(CONFIG.wrongPenalty)}, a podpowiedź +${fmtPenalty(CONFIG.hintPenalty)}. Za trafny powód, potwierdzone alibi pozostałych i trafienie za pierwszym razem raport dostaje gwiazdki.</li>
       <li><b>Z ekipą:</b> każdy otwiera grę na swoim telefonie i wybiera inny numer gracza. Każdy widzi tylko swoje biurka, więc musicie rozmawiać (na Discordzie, przez telefon albo przy stole). Oskarżenie składa kapitan, czyli gracz 1.</li>
     </ol>
   </details>`;
@@ -595,7 +596,7 @@ function renderTopbar() {
       <div class="tb-actions">
         <button class="btn btn-small" data-act="open-hints">Podpowiedź <span class="pill">${progress.hints}/3</span></button>
         ${isCaptain()
-          ? `<button class="btn btn-small btn-primary" data-act="open-accuse">Oskarż <span class="pill">${left}</span></button>`
+          ? `<button class="btn btn-small btn-primary" data-act="open-accuse">Raport <span class="pill">${left}</span></button>`
           : `<button class="btn btn-small" data-act="open-end">Koniec</button>`}
       </div>
     </div>
@@ -685,21 +686,25 @@ function renderModal() {
     const proofCard = a.proof ? cardById(a.proof) : null;
     const forgedCard = a.forged ? cardById(a.forged) : null;
     const accused = forgedCard ? suspectById(forgedCard.by) : null;
+    const reasons = forgedCard ? REASONS[forgedKind(forgedCard)] || [] : [];
+    const reasonText = reasons.find(([code]) => code === a.reason)?.[1];
     const sq = (v) => (v === null ? 'skip' : v ? 'ok' : 'bad');
     const tried = progress.attempts.some((t) => t.forged === a.forged && t.proof === a.proof);
+    const blank = (v) => (v ? `<b>${v}</b>` : '<span class="blank">……</span>');
+    const cardOptions = (sel) => DESK_DEFS.map((d) => `<optgroup label="${esc(d.name)}">${state.c.cards.filter((k) => k.desk === d.id).map((k) => `<option value="${k.id}" ${sel === k.id ? 'selected' : ''}>${k.id}${mine.includes(k.desk) ? ` · ${esc(k.title)}` : ''}</option>`).join('')}</optgroup>`).join('');
     body = `
-      <h2 tabindex="-1">Oskarżenie</h2>
+      <h2 tabindex="-1">Raport z dochodzenia</h2>
       <p class="muted small">Pozostałe próby: ${left}. Pomyłka dodaje ${fmtPenalty(CONFIG.wrongPenalty)} do czasu.</p>
       ${a.last ? `<p class="feedback" role="status"><span class="fb"><span class="sq ${sq(a.last[0])}"></span> fałszywka: ${a.last[0] ? 'trafiona' : 'pudło'}</span> <span class="fb"><span class="sq ${sq(a.last[1])}"></span> obalenie: ${a.last[1] === null ? 'nie sprawdzono' : a.last[1] ? 'trafione' : 'pudło'}</span></p>` : ''}
       ${progress.attempts.length ? `<div class="history"><span class="history-label">Wcześniejsze próby:</span> ${progress.attempts.map((t) => `<span class="fb"><span class="chip">${t.forged}</span> + <span class="chip">${t.proof}</span> <span class="sq ${sq(t.ok[0])}"></span><span class="sq ${sq(t.ok[1])}"></span></span>`).join(' ')}</div>` : ''}
       <fieldset class="pick">
-        <legend>1. Który dowód jest sfałszowany?</legend>
+        <legend>1. Sfałszowany dowód</legend>
         <div class="pick-list">
           ${supplied.map((k) => `<button class="pick-btn pick-row${a.forged === k.id ? ' on' : ''}" data-act="pick-forged" data-id="${k.id}" aria-pressed="${a.forged === k.id}"><span class="chip">${k.id}</span> <span class="pick-main">${esc(k.title)}<span class="pick-sub">${esc(suspectById(k.by).full)}</span></span></button>`).join('')}
         </div>
       </fieldset>
       <fieldset class="pick">
-        <legend>2. Która karta to udowadnia?</legend>
+        <legend>2. Karta, która go obala</legend>
         ${state.mode === 'team' ? '<p class="muted small">Kody kart z innych biurek podają ci pozostali gracze.</p>' : ''}
         <div class="proof-grid">
           ${DESK_DEFS.map((d) => {
@@ -708,11 +713,26 @@ function renderModal() {
             return `<div class="proof-row"><span class="proof-desk">${esc(d.name)}</span><div class="proof-chips">${ids.map((k) => `<button class="proof-chip${a.proof === k.id ? ' on' : ''}" data-act="pick-proof" data-id="${k.id}" aria-pressed="${a.proof === k.id}" ${mine.includes(k.desk) ? `title="${esc(k.title)}"` : ''}>${k.id}</button>`).join('')}</div></div>`;
           }).join('')}
         </div>
-        ${proofCard ? `<p class="small">Wybrana karta: <span class="chip">${proofCard.id}</span> ${mine.includes(proofCard.desk) ? esc(proofCard.title) : `z biurka „${esc(deskName(proofCard.desk))}”`}</p>` : ''}
       </fieldset>
-      ${accused ? `<p class="accused">Oskarżasz: <b>${esc(accused.full)}</b></p>` : ''}
+      <fieldset class="pick">
+        <legend>3. Co ta karta pokazuje?</legend>
+        ${reasons.length ? `<div class="pick-list">${reasons.map(([code, text]) => `<button class="pick-btn pick-reason${a.reason === code ? ' on' : ''}" data-act="pick-reason" data-id="${code}" aria-pressed="${a.reason === code}">${esc(text)}</button>`).join('')}</div>` : '<p class="muted small">Najpierw wskaż sfałszowany dowód.</p>'}
+      </fieldset>
+      <fieldset class="pick">
+        <legend>4. Alibi pozostałych potwierdzają <span class="muted small">(nieobowiązkowe, za gwiazdkę)</span></legend>
+        <div class="alibi-list">
+          ${state.c.suspects.filter((x) => !accused || x.id !== accused.id).map((x) => `
+            <label class="alibi-row" for="alibi-${x.id}"><span>${esc(x.full)}</span>
+              <select id="alibi-${x.id}" data-act="alibi" data-id="${x.id}"><option value="">nie wiem</option>${cardOptions(a.alibis[x.id])}</select>
+            </label>`).join('')}
+        </div>
+      </fieldset>
+      <div class="report-preview" aria-live="polite">
+        <p>${accused ? (accused.f ? 'Sprawczynią' : 'Sprawcą') : 'Sprawcą'} jest ${blank(accused ? esc(accused.full) : '')}, bo dowód ${blank(a.forged)} jest sfałszowany, ponieważ karta ${blank(a.proof)} pokazuje, że ${blank(reasonText ? esc(reasonText) : '')}.</p>
+        ${proofCard && !mine.includes(proofCard.desk) ? `<p class="small muted">Karta ${proofCard.id} leży na biurku „${esc(deskName(proofCard.desk))}”.</p>` : ''}
+      </div>
       ${tried ? '<p class="small muted">Ta para kart była już sprawdzona. Wybierz inną.</p>' : ''}
-      <button class="btn btn-primary btn-wide" data-act="accuse" ${a.forged && a.proof && !tried ? '' : 'disabled'}>Oskarżam</button>`;
+      <button class="btn btn-primary btn-wide" data-act="accuse" ${a.forged && a.proof && a.reason && !tried ? '' : 'disabled'}>Podpisz i złóż raport</button>`;
   }
   if (state.modal === 'end') {
     const confirming = state.confirm === 'reveal';
@@ -723,7 +743,7 @@ function renderModal() {
   }
   return `
   <div class="overlay" data-act="close-modal">
-    <div class="modal" role="dialog" aria-modal="true" aria-label="${({ hints: 'Podpowiedzi', accuse: 'Oskarżenie', end: 'Koniec śledztwa' })[state.modal]}" data-stop>
+    <div class="modal" role="dialog" aria-modal="true" aria-label="${({ hints: 'Podpowiedzi', accuse: 'Raport z dochodzenia', end: 'Koniec śledztwa' })[state.modal]}" data-stop>
       <button class="btn btn-ghost btn-icon modal-close" data-act="close-modal" aria-label="Zamknij">✕</button>
       ${body}
     </div>
@@ -735,23 +755,49 @@ function proofSet() {
   return new Set(f.refs.filter((r) => r !== f.card));
 }
 
+function forgedKind(card) {
+  return card.facts?.find((f) => f.t === 'claim')?.kind;
+}
+
+/** Karty, które potwierdzają alibi danej osoby (bez kart z czasami dotarcia). */
+function alibiCards(sid) {
+  const set = new Set();
+  for (const item of state.sol.explain.suspects[sid] || []) item.refs.slice(0, -1).forEach((r) => set.add(r));
+  return set;
+}
+
+function reportQuality(a) {
+  const f = state.sol.explain.forged;
+  const innocents = state.c.suspects.filter((x) => x.id !== state.c.solution.culprit);
+  const alibiCorrect = innocents.filter((x) => a.alibis[x.id] && alibiCards(x.id).has(a.alibis[x.id])).length;
+  const reasonOk = f.reasonCodes.includes(a.reason);
+  const firstTry = progress.attempts.length === 1;
+  const stars = Number(reasonOk) + Number(alibiCorrect === innocents.length) + Number(firstTry);
+  return { reasonOk, alibiCorrect, alibiTotal: innocents.length, firstTry, stars };
+}
+
 function submitAccusation() {
   const a = state.accuse;
   // Po pomyłce karta-obalenie jest czyszczona, więc podwójne kliknięcie nie wyśle drugiej próby.
-  if (!a.forged || !a.proof || progress.status !== 'playing') return;
+  if (!a.forged || !a.proof || !a.reason || progress.status !== 'playing') return;
   if (progress.attempts.some((t) => t.forged === a.forged && t.proof === a.proof)) return;
   const sol = state.c.solution;
   const forgedOk = a.forged === sol.forged;
   const ok = [forgedOk, forgedOk ? proofSet().has(a.proof) : null];
-  progress.attempts.push({ forged: a.forged, proof: a.proof, ok });
+  progress.attempts.push({ forged: a.forged, proof: a.proof, reason: a.reason, alibis: { ...a.alibis }, ok });
   a.last = ok;
-  if (ok[0] && ok[1]) return finish('solved');
+  if (ok[0] && ok[1]) {
+    progress.report = reportQuality(a);
+    return finish('solved');
+  }
   progress.penalty += CONFIG.wrongPenalty;
   a.proof = null;
   saveProgress();
   if (progress.attempts.length >= CONFIG.maxAttempts) return finish('failed');
   render();
 }
+
+const starsText = (n) => `${'★'.repeat(n)}${'☆'.repeat(3 - n)}`;
 
 // ---------------------------------------------------------------------------
 // Wynik
@@ -762,7 +808,7 @@ function shareText() {
   const mode = state.mode === 'solo' ? 'solo' : `ekipa · ${state.teamSize} ${state.teamSize === 5 ? 'osób' : 'osoby'}`;
   const rows = progress.attempts.map((a) => a.ok.map((x) => (x === null ? '⬜' : x ? '🟩' : '🟥')).join('')).join('\n');
   const tail = progress.status === 'solved'
-    ? `⏱ ${fmtClock(elapsedSec())} · 💡 ${progress.hints}`
+    ? `⏱ ${fmtClock(elapsedSec())} · 💡 ${progress.hints}${progress.report ? ` · raport ${starsText(progress.report.stars)}` : ''}`
     : 'Sprawa nierozwiązana';
   return [`${head} · ${mode}`, rows, tail, CONFIG.shareUrl].filter(Boolean).join('\n');
 }
@@ -771,6 +817,18 @@ function shareText() {
 function msToNextCase() {
   const [y, m, d] = state.ref.date.split('-').map(Number);
   return new Date(y, m - 1, d + 1) - new Date();
+}
+
+function renderEpilogue() {
+  const outcome = progress.status === 'failed' ? 'failed' : progress.status === 'revealed' ? 'revealed' : 'solved';
+  const e = buildEpilogue(state.c, state.sol, outcome);
+  return `
+    <section class="epilogue" aria-label="${esc(e.heading)}">
+      <p class="epi-head">${esc(e.heading)}</p>
+      <p class="epi-meta">${esc(e.meta)}</p>
+      ${e.paragraphs.map((x) => `<p>${esc(x)}</p>`).join('')}
+      <blockquote>${esc(e.quote)}</blockquote>
+    </section>`;
 }
 
 function renderResult() {
@@ -809,7 +867,13 @@ function renderResult() {
         <div><dt>Próby</dt><dd>${progress.attempts.length}/${CONFIG.maxAttempts}</dd></div>
         <div><dt>Podpowiedzi</dt><dd>${progress.hints}</dd></div>
         <div><dt>Kary</dt><dd>+${fmtPenalty(progress.penalty)}</dd></div>
+        ${solved && progress.report ? `<div><dt>Raport</dt><dd class="stars" aria-label="${progress.report.stars} z 3 gwiazdek">${starsText(progress.report.stars)}</dd></div>` : ''}
       </dl>
+      ${solved && progress.report ? `<ul class="report-review">
+        <li class="${progress.report.reasonOk ? 'ok' : 'bad'}">${progress.report.reasonOk ? '✓' : '✕'} powód fałszerstwa</li>
+        <li class="${progress.report.alibiCorrect === progress.report.alibiTotal ? 'ok' : 'bad'}">${progress.report.alibiCorrect === progress.report.alibiTotal ? '✓' : '✕'} alibi pozostałych: ${progress.report.alibiCorrect}/${progress.report.alibiTotal}</li>
+        <li class="${progress.report.firstTry ? 'ok' : 'bad'}">${progress.report.firstTry ? '✓' : '✕'} za pierwszym razem</li>
+      </ul>` : ''}
       <div class="share">
         <label for="share-text">Wynik dla znajomych (bez spoilerów)</label>
         <textarea id="share-text" readonly rows="5">${esc(shareText())}</textarea>
@@ -817,6 +881,7 @@ function renderResult() {
       </div>`}
       ${c.kind === 'daily' ? (nextIn > 0 ? `<p class="muted">Następna sprawa za ${hh} h ${mm} min.</p>` : '<p><button class="btn" data-act="home">Nowa sprawa dnia już czeka</button></p>') : ''}
     </section>
+    ${renderEpilogue()}
     <section class="solution">
       <h2>Rozwiązanie</h2>
       <p class="verdict">${culprit.f ? 'Sprawczynią' : 'Sprawcą'} jest <b>${esc(culprit.full)}</b> (${esc(culprit.role)}). Sfałszowany dowód to <span class="chip">${forged.id}</span> ${esc(forged.title)}, a obala go ${[...proofSet()].map((r) => `<span class="chip">${r}</span>`).join(' lub ')}.</p>
@@ -976,7 +1041,14 @@ app.addEventListener('click', (e) => {
       render();
       break;
     case 'pick-proof': state.accuse.proof = target.dataset.id; render(); break;
-    case 'pick-forged': state.accuse.forged = target.dataset.id; render(); break;
+    case 'pick-forged': {
+      state.accuse.forged = target.dataset.id;
+      const kind = forgedKind(cardById(target.dataset.id));
+      if (!(REASONS[kind] || []).some(([code]) => code === state.accuse.reason)) state.accuse.reason = null;
+      render();
+      break;
+    }
+    case 'pick-reason': state.accuse.reason = target.dataset.id; render(); break;
     case 'accuse': submitAccusation(); break;
     case 'reveal':
       if (state.confirm !== 'reveal') {
@@ -1009,6 +1081,14 @@ app.addEventListener('submit', (e) => {
   }
   window.location.hash = `sprawa-${code}`;
   openPractice(code);
+});
+
+app.addEventListener('change', (e) => {
+  const el = e.target;
+  if (el.dataset?.act === 'alibi') {
+    state.accuse.alibis[el.dataset.id] = el.value;
+    render();
+  }
 });
 
 app.addEventListener('input', (e) => {

@@ -6,7 +6,7 @@ Codzienna gra detektywistyczna w przeglądarce, w stylu gier dziennych typu Word
 
 Pięcioro podejrzanych ma alibi. Sprawca podrzucił **dokładnie jeden sfałszowany dowód**: bilet na pociąg, który tego dnia nie kursuje, paragon z lokalu zamkniętego o tej godzinie, zdjęcie z suchym chodnikiem w czasie ulewy, adres, którego nie ma w spisie ulic… Dowody leżą na pięciu biurkach (Dokumenty, Świadkowie, Mapa i rozkłady, Zdjęcia, Rejestry), a fałszywkę zawsze obala karta z **innego** biurka.
 
-Oskarżenie składa się z dwóch kart: **sfałszowany dowód** i **karta, która go obala**. Kto dostarczył fałszywkę, ten jest sprawcą. Są 3 próby. Każda pomyłka dodaje 5 minut do czasu, a każda podpowiedź 2 minuty.
+Na koniec składasz **raport z dochodzenia**: sfałszowany dowód, karta, która go obala, co ta karta pokazuje i (nieobowiązkowo) karty potwierdzające alibi pozostałych. Kto dostarczył fałszywkę, ten jest sprawcą. Są 3 próby. Każda pomyłka dodaje 5 minut do czasu, a każda podpowiedź 2 minuty. Raport dostaje do trzech gwiazdek: za trafny powód, za potwierdzone alibi wszystkich niewinnych i za trafienie za pierwszym razem. Po zamknięciu sprawy czytasz protokół zatrzymania i przyznanie się sprawcy.
 
 Trudność rośnie w ciągu tygodnia: poniedziałek to około 25 kart i 2 dowody do sprawdzenia, niedziela około 45 kart, pułapki z czasami dotarcia i 5 dowodów od podejrzanych.
 

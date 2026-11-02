@@ -247,3 +247,46 @@ export const RULES = [
   'Prawdziwy bilet, paragon, zdjęcie albo zapis w rejestrze oznacza, że ta osoba naprawdę była w tym miejscu o tej porze. Wejście i wyjście w rejestrze kart, tak jak dwie godziny w jednym zeznaniu („przyszedł o…, zapłacił o…”), to pobyt w tym miejscu przez cały ten czas, a wyjazd pociągiem oznacza, że potem tej osoby nie było już w mieście.',
   'Wszystkie zegary są zgodne. Rozkłady, godziny otwarcia i strefy parkowania obowiązują dokładnie tak, jak zapisano je na kartach, także w święta. Liczy się dzień tygodnia podany w aktach.',
 ];
+
+/**
+ * Powody do wyboru w raporcie z dochodzenia, osobno dla każdego rodzaju dowodu.
+ * Kody odpowiadają `reasonCodes` z solvera. Część powodów nigdy nie jest prawdziwa (zmyłki).
+ */
+export const REASONS = {
+  train: [
+    ['train-day', 'pociąg nie kursuje w ten dzień tygodnia'],
+    ['train-time', 'pociąg odjeżdża o innej godzinie'],
+    ['train-missing', 'takiego pociągu nie ma w rozkładzie'],
+  ],
+  receipt: [
+    ['closed-day', 'lokal był w ten dzień tygodnia nieczynny'],
+    ['closed-early', 'o tej godzinie lokal był już zamknięty'],
+    ['receipt-items', 'w tym lokalu nie sprzedaje się takich rzeczy'],
+  ],
+  photo: [
+    ['photo-daylight', 'na zdjęciu jest jasno, a słońce już zaszło'],
+    ['photo-dark', 'na zdjęciu jest ciemno, a słońce jeszcze nie zaszło'],
+    ['photo-dry', 'na zdjęciu jest sucho, a wtedy padało'],
+    ['photo-wet', 'na zdjęciu są kałuże, a od dawna nie padało'],
+  ],
+  cinema: [
+    ['no-screening', 'tego filmu nie grano o tej godzinie'],
+    ['cinema-closed', 'kino było tego dnia zamknięte'],
+    ['cinema-short', 'seans skończył się przed włamaniem'],
+  ],
+  delivery: [
+    ['no-number', 'na tej ulicy nie ma domu o takim numerze'],
+    ['parity', 'ta ulica ma tylko numery parzyste albo tylko nieparzyste'],
+    ['delivery-fast', 'kurier nie zdążyłby dojechać między adresami'],
+  ],
+  parking: [
+    ['zone-off-day', 'w ten dzień tygodnia parkomaty w tej strefie nie działają'],
+    ['zone-ended', 'o tej godzinie parkomaty w tej strefie były już wyłączone'],
+    ['no-zone', 'ta ulica nie należy do strefy płatnego parkowania'],
+  ],
+  bus: [
+    ['bus-after-last', 'ostatni autobus odjechał wcześniej'],
+    ['bus-no-departure', 'o tej godzinie żaden autobus nie odjeżdżał z przystanku'],
+    ['bus-no-stop', 'ta linia nie zatrzymuje się na tym przystanku'],
+  ],
+};

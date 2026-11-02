@@ -84,7 +84,7 @@ export function solveCase(c) {
 
   /** Sprawdza dowód dostarczony przez podejrzanego. */
   function evaluate(cl) {
-    const out = { card: cl.card, who: cl.who, kind: cl.kind, contradicted: false, unknown: false, reason: '', refs: [], sightings: [], okNote: '' };
+    const out = { card: cl.card, who: cl.who, kind: cl.kind, contradicted: false, unknown: false, reason: '', reasonCodes: [], refs: [], sightings: [], okNote: '' };
     switch (cl.kind) {
       case 'train': {
         const row = trains.get(cl.no);
@@ -92,12 +92,14 @@ export function solveCase(c) {
         if (!row) {
           if (!trains.size) { out.unknown = true; break; }
           out.contradicted = true;
+          out.reasonCodes.push('train-missing');
           out.reason = `pociągu ${cl.no} nie ma w rozkładzie`;
           break;
         }
         out.refs.push(row.ref);
         if (row.dep !== cl.time) {
           out.contradicted = true;
+          out.reasonCodes.push('train-time');
           out.reason = `bilet podaje odjazd o ${fmt(cl.time)}, a według rozkładu [${row.ref}] pociąg ${cl.no} odjeżdża o ${fmt(row.dep)}`;
           break;
         }
@@ -106,6 +108,7 @@ export function solveCase(c) {
           const lref = legend.get(row.note);
           if (lref && lref !== row.ref) out.refs.push(lref);
           out.contradicted = true;
+          out.reasonCodes.push('train-day');
           out.reason = `pociąg ${cl.no} ma w rozkładzie [${row.ref}] znak „${row.note}”, czyli ${note.text}${lref && lref !== row.ref ? ` [${lref}]` : ''}, a kradzież wydarzyła się ${WEEKDAYS_ACC[weekday]}`;
           break;
         }
@@ -119,6 +122,7 @@ export function solveCase(c) {
         out.refs.push(h.ref);
         if (!openAt(h, dt, cl.time)) {
           out.contradicted = true;
+          out.reasonCodes.push(h[dt] ? 'closed-early' : 'closed-day');
           out.reason = h[dt]
             ? `${placeName(cl.place)} – lokal czynny tego dnia tylko do ${fmt(h[dt][1])} [${h.ref}], a paragon ma godzinę ${fmt(cl.time)}`
             : `${placeName(cl.place)} – lokal nieczynny w ten dzień tygodnia [${h.ref}], a paragon ma godzinę ${fmt(cl.time)}`;
@@ -131,16 +135,17 @@ export function solveCase(c) {
         out.sightings.push({ place: cl.place, from: cl.time, to: cl.time });
         const problems = [];
         if (sunset) {
-          if (cl.sky === 'day' && cl.time > sunset.time + 20) problems.push({ text: `zdjęcie pokazuje jasne niebo o ${fmt(cl.time)}, a słońce zaszło o ${fmt(sunset.time)} [${sunset.ref}]`, ref: sunset.ref });
-          if (cl.sky === 'night' && cl.time < sunset.time - 20) problems.push({ text: `zdjęcie pokazuje ciemne niebo o ${fmt(cl.time)}, a słońce zaszło dopiero o ${fmt(sunset.time)} [${sunset.ref}]`, ref: sunset.ref });
+          if (cl.sky === 'day' && cl.time > sunset.time + 20) problems.push({ code: 'photo-daylight', text: `zdjęcie pokazuje jasne niebo o ${fmt(cl.time)}, a słońce zaszło o ${fmt(sunset.time)} [${sunset.ref}]`, ref: sunset.ref });
+          if (cl.sky === 'night' && cl.time < sunset.time - 20) problems.push({ code: 'photo-dark', text: `zdjęcie pokazuje ciemne niebo o ${fmt(cl.time)}, a słońce zaszło dopiero o ${fmt(sunset.time)} [${sunset.ref}]`, ref: sunset.ref });
         }
         if (weatherCard) {
-          if (cl.ground === 'dry' && raining(cl.time)) problems.push({ text: `zdjęcie z ${fmt(cl.time)} pokazuje suchy chodnik, a według stacji meteo [${weatherCard}] wtedy padało`, ref: weatherCard });
-          if (cl.ground === 'wet' && !raining(cl.time) && !rainedRecently(cl.time, 60)) problems.push({ text: `zdjęcie z ${fmt(cl.time)} pokazuje kałuże, a według stacji meteo [${weatherCard}] od dawna nie padało`, ref: weatherCard });
+          if (cl.ground === 'dry' && raining(cl.time)) problems.push({ code: 'photo-dry', text: `zdjęcie z ${fmt(cl.time)} pokazuje suchy chodnik, a według stacji meteo [${weatherCard}] wtedy padało`, ref: weatherCard });
+          if (cl.ground === 'wet' && !raining(cl.time) && !rainedRecently(cl.time, 60)) problems.push({ code: 'photo-wet', text: `zdjęcie z ${fmt(cl.time)} pokazuje kałuże, a według stacji meteo [${weatherCard}] od dawna nie padało`, ref: weatherCard });
         }
         if (problems.length) {
           out.contradicted = true;
           out.reason = problems.map((p) => p.text).join('; ');
+          out.reasonCodes.push(...problems.map((p) => p.code));
           out.refs.push(...new Set(problems.map((p) => p.ref)));
           break;
         }
@@ -159,6 +164,7 @@ export function solveCase(c) {
         if (!sc) {
           out.sightings.push({ place: 'kino', from: cl.start, to: cl.start });
           out.contradicted = true;
+          out.reasonCodes.push('no-screening');
           if (anyRef) out.refs.push(anyRef);
           out.reason = `w repertuarze kina [${anyRef}] film „${cl.film}” nie ma seansu o ${fmt(cl.start)}`;
           break;
@@ -178,6 +184,7 @@ export function solveCase(c) {
           const parityOk = st.parity === 'all' || (st.parity === 'even' ? stop.no % 2 === 0 : stop.no % 2 === 1);
           if (stop.no < 1 || stop.no > st.max || !parityOk) {
             const desc = st.parity === 'all' ? `ma numery od 1 do ${st.max}` : `ma tylko numery ${st.parity === 'even' ? 'parzyste' : 'nieparzyste'} do ${st.max}`;
+            out.reasonCodes.push(stop.no > st.max || stop.no < 1 ? 'no-number' : 'parity');
             bad.push(`adres ${placeName(stop.place)} ${stop.no} nie istnieje: według spisu ulic [${st.ref}] ta ulica ${desc}`);
           }
         }
@@ -192,6 +199,7 @@ export function solveCase(c) {
         out.refs.push(zone.ref);
         if (!openAt(zone.hours, dt, cl.time)) {
           out.contradicted = true;
+          out.reasonCodes.push(zone.hours[dt] ? 'zone-ended' : 'zone-off-day');
           out.reason = zone.hours[dt]
             ? `w strefie ${cl.zone} parkomaty działają tego dnia tylko do ${fmt(zone.hours[dt][1])} [${zone.ref}], a bilet wydano o ${fmt(cl.time)}`
             : `w strefie ${cl.zone} w ten dzień tygodnia parkomaty są wyłączone [${zone.ref}], a bilet wydano o ${fmt(cl.time)}`;
@@ -210,6 +218,7 @@ export function solveCase(c) {
         if (match === undefined) {
           const last = deps[deps.length - 1];
           out.contradicted = true;
+          out.reasonCodes.push(last !== undefined && cl.time > last + 2 ? 'bus-after-last' : 'bus-no-departure');
           out.reason = last !== undefined && cl.time > last + 2
             ? `bilet skasowano o ${fmt(cl.time)}, a ostatni autobus linii ${cl.line} odjechał z tego przystanku o ${fmt(last)} [${bus.ref}]`
             : `bilet skasowano o ${fmt(cl.time)}, a o tej porze żaden autobus linii ${cl.line} nie odjeżdżał z tego przystanku [${bus.ref}]`;
@@ -316,7 +325,7 @@ export function solveCase(c) {
   const explain = { suspects: {}, forged: null };
   if (unique) {
     const f = byCard.get(unique.forged);
-    explain.forged = { card: f.card, reason: f.reason, refs: [f.card, ...f.refs] };
+    explain.forged = { card: f.card, kind: f.kind, reason: f.reason, reasonCodes: f.reasonCodes, refs: [f.card, ...f.refs] };
     for (const sus of c.suspects) {
       if (sus.id === unique.culprit) continue;
       const items = [];
