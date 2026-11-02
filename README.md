@@ -24,6 +24,17 @@ Biurka są podzielone tak, że fałszywka i karta, która ją obala, zawsze traf
 
 Pomyłka przy wyborze liczby osób albo numeru? Na stronie głównej jest „Zmień ekipę lub numer”. Każde ustawienie ma osobny zapis postępu. Po przeładowaniu strony gra wraca prosto do rozpoczętej sprawy.
 
+### Gra na żywo (wspólny pokój)
+
+Jeden link dla całej ekipy: „Graj z ekipą na żywo” tworzy pokój (np. `#pokoj-AX8L4`), reszta otwiera ten link i wpisuje imię. Miejsca przydzielają się w kolejności wejścia. Zegar, podpowiedzi, próby, budżet godzin śledztwa i wynik są wspólne. Karty można kłaść na wspólny stół, a ustalenia zapisywać na tablicy. Raport może złożyć każdy. Po zerwaniu połączenia albo odświeżeniu strony gra wraca do pokoju.
+
+Potrzebny jest serwer:
+
+- **na komputerze:** `npm run live`, potem http://localhost:8787 (serwer obsługuje też samą grę; znajomi w tej samej sieci wchodzą na adres twojego komputera),
+- **publicznie:** darmowy Cloudflare Workers z Durable Objects, instrukcja w [`server/README.md`](server/README.md); adres serwera wpisz w `js/config.js` jako `liveServer`.
+
+Przycisk gry na żywo pojawia się tylko wtedy, gdy serwer jest dostępny. W podglądzie na claude.ai tryb na żywo nie działa, bo strona nie może łączyć się z zewnętrznymi serwerami.
+
 ### Solo
 
 Ta sama sprawa dnia, ale widzisz wszystkie biurka.
@@ -71,6 +82,10 @@ Skrypt warto uruchamiać co kilka tygodni, zanim skończą się opublikowane dni
 | `js/solver.js` | Niezależny solver. Czyta tylko fakty zapisane na kartach i sprawdza wszystkie hipotezy „kto i którym dowodem”, łącznie ze spójnością fizyczną (nikt nie jest w dwóch miejscach naraz, a przejście z A do B trwa co najmniej różnicę ich czasów dotarcia). Sprawa trafia do gry tylko wtedy, gdy ma **dokładnie jedno** rozwiązanie i przechodzi kontrolę jakości: każdy niewinny ma potwierdzone alibi, fałszywka dawałaby sprawcy alibi i obala ją tylko jedna karta, a przy każdej wielkości ekipy fałszywka i jej obalenie są u różnych graczy. |
 | `js/data.js` | Treści: postacie z odmianą imion, miejsca, sceny, podział biurek między graczy, zasady. |
 | `js/main.js` | Interfejs: ekrany, zegar, podpowiedzi, oskarżenie, wynik do udostępnienia, statystyki. |
+| `server/room.js` | Logika pokoju gry na żywo i protokół WebSocket, wspólna dla obu serwerów i testów. |
+| `server/node-server.mjs` | Serwer lokalny bez zależności: gra + WebSocket (`npm run live`). |
+| `server/worker.js`, `wrangler.toml` | Wersja serwera na Cloudflare Workers z Durable Objects. |
+| `js/live.js` | Połączenie z serwerem w przeglądarce (ponowne łączenie, zegar serwera). |
 | `js/config.js` | Ustawienia: adres gry do wyników, kary czasowe, liczba prób. |
 | `tests/` | Testy: 400 kolejnych dni i 300 spraw treningowych, deterministyczność, wykrywanie zepsutych spraw, osobna (niezależna od solvera) kontrola spójności pobytów. |
 
@@ -90,6 +105,6 @@ Postęp gry, notatki i statystyki zapisują się w `localStorage` przeglądarki.
 
 ## Pomysły na dalszy rozwój
 
-- **Wspólna tablica na żywo**: mały serwer (np. Supabase, PartyKit albo Cloudflare Durable Objects) z jednym „pokojem” na ekipę: przypinanie kart, wspólny zegar, ranking ekip.
+- **Ranking ekip** i stałe ekipy z historią na serwerze gry na żywo.
 - **Ukrycie rozwiązania**: dziś całą sprawę liczy przeglądarka, więc da się ją podejrzeć w narzędziach dla programistów. Serwer mógłby wysyłać każdemu tylko jego biurka.
 - Nowe rodzaje fałszerstw i scen, archiwum spraw z poprzednich dni.

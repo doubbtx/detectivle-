@@ -6,6 +6,7 @@
   "type": "module",
   "scripts": {
     "start": "node scripts/serve.mjs",
+    "live": "node server/node-server.mjs",
     "test": "node --test tests/*.test.mjs",
     "case": "node scripts/print-case.mjs"
   }
