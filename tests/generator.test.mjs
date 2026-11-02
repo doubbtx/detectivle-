@@ -196,8 +196,13 @@ test('od piątku: dwa sprzeczne dowody, ale tylko fałszywka sprawcy daje alibi'
       const lie = res.explain.lies[0];
       assert.equal(lie.card, c.lieCard, iso);
       assert.notEqual(lie.who, c.solution.culprit, iso);
-      // Kłamstwo nie daje alibi: z miejsca z karty dało się zdążyć (albo wrócić po kradzieży).
-      assert.ok(lie.to <= c.window.from - lie.travel || lie.from >= c.window.to + lie.travel, `${iso}: kłamstwo daje alibi`);
+      // Kłamstwo nie daje alibi: z żadnego miejsca na karcie nie wynika, że kłamca nie mógł być w środku.
+      const ev = res.evaluated.find((e) => e.card === c.lieCard);
+      const travelOf = (place) => c.cards.flatMap((k) => k.facts || []).find((f) => f.t === 'travel' && f.place === place)?.min;
+      for (const st of ev.sightings) {
+        const d = travelOf(st.place);
+        assert.ok(st.to <= c.window.from - d || st.from >= c.window.to + d, `${iso}: kłamstwo daje alibi (${st.place})`);
+      }
     } else {
       assert.equal(contradicted.length, 1, `${iso}: w zwykły dzień tylko fałszywka jest sprzeczna`);
       assert.ok(!c.innocentLie, iso);

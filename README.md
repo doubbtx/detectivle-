@@ -8,13 +8,13 @@ Pięcioro podejrzanych ma alibi. Sprawca podrzucił **dokładnie jeden sfałszow
 
 Na koniec składasz **raport z dochodzenia**: sfałszowany dowód, karta, która go obala, co ta karta pokazuje i (nieobowiązkowo) karty potwierdzające alibi pozostałych. Kto dostarczył fałszywkę, ten jest sprawcą. Są 3 próby. Każda pomyłka dodaje 5 minut do czasu, a każda podpowiedź 2 minuty. Raport dostaje do trzech gwiazdek: za trafny powód, za potwierdzone alibi wszystkich niewinnych i za trafienie za pierwszym razem. Po zamknięciu sprawy czytasz protokół zatrzymania i przyznanie się sprawcy.
 
-Od piątku do niedzieli sprawa jest podchwytliwa: **kłamią dwie osoby**. Fałszywy dowód sprawcy daje mu alibi na czas kradzieży. Drugi fałszywy dowód należy do niewinnej osoby, która skłamała w innej sprawie, a jej godzina leży tuż poza zasięgiem miejsca zbrodni. Trzeba więc policzyć czasy dotarcia, a nie tylko znaleźć sprzeczność.
+Od piątku do niedzieli sprawa jest podchwytliwa: **kłamią dwie osoby**. Fałszywy dowód sprawcy daje mu alibi na czas kradzieży. Drugi fałszywy dowód należy do niewinnej osoby, która skłamała w innej sprawie, a godzina na tym dowodzie wypada tuż poza zasięgiem miejsca zbrodni. Trzeba więc policzyć czasy dotarcia, a nie tylko znaleźć sprzeczność.
 
 Trudność rośnie w ciągu tygodnia: poniedziałek to około 25 kart i 2 dowody do sprawdzenia, niedziela około 45 kart, pułapki z czasami dotarcia i 5 dowodów od podejrzanych.
 
 ### Czynności śledcze
 
-Część kart urzędowych (rozkłady, rejestry, nagrania z kamer, pogoda, godziny otwarcia) jest na start zapieczętowana. Widać tylko tytuł i czynność, np. „Zabezpiecz nagranie: kamera nr 7 · Rynek” (60 min). Każdy gracz ma budżet godzin śledztwa wyliczony z tego, co naprawdę trzeba sprawdzić. Każde rozpoczęte pół godziny nadgodzin dodaje minutę do czasu. Zeznania świadków, czasy dotarcia i dowody od podejrzanych są odkryte od początku.
+Część kart urzędowych (rozkłady, rejestry, nagrania z kamer, pogoda, godziny otwarcia) jest na start zapieczętowana. Widać tylko tytuł i czynność, np. „Zabezpiecz nagranie: kamera nr 7 · Rynek” (60 min). Każdy gracz ma budżet godzin śledztwa wyliczony z tego, co naprawdę trzeba sprawdzić. Każde rozpoczęte pół godziny nadgodzin dodaje minutę do czasu rozwiązania. W grze zespołowej każdy ma własny budżet, a godziny są tylko informacją (wynikiem jest czas kapitana). Zeznania świadków, czasy dotarcia i dowody od podejrzanych są odkryte od początku.
 
 ### Gra z ekipą (2–5 osób)
 
@@ -51,6 +51,7 @@ Sprawy dnia są zapisane w plikach `cases/RRRR-MM-DD.json`, a ich sumy kontrolne
 ```bash
 node scripts/publish-cases.mjs            # dopisz sprawy do dziś + 60 dni (istniejących nie rusza)
 node scripts/publish-cases.mjs --days 90  # dalej w przyszłość
+node scripts/publish-cases.mjs --force --from 2026-12-20   # przegeneruj przyszłe dni (minione wymagają --i-know)
 ```
 
 Skrypt warto uruchamiać co kilka tygodni, zanim skończą się opublikowane dni. Test `tests/cases.test.mjs` pilnuje, że nikt nie zmienił opublikowanych plików. Link `adres-gry/#dzien-RRRR-MM-DD` otwiera sprawę z danego dnia (np. w zaproszeniu wysłanym tuż przed północą). Starsze sprawy nie liczą się do serii.

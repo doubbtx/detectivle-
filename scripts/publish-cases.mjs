@@ -3,7 +3,8 @@
 //
 //   node scripts/publish-cases.mjs                 # od sprawy nr 1 do dziś + 60 dni
 //   node scripts/publish-cases.mjs --days 90       # do dziś + 90 dni
-//   node scripts/publish-cases.mjs --force         # przegeneruj wszystko (tylko przed startem!)
+//   node scripts/publish-cases.mjs --force --from 2026-12-01   # przegeneruj przyszłe dni z zakresu
+//   node scripts/publish-cases.mjs --force --i-know            # także dzisiejsze i minione (tylko przed startem!)
 import { mkdirSync, readFileSync, writeFileSync, existsSync, readdirSync, unlinkSync } from 'node:fs';
 import { createHash } from 'node:crypto';
 import { join } from 'node:path';
@@ -20,6 +21,7 @@ const opt = (name, def) => {
   return i >= 0 ? args[i + 1] : def;
 };
 const force = args.includes('--force');
+const iKnow = args.includes('--i-know');
 const from = opt('--from', addDays(EPOCH, 1));
 const days = Number(opt('--days', 60));
 const to = opt('--to', addDays(localTodayIso(), days));
@@ -28,8 +30,19 @@ mkdirSync(dir, { recursive: true });
 const manifestPath = join(dir, 'manifest.json');
 const manifest = existsSync(manifestPath) ? JSON.parse(readFileSync(manifestPath, 'utf8')) : { files: {} };
 if (force) {
-  for (const f of readdirSync(dir)) if (/^\d{4}-\d{2}-\d{2}\.json$/.test(f)) unlinkSync(join(dir, f));
-  manifest.files = {};
+  // --force przegenerowuje tylko dni z zakresu. Dni do dziś włącznie wymagają --i-know,
+  // bo gracze mogli już je widzieć.
+  if (from <= localTodayIso() && !iKnow) {
+    console.error('Zakres obejmuje dzisiejsze albo minione sprawy. Dodaj --i-know, jeśli na pewno chcesz je zmienić (np. przed startem gry).');
+    process.exit(1);
+  }
+  for (const f of readdirSync(dir)) {
+    const iso = f.slice(0, 10);
+    if (/^\d{4}-\d{2}-\d{2}\.json$/.test(f) && iso >= from && iso <= to) {
+      unlinkSync(join(dir, f));
+      delete manifest.files[iso];
+    }
+  }
 }
 
 let written = 0;

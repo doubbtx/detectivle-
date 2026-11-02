@@ -242,8 +242,8 @@ export const TEAM_DESKS = {
 export const RULES = [
   'Sprawca jest jednym z pięciorga podejrzanych i działał sam. Przez cały czas od otwarcia do zamknięcia drzwi był w środku.',
   'Dokumenty urzędowe, rejestry, rozkłady, mapy, nagrania z kamer i świadkowie spoza grona podejrzanych mówią prawdę.',
-  'Dowody dostarczone przez podejrzanych są prawdziwe, z wyjątkiem dokładnie jednego. Ten jeden sfałszował sprawca i dałby mu on alibi na czas kradzieży.',
-  'Czasy dotarcia na mapie to najszybszy możliwy sposób (pieszo, rowerem albo autem). Są dokładne co do minuty i takie same w każdą stronę.',
+  'Dowody dostarczone przez podejrzanych są prawdziwe, z wyjątkiem dokładnie jednego. Ten jeden sfałszował sprawca. Gdyby był prawdziwy, dawałby mu alibi na czas kradzieży.',
+  'Czasy dotarcia na mapie podano dla najszybszego możliwego sposobu (pieszo, rowerem albo autem). Są dokładne co do minuty i takie same w każdą stronę.',
   'Prawdziwy bilet, paragon, zdjęcie albo zapis w rejestrze oznacza, że ta osoba naprawdę była w tym miejscu o tej porze. Wejście i wyjście w rejestrze kart, tak jak dwie godziny w jednym zeznaniu („przyszedł o…, zapłacił o…”), to pobyt w tym miejscu przez cały ten czas, a wyjazd pociągiem oznacza, że potem tej osoby nie było już w mieście.',
   'Wszystkie zegary są zgodne. Rozkłady, godziny otwarcia i strefy parkowania obowiązują dokładnie tak, jak zapisano je na kartach, także w święta. Liczy się dzień tygodnia podany w aktach.',
 ];
@@ -280,12 +280,12 @@ export const REASONS = {
   cinema: [
     ['no-screening', 'tego filmu nie grano o tej godzinie'],
     ['cinema-closed', 'kino było tego dnia zamknięte'],
-    ['cinema-short', 'seans skończył się przed włamaniem'],
+    ['cinema-short', 'seans skończył się przed kradzieżą'],
   ],
   delivery: [
     ['no-number', 'na tej ulicy nie ma domu o takim numerze'],
     ['parity', 'ta ulica ma tylko numery parzyste albo tylko nieparzyste'],
-    ['delivery-fast', 'kurier nie zdążyłby dojechać między adresami'],
+    ['delivery-fast', 'kurier nie zdążyłby przejechać od jednego adresu do drugiego'],
   ],
   parking: [
     ['zone-off-day', 'w ten dzień tygodnia parkomaty w tej strefie nie działają'],

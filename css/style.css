@@ -529,6 +529,11 @@ button.chip { cursor: pointer; }
 .card-sealed .btn { justify-self: start; }
 .seal-note { font-size: var(--step--1); color: var(--ink-soft); border-top: 1px dashed var(--rule); padding-top: 0.5rem; }
 .tb-title .over { color: var(--stamp); font-weight: 700; }
+.nw { white-space: nowrap; }
+.proof-chip.sealed { border-style: dashed; color: var(--ink-soft); }
+.warn { color: var(--stamp); }
+.big-stamp:focus { outline: none; }
+.big-stamp:focus-visible { outline: 3px solid var(--focus); }
 
 /* Okno modalne */
 .overlay {

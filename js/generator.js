@@ -21,7 +21,7 @@ import { solveCase, qualityIssues, investigationProfile } from './solver.js';
  * Wersja generatora. Podbij ją przy każdej zmianie, która zmienia treść spraw.
  * Opublikowane sprawy (cases/*.json) i tak się nie zmienią, bo gra czyta je z plików.
  */
-export const GENERATOR_VERSION = 4;
+export const GENERATOR_VERSION = 5;
 
 /** Krótki „odcisk” sprawy: 4 znaki, po których ekipa sprawdza, że ma te same akta. */
 export function caseFingerprint(c) {
@@ -727,7 +727,8 @@ function generate(rng, opts) {
 
   // Godziny otwarcia lokali
   if (wantTable(T.hours.length > 0)) {
-    const extra = Object.keys(PLACES).filter((k) => PLACES[k].venue && !T.hours.some((h) => h.place === k));
+    // Lokale, w których ktoś był widziany (np. świadek w restauracji), nie dostają losowych godzin.
+    const extra = Object.keys(PLACES).filter((k) => PLACES[k].venue && !taken.has(k) && !T.hours.some((h) => h.place === k));
     for (const place of rng.sample(extra, rng.int(1, 3))) {
       const span = () => [rng.pick([7, 8, 9, 10]) * 60, rng.pick([18, 19, 20, 21, 22]) * 60];
       T.hours.push({ place, wd: span(), sat: rng.chance(0.8) ? span() : null, sun: rng.chance(0.5) ? span() : null });
@@ -998,7 +999,7 @@ function generate(rng, opts) {
     const types = new Set((card.facts || []).map((f) => f.t));
     if (types.has('travel')) return null;
     if (types.has('train')) return { label: 'Pobierz rozkład jazdy ze stacji Borowice', cost: 30 };
-    if (types.has('bus')) return { label: `Pobierz rozkład MZK: ${card.title.replace(/^Przystanek/, 'przystanek')}`, cost: 30 };
+    if (types.has('bus')) return { label: `Pobierz rozkład MZK: ${card.title.replace(/^Przystanek (.+): linia (\S+)$/, 'linia $2, przystanek $1')}`, cost: 30 };
     if (types.has('street')) return { label: 'Zapytaj urząd o numerację budynków', cost: 30 };
     if (types.has('hours')) return { label: 'Zapytaj urząd o godziny otwarcia lokali', cost: 30 };
     if (types.has('weather')) return { label: 'Zamów raport ze stacji meteo', cost: 30 };
@@ -1008,9 +1009,10 @@ function generate(rng, opts) {
     if (types.has('cardowner')) return { label: `Zażądaj wykazu kart: ${card.title.replace(/^Właściciele kart wejściowych: /, '')}`, cost: 30 };
     if (types.has('sunset')) return { label: 'Sprawdź kalendarz astronomiczny', cost: 15 };
     if (types.has('legend')) return { label: 'Poproś o objaśnienia znaków w rozkładach', cost: 15 };
-    if (card.title === 'Monitoring miejski') return { label: `Zabezpiecz nagranie: ${card.lines[0].toLowerCase()}`, cost: 60 };
-    if (card.desk === 'R') return { label: `Zażądaj kopii dokumentu „${card.title}”`, cost: 30 };
-    return { label: `Przejrzyj dokument „${card.title}”`, cost: 15 };
+    if (card.title === 'Monitoring miejski') return { label: `Zabezpiecz nagranie: ${card.lines[0].charAt(0).toLowerCase()}${card.lines[0].slice(1)}`, cost: 60 };
+    const inner = card.title.replace(/„([^”]*)”/g, '»$1«');
+    if (card.desk === 'R') return { label: `Zażądaj kopii dokumentu „${inner}”`, cost: 30 };
+    return { label: `Przejrzyj dokument „${inner}”`, cost: 15 };
   };
 
   const publicCards = finalCards.map((c) => {

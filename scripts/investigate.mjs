@@ -61,4 +61,4 @@ for (const d of DESK_DEFS) {
     else printCard(k);
   }
 }
-console.log(`\nGodziny śledztwa: ${hm(used())} z ${hm(budget)} h. Każde rozpoczęte pół godziny nadgodzin to +1 min do czasu.`);
+console.log(`\nGodziny śledztwa: ${hm(used())} z ${hm(budget)} h. Każde rozpoczęte pół godziny nadgodzin to +1 min do czasu rozwiązania.`);

@@ -112,6 +112,7 @@ export function solveCase(c) {
           out.reason = `pociąg ${cl.no} ma w rozkładzie [${row.ref}] znak „${row.note}”, czyli ${note.text}${lref && lref !== row.ref ? ` [${lref}]` : ''}, a kradzież wydarzyła się ${WEEKDAYS_ACC[weekday]}`;
           break;
         }
+        if (row.note && legend.get(row.note) && legend.get(row.note) !== row.ref) out.refs.push(legend.get(row.note));
         out.okNote = `pociąg ${cl.no} odjeżdża o ${fmt(row.dep)} i tego dnia kursuje [${row.ref}]`;
         break;
       }
@@ -122,7 +123,7 @@ export function solveCase(c) {
         out.refs.push(h.ref);
         if (!openAt(h, dt, cl.time)) {
           out.contradicted = true;
-          out.reasonCodes.push(h[dt] ? 'closed-early' : 'closed-day');
+          out.reasonCodes.push(...(h[dt] ? ['closed-early'] : ['closed-day', 'closed-early']));
           out.reason = h[dt]
             ? `${placeName(cl.place)} – lokal czynny tego dnia tylko do ${fmt(h[dt][1])} [${h.ref}], a paragon ma godzinę ${fmt(cl.time)}`
             : `${placeName(cl.place)} – lokal nieczynny w ten dzień tygodnia [${h.ref}], a paragon ma godzinę ${fmt(cl.time)}`;
@@ -199,7 +200,7 @@ export function solveCase(c) {
         out.refs.push(zone.ref);
         if (!openAt(zone.hours, dt, cl.time)) {
           out.contradicted = true;
-          out.reasonCodes.push(zone.hours[dt] ? 'zone-ended' : 'zone-off-day');
+          out.reasonCodes.push(...(zone.hours[dt] ? ['zone-ended'] : ['zone-off-day', 'zone-ended']));
           out.reason = zone.hours[dt]
             ? `w strefie ${cl.zone} parkomaty działają tego dnia tylko do ${fmt(zone.hours[dt][1])} [${zone.ref}], a bilet wydano o ${fmt(cl.time)}`
             : `w strefie ${cl.zone} w ten dzień tygodnia parkomaty są wyłączone [${zone.ref}], a bilet wydano o ${fmt(cl.time)}`;
@@ -218,7 +219,7 @@ export function solveCase(c) {
         if (match === undefined) {
           const last = deps[deps.length - 1];
           out.contradicted = true;
-          out.reasonCodes.push(last !== undefined && cl.time > last + 2 ? 'bus-after-last' : 'bus-no-departure');
+          out.reasonCodes.push(...(last !== undefined && cl.time > last + 2 ? ['bus-after-last', 'bus-no-departure'] : ['bus-no-departure']));
           out.reason = last !== undefined && cl.time > last + 2
             ? `bilet skasowano o ${fmt(cl.time)}, a ostatni autobus linii ${cl.line} odjechał z tego przystanku o ${fmt(last)} [${bus.ref}]`
             : `bilet skasowano o ${fmt(cl.time)}, a o tej porze żaden autobus linii ${cl.line} nie odjeżdżał z tego przystanku [${bus.ref}]`;
@@ -397,6 +398,16 @@ export function qualityIssues(c, res = solveCase(c)) {
   const storyEvents = [...res.trueEvents(c.solution.culprit, new Set([c.solution.forged, ...lieSet])), ...forged.sightings.map((x) => ({ ...x, refs: [forged.card] }))];
   if (forged.kind === 'train') storyEvents.push({ place: '@poza-miastem', from: forged.sightings[0].from + 1, to: 100000, refs: [forged.card] });
   if (res.firstConflict(storyEvents)) issues.push('fałszywkę obala też fizyczna sprzeczność z innym pobytem sprawcy');
+  // Prawdziwe karty nie mogą sobie przeczyć: świadek w lokalu tylko w godzinach otwarcia.
+  const dtq = dayType(c.crimeDate.weekday);
+  const hoursRows = c.cards.flatMap((k) => (k.facts || []).filter((f) => f.t === 'hours'));
+  for (const k of c.cards) {
+    for (const f of k.facts || []) {
+      if (f.t !== 'seen' && f.t !== 'cardlog') continue;
+      const h = hoursRows.find((x) => x.place === f.place);
+      if (h && !(h[dtq] && h[dtq][0] <= f.from && f.to < h[dtq][1])) issues.push(`${k.id}: pobyt w lokalu poza godzinami otwarcia`);
+    }
+  }
   if (c.innocentLie) {
     if (res.explain.lies.length !== 1) issues.push(`liczba kłamstw niewinnych: ${res.explain.lies.length}`);
     for (const lie of res.explain.lies) {
@@ -438,14 +449,28 @@ export function investigationProfile(c, res = solveCase(c)) {
     const d = byId.get(id).desk;
     perDesk[d] = (perDesk[d] || 0) + cost(id);
   }
-  return { need: [...need].sort(), total: [...need].reduce((a, id) => a + cost(id), 0), perDesk };
+  const minimal = new Set();
+  for (const ex of [res.explain.forged, ...(res.explain.lies || [])]) {
+    if (ex) for (const r of ex.refs) if (cost(r)) minimal.add(r);
+  }
+  const minimalPerDesk = {};
+  for (const id of minimal) {
+    const d = byId.get(id).desk;
+    minimalPerDesk[d] = (minimalPerDesk[d] || 0) + cost(id);
+  }
+  return { need: [...need].sort(), total: [...need].reduce((a, id) => a + cost(id), 0), perDesk, minimalPerDesk };
 }
 
-/** Budżet godzin śledztwa (w minutach) dla zestawu biurek. Im trudniejszy dzień, tym ciaśniej. */
+/**
+ * Budżet godzin śledztwa (w minutach) dla zestawu biurek: minimalna ścieżka (karty obalające
+ * fałszywkę i kłamstwo) plus część pełnego sprawdzenia wszystkich dowodów. Im trudniejszy dzień, tym ciaśniej.
+ */
 export function investigationBudget(c, desks) {
   const inv = c.investigation;
   if (!inv) return 0;
-  const need = desks.reduce((a, d) => a + (inv.perDesk[d] || 0), 0);
-  const factor = 1.9 - 0.08 * (c.difficulty || 4);
-  return Math.max(60, Math.ceil((need * factor) / 30) * 30);
+  const sum = (per) => desks.reduce((a, d) => a + ((per || {})[d] || 0), 0);
+  const need = sum(inv.perDesk);
+  const minimal = sum(inv.minimalPerDesk);
+  const k = 0.7 - 0.05 * (c.difficulty || 4);
+  return Math.max(60, Math.ceil((minimal + k * (need - minimal)) / 30) * 30);
 }

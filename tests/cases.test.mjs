@@ -11,7 +11,8 @@ import { caseFingerprint } from '../js/generator.js';
 const dir = join(fileURLToPath(new URL('.', import.meta.url)), '..', 'cases');
 const has = existsSync(join(dir, 'manifest.json'));
 
-test('opublikowane sprawy zgadzają się z manifestem (nikt ich nie przepisał)', { skip: !has }, () => {
+test('opublikowane sprawy zgadzają się z manifestem (nikt ich nie przepisał)', () => {
+  assert.ok(has, 'brak cases/manifest.json');
   const manifest = JSON.parse(readFileSync(join(dir, 'manifest.json'), 'utf8'));
   const files = readdirSync(dir).filter((f) => /^\d{4}-\d{2}-\d{2}\.json$/.test(f)).map((f) => f.slice(0, 10));
   assert.deepEqual(files.sort(), Object.keys(manifest.files).sort(), 'lista plików różni się od manifestu');
@@ -21,7 +22,7 @@ test('opublikowane sprawy zgadzają się z manifestem (nikt ich nie przepisał)'
   }
 });
 
-test('każda opublikowana sprawa ma jedno rozwiązanie i poprawny odcisk', { skip: !has }, () => {
+test('każda opublikowana sprawa ma jedno rozwiązanie i poprawny odcisk', () => {
   for (const f of readdirSync(dir).filter((x) => /^\d{4}-\d{2}-\d{2}\.json$/.test(x))) {
     const c = JSON.parse(readFileSync(join(dir, f), 'utf8'));
     const res = solveCase(c);
