@@ -1,0 +1,12 @@
+{
+  "name": "falszywe-alibi",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Codzienna przeglądarkowa gra detektywistyczna do grania ze znajomymi albo solo.",
+  "type": "module",
+  "scripts": {
+    "start": "node scripts/serve.mjs",
+    "test": "node --test tests/*.test.mjs",
+    "case": "node scripts/print-case.mjs"
+  }
+}

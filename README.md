@@ -1,0 +1,75 @@
+# Fałszywe Alibi
+
+Codzienna gra detektywistyczna w przeglądarce, w stylu gier dziennych typu Wordle. Codziennie o północy pojawia się nowa sprawa, taka sama dla wszystkich graczy. Można ją rozwiązać **razem ze znajomymi** albo **solo**.
+
+## O co chodzi
+
+Pięcioro podejrzanych ma alibi. Sprawca podrzucił **dokładnie jeden sfałszowany dowód**: bilet na pociąg, który tego dnia nie kursuje, paragon z lokalu zamkniętego o tej godzinie, zdjęcie z suchym chodnikiem w czasie ulewy, adres, którego nie ma w spisie ulic… Dowody leżą na pięciu biurkach (Dokumenty, Świadkowie, Mapa i rozkłady, Zdjęcia, Rejestry), a fałszywkę zawsze obala karta z **innego** biurka.
+
+Oskarżenie składa się z dwóch kart: **sfałszowany dowód** i **karta, która go obala**. Kto dostarczył fałszywkę, ten jest sprawcą. Są 3 próby. Każda pomyłka dodaje 5 minut do czasu, a każda podpowiedź 2 minuty.
+
+Trudność rośnie w ciągu tygodnia: poniedziałek to około 25 kart i 2 dowody do sprawdzenia, niedziela około 45 kart, pułapki z czasami dojścia i 5 dowodów od podejrzanych.
+
+### Gra z ekipą (2–5 osób)
+
+Każdy otwiera grę na swoim telefonie lub komputerze, klika **Graj z ekipą**, wybiera tę samą liczbę osób i **inny numer gracza**. Każdy widzi tylko swoje biurka, więc trzeba rozmawiać: na Discordzie, przez telefon albo przy stole. Karty można wklejać na czat przyciskiem „Kopiuj”. Oskarżenie składa gracz 1 (kapitan), a jego czas jest wynikiem ekipy.
+
+Biurka są podzielone tak, że fałszywka i karta, która ją obala, zawsze trafiają do różnych osób. Nikt nie rozwiąże sprawy sam.
+
+### Solo
+
+Ta sama sprawa dnia, ale widzisz wszystkie biurka.
+
+### Trening
+
+Sprawy treningowe nie liczą się do serii. Każda ma 4-znakowy kod, np. `K7Q2`. Ten sam kod daje tę samą sprawę, więc ekipa może zagrać razem dowolną liczbę spraw dziennie. Link do sprawy treningowej: `adres-gry/#sprawa-K7Q2`.
+
+## Uruchomienie
+
+Gra to zwykłe pliki HTML, CSS i JavaScript, bez bibliotek i bez kroku budowania. Potrzebny jest tylko dowolny serwer plików statycznych, bo moduły JavaScript nie działają po otwarciu `index.html` prosto z dysku.
+
+```bash
+npm start          # http://localhost:8080
+npm test           # testy generatora i solvera
+npm run case 2026-11-08 -- --solution   # podgląd sprawy z danego dnia w terminalu
+```
+
+Wymagany Node.js 18 lub nowszy (tylko do serwera i testów; sama gra działa w przeglądarce).
+
+## Wdrożenie na GitHub Pages
+
+1. Wypchnij repozytorium na GitHuba.
+2. W repozytorium: **Settings → Pages → Build and deployment → Source: Deploy from a branch**, wybierz gałąź i folder `/ (root)`.
+3. Po minucie gra będzie pod adresem `https://<użytkownik>.github.io/<repozytorium>/`.
+4. Wpisz ten adres w `js/config.js` (`shareUrl`), żeby trafiał do wyników udostępnianych znajomym.
+
+## Jak to działa
+
+| Plik | Co robi |
+|---|---|
+| `js/generator.js` | Tworzy sprawę z daty (ten sam dzień = ta sama sprawa u wszystkich). Losuje scenę, podejrzanych, okno czasowe, alibi, jeden sfałszowany dowód i karty-szum. |
+| `js/solver.js` | Niezależny solver. Czyta tylko fakty zapisane na kartach i sprawdza wszystkie hipotezy „kto i którym dowodem”. Sprawa trafia do gry tylko wtedy, gdy ma **dokładnie jedno** rozwiązanie i przechodzi kontrolę jakości (każdy niewinny ma potwierdzone alibi, fałszywka dawałaby sprawcy alibi, przy każdej wielkości ekipy fałszywka i jej obalenie są u różnych graczy). |
+| `js/data.js` | Treści: postacie z odmianą imion, miejsca, sceny, podział biurek między graczy, zasady. |
+| `js/main.js` | Interfejs: ekrany, zegar, podpowiedzi, oskarżenie, wynik do udostępnienia, statystyki. |
+| `js/config.js` | Ustawienia: adres gry do wyników, kary czasowe, liczba prób. |
+| `tests/` | Testy: 400 kolejnych dni i 300 spraw treningowych, deterministyczność, wykrywanie zepsutych spraw. |
+
+Postęp gry, notatki i statystyki zapisują się w `localStorage` przeglądarki. Gra nie ma serwera, więc nie ma też globalnego rankingu ani synchronizacji między graczami.
+
+### Rodzaje fałszerstw
+
+| Dowód od podejrzanego | Co go obala |
+|---|---|
+| Bilet kolejowy | Rozkład jazdy (pociąg nie kursuje tego dnia albo odjeżdża o innej godzinie) |
+| Paragon | Godziny otwarcia lokali |
+| Zdjęcie z telefonu | Stacja meteo (deszcz) albo kalendarz astronomiczny (zachód słońca) |
+| Bilet do kina | Repertuar kina |
+| Zrzut ekranu z aplikacji kurierskiej | Spis ulic i numeracji |
+| Bilet parkingowy | Godziny działania strefy płatnego parkowania |
+| Bilet autobusowy | Rozkład odjazdów z przystanku |
+
+## Pomysły na dalszy rozwój
+
+- **Wspólna tablica na żywo**: mały serwer (np. Supabase, PartyKit albo Cloudflare Durable Objects) z jednym „pokojem” na ekipę: przypinanie kart, wspólny zegar, ranking ekip.
+- **Ukrycie rozwiązania**: dziś całą sprawę liczy przeglądarka, więc da się ją podejrzeć w narzędziach dla programistów. Serwer mógłby wysyłać każdemu tylko jego biurka.
+- Nowe rodzaje fałszerstw i scen, archiwum spraw z poprzednich dni.
