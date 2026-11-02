@@ -138,6 +138,123 @@ export const SCENES = [
 ];
 
 /**
+ * Miejsca podpaleń (crimeType 'arson'). `building`: co się paliło (mianownik), `buildingGen`: dopełniacz,
+ * `damage`: co spłonęło (do intra i karty z aktami).
+ */
+export const ARSON_SCENES = [
+  {
+    id: 'przystan', name: 'Szopa kajakowa na przystani „Wiosło”', inLoc: 'w szopie kajakowej na przystani „Wiosło”', short: 'przystani', ownerIns: 'z prezesem klubu', address: 'ul. Zarzeczna 1',
+    owner: { full: 'Kazimierz Olech', f: false }, ownerRole: 'prezes klubu kajakowego',
+    ownerErrand: 'odnieść wiosła po treningu', crew: 'Członkowie klubu',
+    title: 'Podpalenie szopy kajakowej', building: 'szopa kajakowa', buildingGen: 'szopy kajakowej', buildingAcc: 'szopę', thisNom: 'ta szopa',
+    items: ['dwa kajaki i komplet wioseł', 'stary ponton i kamizelki ratunkowe', 'klubowe puchary i dyplomy'],
+  },
+  {
+    id: 'magazyn', name: 'Magazyn galerii „Pod Arkadami”', inLoc: 'w magazynie galerii „Pod Arkadami”', short: 'galerii', ownerIns: 'z właścicielką', address: 'ul. Rycerska 40',
+    owner: { full: 'Ilona Kamińska', f: true }, ownerRole: 'właścicielka galerii', mapLabel: 'Magazyn galerii',
+    ownerErrand: 'zostawić paczkę z katalogami', crew: 'Przyjaciele galerii',
+    title: 'Podpalenie magazynu galerii', building: 'magazyn galerii', buildingGen: 'magazynu galerii', buildingAcc: 'magazyn', thisNom: 'ten magazyn',
+    items: ['puste ramy i blejtramy', 'skrzynie po obrazach i papier pakowy', 'stare katalogi wystaw i plakaty'],
+  },
+];
+
+/**
+ * Miejsca otruć (crimeType 'poison'): ktoś dosypał środek nasenny do karafki z wodą. Nikt nie ginie:
+ * poszkodowany przesypia zebranie albo koncert. `room`: pomieszczenie z karafką (miejscownik: `roomLoc`),
+ * `event`: co poszkodowany przespał (biernik), `staff`: kto zmieniał wodę w karafce, `bar`: druga karafka
+ * (zmyłka z godziną), `roles`: role podejrzanych (te same indeksy co ROLES), `motives`: przyznania w epilogu.
+ */
+export const POISON_SCENES = [
+  {
+    id: 'zacisze', name: 'Sala kominkowa hotelu „Zacisze”', inLoc: 'w sali kominkowej hotelu „Zacisze”', short: 'hotelu', ownerIns: 'z prezesem', address: 'ul. Parkowa 3',
+    owner: { full: 'Leopold Szymański', f: false }, ownerRole: 'prezes Towarzystwa Miłośników Borowic', mapLabel: 'Hotel „Zacisze”',
+    title: 'Środek nasenny w\u00a0karafce prezesa', otherRoom: 'sala bankietowa', body: 'cały zarząd', meetings: 'zebraniami', room: 'sala kominkowa', roomLoc: 'w sali kominkowej', roomGen: 'sali kominkowej',
+    event: 'zebranie zarządu Towarzystwa', eventGen: 'zebrania zarządu', group: 'członkowie zarządu Towarzystwa',
+    staff: { m: 'kelner hotelowy', f: 'kelnerka hotelowa' }, bar: 'w barze hotelowym', barGen: 'baru hotelowego',
+    place: 'hotel',
+    roles: [
+      { m: 'skarbnik Towarzystwa', f: 'skarbniczka Towarzystwa' }, { m: 'wiceprezes', f: 'wiceprezeska' },
+      { m: 'kronikarz Towarzystwa', f: 'kronikarka Towarzystwa' }, { m: 'członek zarządu', f: 'członkini zarządu' },
+      { m: 'założyciel Towarzystwa', f: 'założycielka Towarzystwa' }, { m: 'nowy członek zarządu', f: 'nowa członkini zarządu' },
+      { m: 'rywal z wyborów na prezesa', f: 'rywalka z wyborów na prezesa' }, { m: 'archiwista Towarzystwa', f: 'archiwistka Towarzystwa' },
+      { m: 'przewodnik po Borowicach', f: 'przewodniczka po Borowicach' }, { m: 'redaktor biuletynu', f: 'redaktorka biuletynu' },
+      { m: 'organizator wycieczek', f: 'organizatorka wycieczek' }, { m: 'sekretarz zarządu', f: 'sekretarz zarządu' },
+    ],
+    // `roles`: indeksy ról (jak w `roles`), do których przyznanie pasuje; bez `roles` pasuje do każdej.
+    motives: [
+      { text: (g) => `${g('Chciałem', 'Chciałam')} tylko, żeby prezes przespał głosowanie nad moim wnioskiem.` },
+      { text: (g) => `Prezes miał dziś ogłosić, kto poprowadzi jubileusz. ${g('Bałem', 'Bałam')} się, że to nie ja.` },
+      { text: (g) => `${g('Chciałem', 'Chciałam')}, żeby choć jedno zebranie odbyło się bez jego przemówień. Nie ${g('chciałem', 'chciałam')} mu zrobić krzywdy.` },
+      { roles: [0], text: (g) => `${g('Chciałem', 'Chciałam')} zyskać jeden wieczór, żeby poprawić sprawozdanie z kasy, zanim prezes je przeczyta.` },
+      { roles: [6], text: (g) => `Prezes wygrał ze mną wybory jednym głosem. ${g('Chciałem', 'Chciałam')}, żeby raz to ja ${g('poprowadził', 'poprowadziła')} zebranie.` },
+    ],
+  },
+  {
+    id: 'jutrzenka', name: 'Garderoba w Domu Kultury „Jutrzenka”', inLoc: 'w garderobie Domu Kultury „Jutrzenka”', short: 'Domu Kultury', ownerIns: 'z dyrygentką', address: 'ul. Słowików 6',
+    owner: { full: 'Aleksandra Bielska', f: true }, ownerRole: 'dyrygentka chóru „Lutnia”', mapLabel: 'Dom Kultury „Jutrzenka”',
+    title: 'Środek nasenny w\u00a0karafce dyrygentki', otherRoom: 'sala widowiskowa', body: 'cały chór', meetings: 'próbami', room: 'garderoba dyrygentki', roomLoc: 'w garderobie dyrygentki', roomGen: 'garderoby dyrygentki',
+    event: 'jubileuszowy koncert chóru', eventGen: 'jubileuszowego koncertu', group: 'osoby z chóru i obsługi koncertu',
+    staff: { m: 'garderobiany', f: 'garderobiana' }, bar: 'w bufecie Domu Kultury', barGen: 'bufetu Domu Kultury',
+    place: null,
+    roles: [
+      { m: 'chórzysta', f: 'chórzystka' }, { m: 'akompaniator', f: 'akompaniatorka' },
+      { m: 'prezes chóru', f: 'prezeska chóru' }, { m: 'solista', f: 'solistka' },
+      { m: 'skarbnik chóru', f: 'skarbniczka chóru' }, { m: 'inspicjent', f: 'inspicjentka' },
+      { m: 'zastępca dyrygentki', f: 'zastępczyni dyrygentki' }, { m: 'akustyk', f: 'akustyczka' },
+      { m: 'bibliotekarz nut', f: 'bibliotekarka nut' }, { m: 'konferansjer', f: 'konferansjerka' },
+      { m: 'kostiumograf', f: 'kostiumografka' }, { m: 'były chórzysta', f: 'była chórzystka' },
+    ],
+    motives: [
+      { roles: [1, 6], text: (g) => `${g('Chciałem', 'Chciałam')} raz poprowadzić koncert ${g('sam', 'sama')}. Dyrygentka nigdy by mi na to nie pozwoliła.` },
+      { roles: [0, 3, 11], text: (g) => `Dyrygentka miała dziś ogłosić, kto zaśpiewa solo na jubileuszu. ${g('Bałem', 'Bałam')} się, że znowu nie ja.` },
+      { text: (g) => `${g('Chciałem', 'Chciałam')}, żeby choć jeden koncert odbył się bez jej uwag. Nie ${g('chciałem', 'chciałam')} jej skrzywdzić.` },
+      { text: (g) => `Na ostatniej próbie dyrygentka skrytykowała mnie przy wszystkich. ${g('Chciałem', 'Chciałam')}, żeby raz to ona się zawstydziła.` },
+    ],
+  },
+];
+
+/**
+ * Rodzaje zbrodni. Teksty zależne od rodzaju trafiają do zasad, ekranów gry, tablicy, planu miasta i epilogu.
+ * `act`: chwila, na którą sprawca musiał być na miejscu (okno zbrodni), w czterech przypadkach.
+ * `windowFrom`: skąd solver bierze okno: 'case' (pole c.window), 'openings' (otwarcia drzwi z rejestru
+ * alarmu, z których jedno wybiera opinia biegłego) albo 'moment' (sprawca był na miejscu tylko przez chwilę
+ * w oknie, którego granice podają karty: ostatnia wymiana wody w karafce i pierwsza szklanka ze środkiem).
+ */
+export const CRIMES = {
+  theft: {
+    id: 'theft', noun: 'kradzież', gen: 'kradzieży', ins: 'kradzieżą', happened: 'kradzież wydarzyła się',
+    act: { acc: 'kradzież', gen: 'kradzieży', ins: 'kradzieżą', loc: 'kradzieży' },
+    icon: 'search', sceneLabel: 'Miejsce kradzieży', mapPinLabel: 'lupa', windowFrom: 'case',
+  },
+  arson: {
+    id: 'arson', noun: 'podpalenie', gen: 'podpalenia', ins: 'podpaleniem', happened: 'podpalenie wydarzyło się',
+    act: { acc: 'podłożenie minutnika', gen: 'podłożenia minutnika', ins: 'podłożeniem minutnika', loc: 'podłożeniu minutnika' },
+    icon: 'flame', sceneLabel: 'Miejsce podpalenia', mapPinLabel: 'płomień', windowFrom: 'openings',
+  },
+  poison: {
+    id: 'poison', noun: 'otrucie', gen: 'otrucia', ins: 'otruciem', happened: 'otrucie wydarzyło się',
+    act: { acc: 'dosypanie środka', gen: 'dosypania środka', ins: 'dosypaniem środka', loc: 'dosypaniu środka' },
+    icon: 'glass-water', sceneLabel: 'Miejsce otrucia', mapPinLabel: 'szklanka', windowFrom: 'moment',
+  },
+};
+
+/** Rodzaj zbrodni w sprawie (stare sprawy bez pola crimeType to kradzieże). */
+export const crimeOf = (c) => CRIMES[c?.crimeType] || CRIMES.theft;
+
+/**
+ * Okna do pokazania graczowi (bez zdradzania rozwiązania): przy kradzieży jedno okno z akt,
+ * przy podpaleniu wszystkie otwarcia drzwi z rejestru alarmu (które z nich jest właściwe, gracz ustala sam),
+ * przy otruciu cały czas, kiedy karafka stała na stole (od postawienia do ostatniej szklanki); właściwe okno,
+ * od wymiany wody do pierwszej szklanki ze środkiem, gracz składa z kart.
+ */
+export const shownWindows = (c) => {
+  const w = crimeOf(c).windowFrom;
+  if (w === 'openings') return c.openings || [];
+  if (w === 'moment' && c.carafe) return [{ from: c.carafe.set, to: c.carafe.glasses[c.carafe.glasses.length - 1] }];
+  return [c.window];
+};
+
+/**
  * Miejsca w mieście. Flagi mówią, do czego miejsce może służyć:
  * witness – zeznanie pracownika, cctv – kamera miejska, cardlog – rejestr wejść na kartę,
  * venue – lokal z paragonem, photo – miejsce na zdjęcie, street – ulica (kurier), parking, stop – przystanek.
@@ -261,6 +378,27 @@ export const RULES = [
   'Wszystkie zegary są zgodne. Rozkłady, godziny otwarcia i strefy parkowania obowiązują dokładnie tak, jak zapisano je na kartach, także w święta. Liczy się dzień tygodnia podany w aktach.',
 ];
 
+/**
+ * Zasady nr 1 i 3 przy podpaleniu (okno to jedno z otwarć drzwi, wybrane opinią biegłego). Zasady nr 4 (czasy
+ * dotarcia) nie ma osobno: każda taka sprawa ma plan miasta, więc zawsze obowiązuje RULE_MAP.
+ */
+const RULES_ARSON = {
+  0: 'Sprawca jest jednym z pięciorga podejrzanych i działał sam. Minutnik z podpałką podłożył w czasie jednego z otwarć drzwi zapisanych w rejestrze alarmu i był w środku przez całe to otwarcie, od rozbrojenia do uzbrojenia alarmu. Ogień wybuchł dokładnie po czasie nastawionym na minutniku: godzinę zapłonu zapisała czujka dymu, a możliwy nastaw podaje opinia biegłego. Pozostałe otwarcia drzwi nie mają związku z podpaleniem.',
+  2: 'Dowody dostarczone przez podejrzanych są prawdziwe, z wyjątkiem dokładnie jednego. Ten jeden sfałszował sprawca. Gdyby był prawdziwy, dawałby mu alibi na czas podłożenia minutnika, czyli na całe otwarcie drzwi, w którym sprawca był w środku.',
+};
+
+/** Zasady nr 1 i 3 przy otruciu (okno-chwila: sprawca był na miejscu tylko przez moment); zasada nr 4 jak wyżej. */
+const RULES_POISON = {
+  0: 'Sprawca jest jednym z pięciorga podejrzanych i działał sam. Środek nasenny dosypał do karafki w jednej chwili: wszedł, dosypał i wyszedł. Zrobił to po wymianie wody w karafce, a przed szklanką, w której według lekarza na pewno był już środek. Te dwie godziny wyznaczają okno zdarzenia i podają je karty (zeznanie obsługi o wymianie wody i opinia lekarza). Inne godziny z kart okna nie zmieniają.',
+  2: 'Dowody dostarczone przez podejrzanych są prawdziwe, z wyjątkiem dokładnie jednego. Ten jeden sfałszował sprawca. Gdyby był prawdziwy, dawałby mu alibi na całe okno, czyli na każdą chwilę, w której dało się dosypać środek.',
+};
+
+/**
+ * Zasada chwili (otrucie): kiedy pobyt gdzie indziej daje alibi, z przykładem liczbowym.
+ * Pobyt od X do Y w miejscu odległym o d min daje alibi na okno A–B tylko wtedy, gdy X − d < A i Y + d > B.
+ */
+export const RULE_MOMENT = 'Sprawcy wystarczyła chwila, więc krótki pobyt gdzie indziej w czasie okna nie daje alibi. Pobyt od X do Y w miejscu, z którego dojście na miejsce zdarzenia trwa d min, daje alibi tylko wtedy, gdy X − d wypada przed początkiem okna, a Y + d po jego końcu (ta sama minuta co początek albo koniec okna to jeszcze nie „przed” ani „po”). Tylko wtedy w żadnej chwili okna nie dało się dojść, dosypać środek i wrócić. Każdy pobyt liczy się osobno: dwie godziny z różnych miejsc (np. dwa doręczenia) nie składają się w jedno alibi. Przykład: okno 19:40–20:20. Paragon z 20:00 z kawiarni 10 min drogi od miejsca zdarzenia nie daje alibi: można było dosypać środek o 19:45 i o 19:55 siedzieć już w kawiarni. Alibi daje dopiero pobyt w tej kawiarni od 19:45 do 20:15 (np. dwie godziny w zeznaniu kelnera, wejście i wyjście w rejestrze, cały seans w kinie): 19:45 − 10 min = 19:35, przed oknem, a 20:15 + 10 min = 20:25, po oknie. Jedna godzina wystarczy tylko z daleka: paragon z 20:00 z pizzerii 25 min drogi od miejsca zdarzenia daje alibi, bo 20:00 − 25 min = 19:35 i 20:00 + 25 min = 20:25.';
+
 /** Zasada nr 3 w sprawach, w których kłamie też niewinna osoba (od piątku). */
 export const RULE_LIE = 'W tej sprawie fałszywe są dwa dowody dostarczone przez podejrzanych. Jeden sfałszował sprawca: gdyby był prawdziwy, dawałby mu alibi na czas kradzieży. Drugi to kłamstwo niewinnej osoby (ukrywała coś niezwiązanego z kradzieżą). Kłamca nie jest sprawcą i zawsze ma inne, potwierdzone alibi (od świadka, z kamery, rejestru albo z prawdziwego dowodu). Sprawca poza fałszywką nie ma żadnego potwierdzonego alibi. Pozostałe dowody od podejrzanych są prawdziwe.';
 
@@ -279,8 +417,14 @@ export const hasTownMap = (c) => c.cards.some((k) => (k.facts || []).some((f) =>
 /** Zasady w skrócie (ikona Lucide + jedno zdanie); pełna treść w rulesFor(). */
 export function rulesShortFor(c) {
   const map = hasTownMap(c);
+  const cr = crimeOf(c).id;
+  const first = {
+    arson: ['timer', 'Sprawca podłożył minutnik w czasie jednego otwarcia drzwi i był w środku przez całe to otwarcie. Które to otwarcie, wynika z godziny zapłonu i opinii biegłego.'],
+    poison: ['glass-water', 'Sprawca dosypał środek w jednej chwili: po wymianie wody w karafce, a przed szklanką, w której według lekarza na pewno był środek. Te dwie godziny podają karty.'],
+  }[cr] || ['lock', 'Sprawca był w środku przez cały czas, od otwarcia do zamknięcia drzwi.'];
   return [
-    ['lock', 'Sprawca był w środku przez cały czas, od otwarcia do zamknięcia drzwi.'],
+    first,
+    ...(cr === 'poison' ? [['hourglass', 'Krótki pobyt gdzie indziej nie daje alibi. Pobyt od X do Y (dojście d min) daje alibi, gdy X − d jest przed oknem, a Y + d po nim.']] : []),
     ['landmark', 'Urzędy, rejestry, kamery i świadkowie spoza piątki mówią prawdę.'],
     c.innocentLie
       ? ['ticket', 'Fałszywe są dwa dowody od podejrzanych: fałszywka sprawcy (dałaby mu alibi) i kłamstwo niewinnej osoby, która ma inne, potwierdzone alibi.']
@@ -296,7 +440,26 @@ export function rulesShortFor(c) {
 /** Zasady dla danej sprawy. */
 export function rulesFor(c) {
   const map = hasTownMap(c);
-  return RULES.map((r, i) => (i === 2 && c.innocentLie ? RULE_LIE : i === 3 && map ? RULE_MAP : i === 5 && hasBankCards(c) ? `${r} ${RULE_CARD}` : r));
+  const cr = crimeOf(c);
+  const over = { arson: RULES_ARSON, poison: RULES_POISON }[cr.id] || {};
+  const base = RULES.map((r, i) => over[i] || r);
+  // Zasada o kłamstwie niewinnej osoby z nazwą zbrodni (przy kradzieży dokładnie RULE_LIE).
+  // Przy podpaleniu i otruciu z tym samym doprecyzowaniem co w zasadzie nr 3 (całe otwarcie drzwi, całe okno).
+  const alibiFor = {
+    arson: 'na całe otwarcie drzwi, w którym podłożono minutnik',
+    poison: 'na całe okno (każdą chwilę, w której dało się dosypać środek)',
+  }[cr.id] || `na czas ${cr.act.gen}`;
+  const lie = cr.id === 'theft' ? RULE_LIE : RULE_LIE.replace('na czas kradzieży', alibiFor).replace('z kradzieżą', `z ${cr.ins}`);
+  const rules = base.map((r, i) => (i === 2 && c.innocentLie ? lie : i === 3 && map ? RULE_MAP : i === 5 && hasBankCards(c) ? `${r} ${RULE_CARD}` : r));
+  // Otrucie: zasada chwili zaraz po zasadzie nr 1 (kiedy pobyt gdzie indziej daje alibi).
+  if (cr.windowFrom === 'moment') rules.splice(1, 0, RULE_MOMENT);
+  return rules;
+}
+
+/** Powody do wyboru w raporcie dla rodzaju dowodu, z nazwą zbrodni z danej sprawy. */
+export function reasonsFor(c, kind) {
+  const cr = crimeOf(c);
+  return (REASONS[kind] || []).map(([code, text]) => [code, text.replace('przed kradzieżą', `przed ${cr.act.ins}`)]);
 }
 
 /**

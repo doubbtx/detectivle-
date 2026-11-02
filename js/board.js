@@ -3,7 +3,7 @@
 // między miejscami. Tablica NIE ocenia, czy coś jest sprzeczne ani który dowód jest fałszywy:
 // liczby zestawia, wniosek wyciąga gracz.
 
-import { PLACES } from './data.js';
+import { PLACES, crimeOf, shownWindows } from './data.js';
 import { fmt } from './time.js';
 import { portrait } from './portraits.js';
 import { PLACE_CELLS, cellsApart, blocksText, MIN_PER_CELL } from './town.js';
@@ -58,7 +58,7 @@ const when = (f) => (f.to === null ? fmt(f.from) : f.from === f.to ? fmt(f.from)
  * @param {string[]} o.sel wybrane fakty (id), najwyżej dwa
  * @param {(k) => boolean} o.canSee czy gracz widzi treść karty
  * @param {boolean} o.hasMap czy gracz ma plan miasta (w ekipie tylko osoba z biurkiem Mapa)
- * @param {string} o.sceneCell pole miejsca kradzieży
+ * @param {string} o.sceneCell pole miejsca zdarzenia (kradzieży, podpalenia)
  * @param {boolean} o.autoAll wpisać wszystkie jawne fakty (pn–wt: zagadka i tak jest w tabelach urzędowych)
  * @param {string} [o.noMapText] co napisać zamiast drogi, gdy gracz nie ma planu
  */
@@ -73,13 +73,26 @@ export function renderBoard({ c, pins, sel, canSee, hasMap, sceneCell, autoAll =
   const chosen = sel.map((id) => byId.get(id)).filter(Boolean);
   // Oś czasu: tylko godziny, w których coś się dzieje (fakty i okno kradzieży, z zapasem), pełne godziny.
   // Na wąskim ekranie kropki z 25-minutowym odstępem nie zlewają się w jedną.
-  const times = [c.window.from, c.window.to, ...facts.flatMap((f) => [f.from, f.to ?? f.from])];
+  // Przy podpaleniu tablica pokazuje wszystkie otwarcia drzwi i zapłon, a nie rozstrzygające okno.
+  const cr = crimeOf(c);
+  const wins = shownWindows(c);
+  const ign = cr.id === 'arson' && typeof c.ignition === 'number' ? c.ignition : null;
+  // Otrucie: pas od postawienia karafki do ostatniej szklanki i kreski przy wejściach obsługi i szklankach
+  // (granice okna gracz ustala z kart).
+  const moment = cr.windowFrom === 'moment' && c.carafe ? c.carafe : null;
+  const marks = moment ? [...moment.visits.map((t) => ({ t, label: 'obsługa' })), ...moment.glasses.map((t) => ({ t, label: 'szklanka' }))] : [];
+  const winText = moment
+    ? `karafka na stole ${fmt(wins[0].from)}–${fmt(wins[0].to)}`
+    : wins.length > 1 ? `otwarcia drzwi ${wins.map((w) => `${fmt(w.from)}–${fmt(w.to)}`).join(' i ')}` : `drzwi otwarte ${fmt(wins[0].from)}–${fmt(wins[0].to)}`;
+  const times = [...wins.flatMap((w) => [w.from, w.to]), ...(ign === null ? [] : [ign]), ...facts.flatMap((f) => [f.from, f.to ?? f.from])];
   const A = Math.floor((Math.min(...times) - 20) / 60) * 60;
   const B = Math.max(A + 180, Math.ceil((Math.max(...times) + 20) / 60) * 60);
   const pct = (m) => ((m - A) / (B - A)) * 100;
   const hours = [];
   for (let h = Math.ceil(A / 60); h * 60 <= B; h++) hours.push(h);
-  const win = `<span class="bd-window" style="left:${pct(c.window.from)}%;width:${pct(c.window.to) - pct(c.window.from)}%" title="drzwi otwarte ${fmt(c.window.from)}–${fmt(c.window.to)}"></span>`;
+  const win = wins.map((w, i) => `<span class="bd-window${wins.length > 1 && i % 2 ? ' alt' : ''}" style="left:${pct(w.from)}%;width:${pct(w.to) - pct(w.from)}%" title="${wins.length > 1 ? `otwarcie ${i + 1}` : 'drzwi otwarte'} ${fmt(w.from)}–${fmt(w.to)}"></span>`).join('')
+    + (ign === null ? '' : `<span class="bd-ign" style="left:${pct(ign)}%" title="zapłon ${fmt(ign)}"></span>`)
+    + marks.map((m) => `<span class="bd-mark" style="left:${pct(m.t)}%" title="${m.label} ${fmt(m.t)}"></span>`).join('');
   // Oś w takim samym układzie jak wiersze (kolumna twarzy + pas), więc godziny trafiają dokładnie nad kropki.
   const axis = `<div class="bd-row bd-axis-row" aria-hidden="true"><span></span><div class="bd-axis">${hours.map((h) => `<span style="left:${pct(h * 60)}%">${h % 24}:00</span>`).join('')}</div></div>`;
   const ticks = hours.map((h) => `<i class="bd-tick" style="left:${pct(h * 60)}%"></i>`).join('');
@@ -105,11 +118,11 @@ export function renderBoard({ c, pins, sel, canSee, hasMap, sceneCell, autoAll =
     const n = cellsApart(cellOf(a), cellOf(b));
     return `droga ${blocksText(n)} = <b>${n * MIN_PER_CELL} min</b>`;
   };
-  let compare = '<p class="muted small bd-tip">Dotknij faktu, żeby zobaczyć drogę do miejsca kradzieży. Dotknij drugiego, żeby zestawić czas i drogę.</p>';
+  let compare = `<p class="muted small bd-tip">Dotknij faktu, żeby zobaczyć drogę do miejsca ${cr.gen}. Dotknij drugiego, żeby zestawić czas i drogę.</p>`;
   if (chosen.length === 1) {
     const f = chosen[0];
     compare = `<p><span class="chip">${f.card}</span> ${esc(placeName(f.place))} <b>${when(f)}</b>${hasMap ? ` · pole ${cellOf(f.place)}` : ''}</p>
-      <p class="small">Do miejsca kradzieży: ${hasMap ? `${blocksText(cellsApart(cellOf(f.place), sceneCell))} = <b>${cellsApart(cellOf(f.place), sceneCell) * MIN_PER_CELL} min</b>` : noMapText} · drzwi otwarte ${fmt(c.window.from)}–${fmt(c.window.to)}</p>`;
+      <p class="small">Do miejsca ${cr.gen}: ${hasMap ? `${blocksText(cellsApart(cellOf(f.place), sceneCell))} = <b>${cellsApart(cellOf(f.place), sceneCell) * MIN_PER_CELL} min</b>` : noMapText} · ${winText}</p>`;
   } else if (chosen.length === 2) {
     const [x, y] = [...chosen].sort((a, b) => a.from - b.from);
     const xEnd = x.to ?? x.from;
@@ -123,7 +136,9 @@ export function renderBoard({ c, pins, sel, canSee, hasMap, sceneCell, autoAll =
     <ul class="bd-legend" aria-label="Legenda">
       <li><span class="lg lg-claim"></span>twierdzi podejrzany</li>
       ${autoAll ? '' : '<li><span class="lg lg-pin"></span>dopięte przez ciebie (przycisk „Na tablicę”)</li>'}
-      <li><span class="lg lg-win"></span>drzwi otwarte ${fmt(c.window.from)}–${fmt(c.window.to)}</li>
+      <li><span class="lg lg-win"></span>${winText}</li>
+      ${ign === null ? '' : `<li><span class="lg lg-ign"></span>zapłon ${fmt(ign)}</li>`}
+      ${moment ? `<li><span class="lg lg-mark"></span>obsługa ${moment.visits.map(fmt).join(', ')} · szklanki ${moment.glasses.map(fmt).join(', ')}</li>` : ''}
     </ul>
     <div class="bd-compare${chosen.length ? '' : ' empty'}" aria-live="polite">${compare}<p class="bd-clear"${sel.length ? '' : ' style="visibility:hidden"'}><button class="link-btn" data-act="board-clear"${sel.length ? '' : ' tabindex="-1" aria-hidden="true"'}>Wyczyść wybór</button></p></div>
     ${facts.length ? `<div class="bd-grid">${axis}${rows}${looseRow}</div>` : '<p class="muted">Tablica jest pusta. Na kartach z godziną i miejscem (bilety, paragony, zeznania, nagrania, rejestry) jest przycisk „Na tablicę”.</p>'}

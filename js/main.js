@@ -3,7 +3,7 @@
 import { randomPracticeCode, DIFFICULTY_LABELS, EPOCH } from './generator.js';
 import { loadDailyCase, loadPracticeCase } from './cases.js';
 import { solveCase, investigationBudget } from './solver.js';
-import { TEAM_DESKS, DESK_DEFS, REASONS, PLACES, SCENES, rulesFor, rulesShortFor, hasTownMap } from './data.js';
+import { TEAM_DESKS, DESK_DEFS, PLACES, SCENES, ARSON_SCENES, POISON_SCENES, rulesFor, rulesShortFor, hasTownMap, crimeOf, shownWindows, reasonsFor } from './data.js';
 import { renderTownSvg } from './map.js';
 import { icon } from './icons.js';
 import { portrait } from './portraits.js';
@@ -286,7 +286,7 @@ function renderTown() {
   }
   const plaques = [...byCell].map(([cell, items]) => ({ cell, items }));
   const scene = sceneIdOf(c);
-  const svg = renderTownSvg({ places: PLACES, scene, sceneLabel: c.scene.name, active: new Set(), office: OFFICE_CELL, plaques, sceneAct: 'home-case' });
+  const svg = renderTownSvg({ places: PLACES, scene, sceneLabel: c.scene.mapLabel || c.scene.name, active: new Set(), office: OFFICE_CELL, plaques, sceneAct: 'home-case', ...sceneMarker(c) });
   return `
   <section class="town-home" aria-label="Borowice">
     <h2 class="sec-label">Borowice · twoje miasto</h2>
@@ -464,7 +464,7 @@ function caseHeading() {
   return `
     <div class="file-tab">${esc(label)}</div>
     <h1 class="case-title">${esc(c.title)}</h1>
-    <p class="case-meta">Data kradzieży: ${esc(c.crimeDate.label)}</p>
+    <p class="case-meta">Data ${crimeOf(c).gen}: ${esc(c.crimeDate.label)}</p>
     <p class="case-meta">Trudność ${difficultyDots(c.difficulty)} ${esc(DIFFICULTY_LABELS[c.difficulty])}</p>
     ${c.innocentLie ? '<p class="case-meta lie-meta">W tej sprawie kłamią dwie osoby.</p>' : ''}
     ${isArchive() ? '<p class="case-meta"><b>Sprawa archiwalna.</b> Wynik nie liczy się do serii.</p>' : ''}`;
@@ -683,6 +683,55 @@ function renderSuspects() {
   }).join('');
 }
 
+/** Znacznik miejsca zdarzenia na planie: lupa przy kradzieży, płomień przy podpaleniu. */
+function sceneMarker(c) {
+  const cr = crimeOf(c);
+  return { sceneKind: cr.sceneLabel, sceneIcon: cr.icon };
+}
+
+/**
+ * Okno zdarzenia w aktach. Kradzież: otwarcie i zamknięcie drzwi. Podpalenie: wszystkie otwarcia drzwi
+ * z rejestru alarmu i godzina zapłonu, bez wskazania, które otwarcie jest właściwe (to gracz ustala sam).
+ */
+function renderWindowBox(c) {
+  if (crimeOf(c).windowFrom === 'moment' && c.carafe) {
+    // Otrucie: godziny karafki z akt (postawienie, wejścia obsługi, szklanki), bez wskazania granic okna.
+    const k = c.carafe;
+    const cell = (label, t) => `<div><span class="w-label">${label}</span><span class="w-time">${t}</span></div>`;
+    return `
+      <div class="window w-multi w-moment" aria-label="Karafka postawiona o ${fmt(k.set)}, obsługa zaglądała o ${k.visits.map(fmt).join(' i ')}, szklanki wypite o ${k.glasses.map(fmt).join(' i ')}.">
+        ${cell('karafka', fmt(k.set))}
+        ${cell('obsługa', k.visits.map(fmt).join(' · '))}
+        ${cell('szklanki', k.glasses.map(fmt).join(' · '))}
+      </div>
+      <p class="w-note">Sprawca dosypał środek w jednej chwili: po wymianie wody, a przed szklanką, w której według lekarza na pewno był środek. Te granice podają zeznanie obsługi i opinia lekarza. Krótki pobyt gdzie indziej nie daje alibi.</p>`;
+  }
+  if (crimeOf(c).windowFrom === 'openings') {
+    const ops = shownWindows(c);
+    const span = (w) => `${fmt(w.from)}–${fmt(w.to)}`;
+    return `
+      <div class="window w-multi" aria-label="Drzwi otwierano ${ops.length} razy: ${ops.map(span).join(', ')}. Zapłon o ${fmt(c.ignition)}.">
+        ${ops.map((w, i) => `<div><span class="w-label">otwarcie ${i + 1}</span><span class="w-time">${span(w).replace('–', '\u2060–\u2060')}</span></div>`).join('')}
+        <div class="w-ign"><span class="w-label">zapłon</span><span class="w-time">${fmt(c.ignition)}</span></div>
+      </div>
+      <p class="w-note">Sprawca podłożył minutnik w czasie jednego otwarcia i był w środku przez całe to otwarcie. Które to, wynika z opinii biegłego.</p>`;
+  }
+  // Godzina wyjścia właściciela z meldunku, z rodzajem zgodnym z osobą („właścicielka wyszła”).
+  const left = (() => {
+    const m = c.intro.match(/(wyszedł|wyszła) o (\d{1,2}:\d{2})/);
+    if (!m) return '';
+    const role = c.owner?.role || (m[1] === 'wyszła' ? 'właścicielka' : 'właściciel');
+    return `${m[2]} ${esc(role)} ${m[1]} · `;
+  })();
+  return `
+      <div class="window" aria-label="Drzwi były otwarte od ${fmt(c.window.from)} do ${fmt(c.window.to)}">
+        <div><span class="w-label">otwarcie</span><span class="w-time">${fmt(c.window.from)}</span></div>
+        <div class="w-line" aria-hidden="true"></div>
+        <div><span class="w-label">zamknięcie</span><span class="w-time">${fmt(c.window.to)}</span></div>
+      </div>
+      <p class="w-note">${left}sprawca w środku przez całe ${c.window.to - c.window.from} min</p>`;
+}
+
 function renderAkta() {
   const c = state.c;
   const team = isTeamLike();
@@ -693,24 +742,15 @@ function renderAkta() {
       <div class="facts-row">
         <span class="fchip">${icon('clock')}${esc(c.crimeDate.label.replace(/ \d{4}$/, ''))}</span>
         <span class="fchip">${icon('map-pin')}${esc(c.scene.name)}${sceneIdOf(c) && SCENE_CELLS[sceneIdOf(c)] && hasTownMap(c) ? ` · ${SCENE_CELLS[sceneIdOf(c)]}` : ''}</span>
-        <span class="fchip">${icon('lock')}kod znało 5 osób</span>
+        ${c.carafe ? `<span class="fchip">${icon('glass-water')}do karafki mogło podejść 5 osób</span>` : `<span class="fchip">${icon('lock')}kod znało 5 osób</span>`}
+        ${c.carafe && c.scene.event ? `<span class="fchip">${icon('moon-star')}${esc(c.owner.full)} ${c.owner.f ? 'przespała' : 'przespał'} ${esc(c.scene.event)}</span>` : ''}
         ${c.stolen?.nom ? `<span class="fchip">${icon('search')}${esc(c.stolen.nom)}</span>` : ''}
+        ${c.damage ? `<span class="fchip">${icon('flame')}spłonęły ${esc(c.damage)}</span>` : ''}
       </div>
-      <div class="window" aria-label="Drzwi były otwarte od ${fmt(c.window.from)} do ${fmt(c.window.to)}">
-        <div><span class="w-label">otwarcie</span><span class="w-time">${fmt(c.window.from)}</span></div>
-        <div class="w-line" aria-hidden="true"></div>
-        <div><span class="w-label">zamknięcie</span><span class="w-time">${fmt(c.window.to)}</span></div>
-      </div>
-      <p class="w-note">${(() => {
-        // Godzina wyjścia właściciela z meldunku, z rodzajem zgodnym z osobą („właścicielka wyszła”).
-        const m = c.intro.match(/(wyszedł|wyszła) o (\d{1,2}:\d{2})/);
-        if (!m) return '';
-        const role = c.owner?.role || (m[1] === 'wyszła' ? 'właścicielka' : 'właściciel');
-        return `${m[2]} ${esc(role)} ${m[1]} · `;
-      })()}sprawca w środku przez całe ${c.window.to - c.window.from} min</p>
+      ${renderWindowBox(c)}
       <details class="intro-more" data-keep="intro"${keepOpen.intro ? ' open' : ''}><summary>Czytaj meldunek</summary><p class="intro">${esc(c.intro)}</p></details>
       ${(() => { const used = usedMin(); const bud = budgetMin(); const pct = Math.min(100, Math.round((used / Math.max(1, bud)) * 100)); return `<div class="budget${used > bud ? ' over' : used >= bud * 0.8 ? ' warn' : ''}" title="${state.mode === 'team' ? 'W ekipie każdy ma własny budżet, a nadgodziny są tylko informacją.' : `Każde rozpoczęte pół godziny ponad budżet to +${fmtPenalty(OVERTIME_PENALTY)} do czasu.`}"><span class="budget-label">${icon('clock')} Śledztwo <b>${fmtHM(used)} / ${fmtHM(bud)} h</b></span><span class="budget-bar"><span style="width:${pct}%"></span></span><span class="budget-note">${state.mode === 'team' ? 'koperty kosztują czas' : `ponad budżet: +${fmtPenalty(OVERTIME_PENALTY)} za każde 30 min`}</span></div>`; })()}
-      ${c.innocentLie ? '<details class="lie-stamp"><summary>Kłamią 2 osoby</summary><p>Jeden fałszywy dowód podrzucił sprawca. Drugi to kłamstwo niewinnej osoby, która ukrywała coś niezwiązanego z kradzieżą. Kłamca ma poza nim inne, potwierdzone alibi.</p></details>' : ''}
+      ${c.innocentLie ? `<details class="lie-stamp"><summary>Kłamią 2 osoby</summary><p>Jeden fałszywy dowód podrzucił sprawca. Drugi to kłamstwo niewinnej osoby, która ukrywała coś niezwiązanego z ${crimeOf(c).ins}. Kłamca ma poza nim inne, potwierdzone alibi.</p></details>` : ''}
     </div>
     <h3 class="sec-label">Podejrzani i ich alibi</h3>
     <ul class="suspects">${renderSuspects()}</ul>
@@ -840,7 +880,7 @@ const mapPlaceName = (key) => (key === 'scene' ? state.c.scene.name : PLACES[key
 const mapCell = (key) => (key === 'scene' ? SCENE_CELLS[sceneIdOf(state.c)] : PLACE_CELLS[key]);
 function sceneIdOf(c) {
   const g = mapCardOf(c)?.facts.find((f) => f.t === 'grid');
-  return Object.keys(SCENE_CELLS).find((id) => SCENE_CELLS[id] === g?.scene) || SCENES.find((x) => x.name === c.scene?.name)?.id;
+  return Object.keys(SCENE_CELLS).find((id) => SCENE_CELLS[id] === g?.scene) || [...SCENES, ...ARSON_SCENES, ...POISON_SCENES].find((x) => x.name === c.scene?.name)?.id;
 }
 
 /** Karty (z biurek gracza), które dotyczą danego miejsca. Zapieczętowane rozpoznajemy tylko po etykiecie czynności. */
@@ -858,7 +898,7 @@ function renderPlan() {
   const mc = mapCardOf();
   const active = new Set(mc.facts.filter((f) => f.t === 'pos').map((f) => f.place));
   const sel = state.mapSel || [];
-  const svg = renderTownSvg({ places: PLACES, scene: sceneIdOf(c), sceneLabel: c.scene.name, active, selected: sel });
+  const svg = renderTownSvg({ places: PLACES, scene: sceneIdOf(c), sceneLabel: c.scene.mapLabel || c.scene.name, active, selected: sel, ...sceneMarker(c) });
   const chip = (id) => `<button class="chip chip-btn" data-act="goto-card" data-id="${id}">${id}</button>`;
   let info = '<p class="muted small">Dotknij miejsca, żeby zobaczyć jego pole i karty, które go dotyczą. Dotknij drugiego, a plan pokaże trasę po ulicach.</p>';
   if (sel.length === 1) {
@@ -866,7 +906,7 @@ function renderPlan() {
     const n = key === 'scene' ? 0 : cellsApart(mapCell('scene'), mapCell(key));
     const cards = key === 'scene' ? [] : cardsAtPlace(key);
     info = `<p class="plan-place"><b>${esc(mapPlaceName(key))}</b> · pole ${mapCell(key)}</p>
-      ${key === 'scene' ? '<p class="small">Tu doszło do kradzieży.</p>' : `<p class="small">Do miejsca kradzieży: ${blocksText(n)}, czyli ${n * MIN_PER_CELL} min.</p>`}
+      ${key === 'scene' ? `<p class="small">Tu doszło do ${crimeOf(c).gen}.</p>` : `<p class="small">Do miejsca ${crimeOf(c).gen}: ${blocksText(n)}, czyli ${n * MIN_PER_CELL} min.</p>`}
       ${cards.length ? `<p class="small">Karty o tym miejscu: ${cards.map((k) => chip(k.id)).join(' ')}</p>` : key === 'scene' ? '' : '<p class="small muted">Na twoich biurkach nie ma kart o tym miejscu.</p>'}`;
   } else if (sel.length === 2) {
     const n = cellsApart(mapCell(sel[0]), mapCell(sel[1]));
@@ -877,7 +917,7 @@ function renderPlan() {
   <section class="plan" aria-label="Plan miasta">
     <header class="desk-head">
       <h2>Plan Borowic</h2>
-      <p class="muted small">1 przecznica = ${MIN_PER_CELL} min · pinezki: miejsca z akt (karta ${mc.id}) · lupa: miejsce kradzieży</p>
+      <p class="muted small">1 przecznica = ${MIN_PER_CELL} min · pinezki: miejsca z akt (karta ${mc.id}) · ${crimeOf(c).mapPinLabel}: miejsce ${crimeOf(c).gen}</p>
     </header>
     <div class="plan-info">${info}${sel.length ? '<p><button class="link-btn" data-act="map-clear">Wyczyść wybór</button></p>' : ''}</div>
     <div class="town-wrap" data-scroll-key="plan">${svg}</div>
@@ -1059,14 +1099,16 @@ function renderCompareBody() {
       }
     }
   }
-  const single = facts.flat().filter(() => map && sceneC).slice(0, 6).map((x) => `<li><span class="chip">${x.card}</span> ${esc(nm(x.place))} <b>${when(x)}</b> · do miejsca kradzieży ${blocksText(cellsApart(cellOf(x.place), sceneC))} = <b>${cellsApart(cellOf(x.place), sceneC) * MIN_PER_CELL} min</b></li>`);
+  const cr = crimeOf(state.c);
+  const winsText = shownWindows(state.c).map((w) => `${fmt(w.from)}–${fmt(w.to)}`).join(' i ');
+  const single = facts.flat().filter(() => map && sceneC).slice(0, 6).map((x) => `<li><span class="chip">${x.card}</span> ${esc(nm(x.place))} <b>${when(x)}</b> · do miejsca ${cr.gen} ${blocksText(cellsApart(cellOf(x.place), sceneC))} = <b>${cellsApart(cellOf(x.place), sceneC) * MIN_PER_CELL} min</b></li>`);
   const places = [...new Set(facts.flat().map((x) => x.place).filter((pl) => PLACE_CELLS[pl]))];
-  const mini = map && places.length ? `<div class="town-wrap cmp-map" data-scroll-key="cmp">${renderTownSvg({ places: PLACES, scene: sceneIdOf(state.c), sceneLabel: state.c.scene.name, active: new Set(places), selected: places.slice(0, 2) })}</div>` : '';
+  const mini = map && places.length ? `<div class="town-wrap cmp-map" data-scroll-key="cmp">${renderTownSvg({ places: PLACES, scene: sceneIdOf(state.c), sceneLabel: state.c.scene.mapLabel || state.c.scene.name, active: new Set(places), selected: places.slice(0, 2), ...sceneMarker(state.c) })}</div>` : '';
   return `
     <h2 tabindex="-1">Porównanie</h2>
     <div class="cmp-grid cmp-${Math.min(list.length, 3)}">${list.map((k) => (canSee(k) ? renderCard(k, { noActions: true }) : `<article class="card card-sealed"><header class="card-head"><span class="card-id">${k.id}</span><div class="card-titles"><h4>${esc(k.title)}</h4></div></header><p class="seal-action">${isSealed(k) ? 'Koperta jeszcze zamknięta.' : 'Ta karta leży u innego gracza.'}</p></article>`)).join('')}</div>
     ${rows.length ? `<h3 class="sec-label">Godziny i drogi</h3><ul class="cmp-rows">${rows.slice(0, 8).join('')}</ul>` : ''}
-    ${single.length ? `<h3 class="sec-label">Do miejsca kradzieży (drzwi otwarte ${fmt(state.c.window.from)}–${fmt(state.c.window.to)})</h3><ul class="cmp-rows">${single.join('')}</ul>` : ''}
+    ${single.length ? `<h3 class="sec-label">Do miejsca ${cr.gen} (${{ openings: 'otwarcia drzwi', moment: 'karafka na stole' }[cr.windowFrom] || 'drzwi otwarte'} ${winsText})</h3><ul class="cmp-rows">${single.join('')}</ul>` : ''}
     ${mini}
     <p class="muted small">Gra tylko zestawia liczby z kart. Wnioski wyciągasz sam.</p>`;
 }
@@ -1125,7 +1167,7 @@ function renderModal() {
     const proofCard = a.proof ? cardById(a.proof) : null;
     const forgedCard = a.forged ? cardById(a.forged) : null;
     const accused = forgedCard ? suspectById(forgedCard.by) : null;
-    const reasons = forgedCard ? REASONS[forgedKind(forgedCard)] || [] : [];
+    const reasons = forgedCard ? reasonsFor(state.c, forgedKind(forgedCard)) : [];
     const reasonText = reasons.find(([code]) => code === a.reason)?.[1];
     const sq = (v) => (v === null ? 'skip' : v ? 'ok' : 'bad');
     const tried = progress.attempts.some((t) => t.forged === a.forged && t.proof === a.proof);
@@ -1354,6 +1396,7 @@ function renderResult() {
     <section class="solution">
       <h2>Rozwiązanie</h2>
       <p class="verdict">${culprit.f ? 'Sprawczynią' : 'Sprawcą'} jest <b>${esc(culprit.full)}</b> (${esc(culprit.role)}). Sfałszowany dowód to <span class="chip">${forged.id}</span> ${esc(forged.title)}, a obala go ${[...proofSet()].map((r) => `<span class="chip">${r}</span>`).join(' lub ')}.</p>
+      ${sol.explain.window?.reason ? `<p><b>${sol.explain.window.moment ? 'Kiedy dosypano środek' : 'Kiedy podłożono minutnik'}:</b> ${refsHtml(sol.explain.window.reason.charAt(0).toUpperCase() + sol.explain.window.reason.slice(1))}.</p>` : ''}
       <p>Dlaczego: ${refsHtml(sol.explain.forged.reason)}.</p>
       ${sol.explain.lies.map((lie) => {
         const liar = suspectById(lie.who);
@@ -1367,8 +1410,8 @@ function renderResult() {
         const before = lie.to <= c.window.from - lie.travel;
         const when = lie.from === lie.to ? `o ${fmt(lie.from)}` : `od ${fmt(lie.from)} do ${fmt(lie.to)}`;
         const why = before
-          ? `z miejsca podanego na karcie (${PLACES[lie.place]?.name ?? lie.place}, ${when}, dotarcie ${lie.travel} min) ${liar.f ? 'zdążyłaby' : 'zdążyłby'} na kradzież o ${fmt(c.window.from)}`
-          : `do miejsca podanego na karcie (${PLACES[lie.place]?.name ?? lie.place}, ${when}, dotarcie ${lie.travel} min) dało się dotrzeć już po kradzieży`;
+          ? `z miejsca podanego na karcie (${PLACES[lie.place]?.name ?? lie.place}, ${when}, dotarcie ${lie.travel} min) ${liar.f ? 'zdążyłaby' : 'zdążyłby'} na ${crimeOf(c).act.acc} o ${fmt(c.window.from)}`
+          : `do miejsca podanego na karcie (${PLACES[lie.place]?.name ?? lie.place}, ${when}, dotarcie ${lie.travel} min) dało się dotrzeć już po ${crimeOf(c).act.loc}`;
         return `<p class="lie-explain">${head} Ten dowód i tak nie dawał alibi, bo ${esc(why)}${lie.travelRef ? ` <span class="chip">${lie.travelRef}</span>` : ''}.</p>`;
       }).join('')}
       <div class="cards cards-solution">
@@ -1973,7 +2016,7 @@ app.addEventListener('click', (e) => {
     case 'pick-forged': {
       state.accuse.forged = target.dataset.id;
       const kind = forgedKind(cardById(target.dataset.id));
-      if (!(REASONS[kind] || []).some(([code]) => code === state.accuse.reason)) state.accuse.reason = null;
+      if (!reasonsFor(state.c, kind).some(([code]) => code === state.accuse.reason)) state.accuse.reason = null;
       render();
       break;
     }

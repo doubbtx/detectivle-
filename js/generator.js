@@ -9,7 +9,7 @@
 import { makeRng, hashString } from './rng.js';
 import {
   CHARACTERS, ROLES, WITNESSES, SCENES, PLACES, TRAIN_DESTINATIONS, TRAIN_NOTES, FILMS,
-  VENUE_ITEMS, CCTV_DETAILS, PHOTO_POSES, DESK_DEFS, ITEM_NOM, CARD_HOLDERS,
+  VENUE_ITEMS, CCTV_DETAILS, PHOTO_POSES, DESK_DEFS, ITEM_NOM, CARD_HOLDERS, ARSON_SCENES, POISON_SCENES, CRIMES,
 } from './data.js';
 import {
   fmt, fmtHour, addDays, weekdayOf, dayType, dateLong, dateShort, sunsetFor, daysBetween,
@@ -22,7 +22,7 @@ import { PLACE_CELLS, SCENE_CELLS, MIN_PER_CELL, minutesApart } from './town.js'
  * Wersja generatora. Podbij ją przy każdej zmianie, która zmienia treść spraw.
  * Opublikowane sprawy (cases/*.json) i tak się nie zmienią, bo gra czyta je z plików.
  */
-export const GENERATOR_VERSION = 9;
+export const GENERATOR_VERSION = 10;
 
 /** Krótki „odcisk” sprawy: 4 znaki, po których ekipa sprawdza, że ma te same akta. */
 export function caseFingerprint(c) {
@@ -109,6 +109,32 @@ const BUS_LINES = ['3', '7', '12', '15'];
 /** Wagi rodzajów dowodów w sprawach z fałszywką tabelową (pn–wt). */
 const TABLE_KIND_W = { receipt: 1.5, photo: 1.8, bus: 1.8 };
 
+/** Pierwszy dzień spraw dziennych z podpaleniem (czwartek). */
+export const ARSON_FROM = '2026-11-12';
+/** Pierwszy dzień spraw dziennych z otruciem (środa); potem co drugą środę. */
+export const POISON_FROM = '2026-11-18';
+
+/**
+ * Rodzaj zbrodni w sprawie dnia: czwartki od ARSON_FROM to podpalenia, co druga środa od POISON_FROM to otrucia,
+ * pozostałe dni kradzieże. Rodzaj nie zależy od losowania sprawy, więc dni z kradzieżą wyglądają dokładnie tak
+ * jak przed v10.
+ */
+export function dailyCrimeType(iso) {
+  const wd = weekdayOf(iso);
+  if (wd === 4 && iso >= ARSON_FROM) return 'arson';
+  if (wd === 3 && iso >= POISON_FROM && daysBetween(POISON_FROM, iso) % 14 === 0) return 'poison';
+  return 'theft';
+}
+
+/**
+ * Rodzaj zbrodni w sprawie treningowej (osobny skrót kodu): mniej więcej co trzeci kod to podpalenie,
+ * co trzeci otrucie, reszta kradzieże. Kody z podpaleniem są te same co przed dodaniem otrucia.
+ */
+export function practiceCrimeType(code) {
+  const h = hashString(`crime:${code.toUpperCase()}`) % 3;
+  return h === 0 ? 'arson' : h === 1 ? 'poison' : 'theft';
+}
+
 export function buildDailyCase(iso) {
   return buildCase({
     seed: `daily:${iso}`,
@@ -116,6 +142,7 @@ export function buildDailyCase(iso) {
     difficulty: difficultyForDate(iso),
     number: caseNumber(iso),
     kind: 'daily',
+    crimeType: dailyCrimeType(iso),
   });
 }
 
@@ -131,6 +158,7 @@ export function buildPracticeCase(code) {
     number: null,
     code: norm,
     kind: 'practice',
+    crimeType: practiceCrimeType(norm),
   });
 }
 
@@ -156,7 +184,7 @@ export function buildCase(opts) {
       c.attempt = attempt;
       c.generatorVersion = GENERATOR_VERSION;
       c.investigation = investigationProfile(c, res);
-      c.depth = proofDepth(res);
+      c.depth = proofDepth(res, c);
       c.fingerprint = caseFingerprint(c);
       return c;
     }
@@ -176,6 +204,19 @@ export function generateAttempt(opts, attempt) {
 
 function generate(rng, opts) {
   const P = params(opts.difficulty);
+  const crime = opts.crimeType || 'theft';
+  const CR = CRIMES[crime];
+  const arsonCase = crime === 'arson';
+  // Otrucie: okno-chwila (sprawca był na miejscu tylko przez moment gdzieś w oknie W1–W2).
+  const poisonCase = crime === 'poison';
+  const moment = poisonCase;
+  // Otrucie: alibi z własnego dowodu trudniej pogodzić z drugim alibi (dodatkowy dowód, kłamstwo z alibi, wspólny
+  // dowód często się nie mieszczą), więc własny dowód z alibi dostają od razu trzy niewinne osoby. Inaczej
+  // „ma własny dowód z alibi” częściej wskazywałoby sprawcę niż przy kradzieży.
+  if (poisonCase) {
+    P.decoys = Math.max(P.decoys, 3);
+    P.extraTrueItems = 0;
+  }
   const crimeIso = addDays(opts.date, -1);
   const weekday = weekdayOf(crimeIso);
   const dt = dayType(weekday);
@@ -187,34 +228,184 @@ function generate(rng, opts) {
   const round5 = (m) => Math.round(m / 5) * 5;
 
   // --- Scena, podejrzani, okno czasowe -------------------------------------
-  const scene = rng.pick(SCENES);
-  const stolen = rng.pick(scene.items);
+  // Przy kradzieży losowanie idzie dokładnie tak jak przed v10 (te same sprawy dla tych samych dni).
+  const scene = rng.pick(arsonCase ? ARSON_SCENES : poisonCase ? POISON_SCENES : SCENES);
+  const stolen = rng.pick(scene.items || [scene.event]);
   const stolenNom = ITEM_NOM[stolen] ?? stolen;
   const roles = rng.sample(ROLES, 5);
+  // Otrucie: role z listy miejsca (członkowie zarządu, chórzyści…), losowane tak samo jak ROLES.
+  const roleOf = (r) => (scene.roles ? scene.roles[ROLES.indexOf(r)] : r);
   const suspects = rng.sample(CHARACTERS, 5).map((ch, i) => ({
     id: `s${i + 1}`,
     ...ch,
-    role: roles[i][ch.f ? 'f' : 'm'],
+    role: roleOf(roles[i])[ch.f ? 'f' : 'm'],
     items: [],
     alibi: '',
   }));
-  const W1 = rng.int(19 * 60 + 5, 20 * 60 + 35);
-  const W2 = W1 + rng.int(24, 46);
-  const closeT = W1 - rng.int(14, 45);
+  let W1;
+  let W2;
+  let closeT;
+  // Podpalenie: dwa otwarcia drzwi w rejestrze alarmu, godzina zapłonu z czujki i widełki nastawu minutnika.
+  let arson = null;
+  // Otrucie: postawienie karafki, wymiana wody (W1), pierwsza i druga szklanka (W2 = pierwsza), zaśnięcie.
+  let poison = null;
+  if (!arsonCase && !poisonCase) {
+    W1 = rng.int(19 * 60 + 5, 20 * 60 + 35);
+    W2 = W1 + rng.int(24, 46);
+    closeT = W1 - rng.int(14, 45);
+  } else if (arsonCase) {
+    arson = arsonTimeline();
+    [W1, W2] = arson.decisive;
+    closeT = Math.min(arson.decisive[0], arson.other[0]) - rng.int(14, 45);
+  } else {
+    poison = poisonTimeline();
+    W1 = poison.A;
+    W2 = poison.B;
+    closeT = poison.set;
+  }
+  // Okna, które muszą pokrywać prawdziwe alibi niewinnych (i fałszywka), oraz ich obwiednia, poza którą leżą
+  // pobyty bez alibi. Przy kradzieży to jedno okno, przy podpaleniu oba otwarcia drzwi: bez opinii biegłego
+  // nie da się więc wybrać okna przez samo wykluczanie (w obu wychodzi to samo rozwiązanie).
+  // Przy otruciu prawdziwe alibi i fałszywka obejmują czas od wymiany wody do drugiej szklanki: bez zeznania
+  // o wymianie wody albo bez opinii lekarza okna nie da się ustalić przez wykluczanie.
+  const wins = arson ? [arson.decisive, arson.other] : poison ? [[poison.covLo, poison.covHi]] : [[W1, W2]];
+  const winLo = Math.max(...wins.map((w) => w[0]));
+  const winHi = Math.min(...wins.map((w) => w[1]));
+  const hullLo = Math.min(...wins.map((w) => w[0]));
+  const hullHi = Math.max(...wins.map((w) => w[1]));
+
+  /**
+   * Oś czasu podpalenia. Z – zapłon (czujka dymu), [Rmin, Rmax] – nastaw minutnika (opinia biegłego).
+   * Minutnik podłożono w chwili z przedziału [Z − Rmax, Z − Rmin]. Ten przedział zahacza (co najmniej o k min)
+   * o dokładnie jedno otwarcie drzwi (rozstrzygające), a drugie (właściciel wrócił po telefon) leży co najmniej
+   * m min poza nim: za wcześnie albo za późno. Rozstrzygające otwarcie jest raz pierwsze, raz drugie.
+   * Na trudności 1–2 rozstrzygające otwarcie mieści się w przedziale w całości, a marginesy są szersze.
+   */
+  function arsonTimeline() {
+    const easy = opts.difficulty <= 2;
+    const m = easy ? 6 : 3;
+    const k = 4;
+    const Z = rng.int(20 * 60 + 30, 22 * 60 + 25);
+    const first = rng.chance(0.5);
+    // Długości obu otwarć z tego samego zakresu: po długości nie widać, które otwarcie jest właściwe.
+    const LA = rng.int(4, 22);
+    const LB = rng.int(4, 22);
+    const gap = easy ? rng.int(16, 24) : rng.int(5, 12);
+    const mult5 = (lo, hi) => {
+      const opts5 = [];
+      for (let x = Math.max(0, Math.ceil(lo / 5) * 5); x <= hi; x += 5) opts5.push(x);
+      if (!opts5.length) retry();
+      return rng.pick(opts5);
+    };
+    let A1; let A2; let B1; let B2; let Rmin; let Rmax;
+    if (first) {
+      // Właściciel zajrzał tuż przed zapłonem: na tak krótki nastaw minutnik nie pozwala.
+      B2 = Z - rng.int(5, 20);
+      B1 = B2 - LB;
+      A2 = B1 - gap;
+      A1 = A2 - LA;
+      Rmin = mult5(Z - B1 + m, easy ? Z - A2 - m : Z - A1 - k);
+      const lo = Math.max(Rmin + 15, easy ? Z - A1 + m : Z - A2 + k);
+      Rmax = mult5(lo, lo + 30);
+    } else {
+      // Właściciel był wcześniej, zanim w ogóle dało się nastawić minutnik.
+      A2 = Z - rng.int(12, 45);
+      A1 = A2 - LA;
+      B2 = A1 - gap;
+      B1 = B2 - LB;
+      Rmax = mult5(easy ? Z - A1 + m : Z - A2 + k, Z - B2 - m);
+      const hi = Math.min(Rmax - 10, easy ? Z - A2 - m : Z - A1 - k);
+      // Nastaw co najmniej 5 min (minutnik nastawiony na 0 dzwoniłby od razu).
+      Rmin = mult5(5, hi);
+    }
+    if (Rmax > 90 || Math.min(A1, B1) < 18 * 60 + 30) retry();
+    const decisive = [A1, A2];
+    const other = [B1, B2];
+    return { Z, Rmin, Rmax, decisive, other, first, openings: [decisive, other].sort((x, y) => x[0] - y[0]) };
+  }
+
+  /**
+   * Oś czasu otrucia. set – obsługa stawia karafkę, visits – dwa wejścia obsługi (przy jednym z nich, A, obsługa
+   * wymieniła wodę: dolna granica okna; przy drugim tylko coś przyniosła), glasses – dwie szklanki wypite przez
+   * poszkodowanego (w jednej z nich, B, lekarz na pewno stwierdził środek: górna granica), asleep – poszkodowany
+   * zasypia, bar – godzina przy drugiej karafce (zmyłka bez znaczenia), m0 – chwila, w której sprawca naprawdę
+   * dosypał środek (dowolna chwila okna).
+   * Które wejście i która szklanka wyznaczają okno, losujemy (pierwsze albo drugie), więc z samej kolejności godzin
+   * w aktach okna nie widać: trzeba przeczytać zeznanie obsługi i opinię lekarza.
+   * Bez zeznania obsługi dolną granicą może być każde wejście (albo postawienie karafki), a bez opinii lekarza
+   * górną każda szklanka. Dlatego alibi i fałszywka osłaniają czas od pierwszego wejścia do drugiej szklanki
+   * (covLo–covHi): bez którejś z tych kart zostają co najmniej dwa okna z tym samym rozwiązaniem.
+   */
+  function poisonTimeline() {
+    const easy = opts.difficulty <= 2;
+    const refillIdx = rng.chance(0.5) ? 0 : 1;
+    const dosedIdx = rng.chance(0.5) ? 0 : 1;
+    const A = rng.int(19 * 60, 20 * 60 + 30);
+    // Przy wymianie wody przy drugim wejściu obsługa była już wcześniej (V < A), więc osłaniany czas jest dłuższy
+    // o odstęp między wejściami; okno jest wtedy nieco krótsze, żeby całość nie była dużo dłuższa.
+    const B = A + (refillIdx ? rng.int(16, 25) : easy ? rng.int(18, 26) : rng.int(18, 30));
+    const V = refillIdx ? A - rng.int(5, 9) : rng.int(A + 5, B - 9);
+    const visits = refillIdx ? [V, A] : [A, V];
+    const set = visits[0] - rng.int(8, 20);
+    // Druga szklanka po pierwszej ze środkiem albo pierwsza (czysta albo nie, lekarz nie wie) w czasie okna.
+    const G = dosedIdx ? B - rng.int(4, 9) : B + rng.int(4, 7);
+    if (dosedIdx && Math.abs(G - V) <= 1) retry();
+    const glasses = dosedIdx ? [G, B] : [B, G];
+    // Zasypia 10–28 min po szklance ze środkiem i po drugiej szklance.
+    const asleep = rng.int(Math.max(glasses[1] + 5, B + 10), B + 28);
+    let bar;
+    do bar = rng.int(set + 3, glasses[1] + 10); while ([...visits, ...glasses].some((x) => Math.abs(bar - x) <= 2));
+    const m0 = rng.int(A + 2, B - 3);
+    return { set, A, B, visits, glasses, refillIdx, dosedIdx, covLo: visits[0], covHi: glasses[1], asleep, bar, m0 };
+  }
+
 
   // Czasy dotarcia wynikają z planu Borowic: kratki w poziomie i w pionie razy MIN_PER_CELL.
   const sceneCell = SCENE_CELLS[scene.id];
   const travel = {};
   for (const key of Object.keys(PLACES)) travel[key] = minutesApart(sceneCell, PLACE_CELLS[key]);
+  // Okno-chwila: chwila sprawcy na miejscu zbrodni jako pobyt w „miejscu” SCENE_EV (czas dotarcia 0).
+  const SCENE_EV = '@scena';
   /** Najszybsze przejście między dwoma miejscami w mieście. */
-  const between = (a, b) => (a === b ? 0 : minutesApart(PLACE_CELLS[a], PLACE_CELLS[b]));
+  const between = (a, b) => (a === b ? 0 : a === SCENE_EV ? travel[b] : b === SCENE_EV ? travel[a] : minutesApart(PLACE_CELLS[a], PLACE_CELLS[b]));
   const usedPlaces = new Set();
   const taken = new Set();
   const useWitness = rng.sample(WITNESSES, WITNESSES.length);
   let witnessIdx = 0;
   const nextWitness = () => useWitness[witnessIdx++ % useWitness.length];
 
-  const clearRange = (place) => [W1 - travel[place] + 3, W2 + travel[place] - 3];
+  // `looseRange`: dowód, który nie musi dawać alibi na oba otwarcia przy podpaleniu (dodatkowy prawdziwy dowód
+  // osoby z innym alibi, kłamstwo niewinnej osoby): wystarczy rozstrzygające okno, tak jak przy kradzieży.
+  let looseRange = false;
+  // Okno-chwila: okno, które dowód musi osłaniać w całości (cały czas karafki na stole albo, przy `looseRange`,
+  // tylko właściwe okno). Pojedyncza godzina t w miejscu odległym o d osłania je, gdy t − d < początek
+  // i t + d > koniec (z zapasem 3 min), więc tylko z daleka.
+  const covLo = () => (looseRange ? W1 : hullLo);
+  const covHi = () => (looseRange ? W2 : hullHi);
+  const clearRange = (place) => (moment
+    ? [covHi() - travel[place] + 3, covLo() + travel[place] - 3]
+    : looseRange
+      ? [W1 - travel[place] + 3, W2 + travel[place] - 3]
+      : [winLo - travel[place] + 3, winHi + travel[place] - 3]);
+  /** Okno-chwila: czy z tego miejsca pojedyncza godzina może dać alibi (miejsce dość daleko). */
+  const farFor = (k) => 2 * travel[k] - 6 >= covHi() - covLo();
+  /**
+   * Okno-chwila: pobyt [t1, t2] (dwie godziny w zeznaniu, wejście i wyjście w rejestrze), który osłania całe
+   * okno: t1 − d i t2 + d leżą poza nim (z zapasem 3 min).
+   */
+  const stayIn = (place, minLen, maxLen, lo = 18 * 60, hi = 23 * 60) => {
+    const d = travel[place];
+    const a = covLo() + d - 3;
+    const b = covHi() - d + 3;
+    const t1lo = Math.max(lo, b - maxLen);
+    const t1hi = Math.min(a, hi - minLen);
+    if (t1lo > t1hi) retry();
+    const t1 = rng.int(t1lo, t1hi);
+    const t2lo = Math.max(b, t1 + minLen);
+    const t2hi = Math.min(hi, t1 + maxLen);
+    if (t2lo > t2hi) retry();
+    return [t1, rng.int(t2lo, t2hi)];
+  };
   const timeIn = (place, lo = 18 * 60, hi = 23 * 60) => {
     const [a, b] = clearRange(place);
     const from = Math.max(a, lo);
@@ -224,14 +415,16 @@ function generate(rng, opts) {
   };
   const trapTime = (place) => {
     const d = travel[place];
-    const beforeMax = W1 - d - 3;
-    const afterMin = W2 + d + 3;
+    const beforeMax = hullLo - d - 3;
+    const afterMin = hullHi + d + 3;
     const choices = [];
     if (beforeMax >= 17 * 60 + 15) choices.push({ side: 'before', t: rng.int(Math.max(17 * 60, beforeMax - 70), beforeMax) });
     if (afterMin <= 23 * 60 + 30) choices.push({ side: 'after', t: rng.int(afterMin, Math.min(23 * 60 + 40, afterMin + 50)) });
     if (!choices.length) retry();
     return rng.pick(choices);
   };
+  // Otrucie w budynku z planu (hotel „Zacisze”): ten budynek nie może być miejscem alibi.
+  if (scene.place) taken.add(scene.place);
   const takePlace = (pred) => {
     const options = Object.keys(PLACES).filter((k) => pred(PLACES[k], k) && !taken.has(k));
     if (!options.length) retry();
@@ -246,7 +439,7 @@ function generate(rng, opts) {
   const AWAY = '@poza-miastem';
   const FAR = 100000;
   const events = Object.fromEntries(suspects.map((s) => [s.id, []]));
-  const tmin = (place) => (place === AWAY ? undefined : travel[place]);
+  const tmin = (place) => (place === AWAY ? undefined : place === SCENE_EV ? 0 : travel[place]);
   const clash = (a, b, margin) => {
     if (a.place === b.place) return false;
     if (a.from <= b.to + margin && b.from <= a.to + margin) return true;
@@ -350,6 +543,8 @@ function generate(rng, opts) {
   const usedMeters = new Set();
   const meterNo = () => {
     let n;
+    // Numery z cofniętych prób nie wracają do puli: gdy się skończą, cała próba od nowa (zamiast pętli bez końca).
+    if (usedMeters.size >= 50) retry();
     do n = rng.int(10, 59); while (usedMeters.has(n));
     usedMeters.add(n);
     return n;
@@ -492,17 +687,26 @@ function generate(rng, opts) {
   const nearOut = (place) => {
     const d = travel[place];
     const choices = [];
-    const bLo = Math.max(17 * 60, W1 - d - 18);
-    const bHi = W1 - d - 4;
+    const bLo = Math.max(17 * 60, hullLo - d - 18);
+    const bHi = hullLo - d - 4;
     if (bLo <= bHi) choices.push(() => rng.int(bLo, bHi));
-    const aLo = W2 + d + 4;
-    const aHi = Math.min(23 * 60 + 15, W2 + d + 18);
+    const aLo = hullHi + d + 4;
+    const aHi = Math.min(23 * 60 + 15, hullHi + d + 18);
     if (aLo <= aHi) choices.push(() => rng.int(aLo, aHi));
     if (!choices.length) retry();
     return rng.pick(choices)();
   };
 
   function makeClaim(kind, s, forged, noAlibi = false, opts = {}) {
+    looseRange = Boolean(opts.loose);
+    try {
+      return makeClaimIn(kind, s, forged, noAlibi, opts);
+    } finally {
+      looseRange = false;
+    }
+  }
+
+  function makeClaimIn(kind, s, forged, noAlibi, opts) {
     let evs = [];
     const withP = opts.withP || null;
     const tPick = (place, lo = 18 * 60, hi = 23 * 60) => {
@@ -522,10 +726,19 @@ function generate(rng, opts) {
     };
     let card;
     const by = s.id;
+    // Okno-chwila: dowód z jedną godziną daje alibi tylko z dość daleka, więc miejsce wybieramy spośród dalekich.
+    const needFar = (k) => !moment || noAlibi || farFor(k);
     switch (kind) {
       case 'train': {
         usedPlaces.add('dworzec');
-        const t = timeIn('dworzec', 18 * 60, 22 * 60 + 45);
+        // Okno-chwila: po odjeździe tej osoby nie ma w mieście, więc pociąg osłania okno, jeśli z dworca nie dało się
+        // zdążyć na miejsce zbrodni przed odjazdem: odjazd − dojście przed początkiem okna.
+        const dw = travel.dworzec;
+        const t = moment && noAlibi
+          ? rng.int(hullHi + dw + 4, hullHi + dw + 18)
+          : moment
+            ? rng.int(Math.max(18 * 60, covLo() - 45), Math.min(22 * 60 + 45, covLo() + dw - 3))
+            : timeIn('dworzec', 18 * 60, 22 * 60 + 45);
         const dest = rng.pick(TRAIN_DESTINATIONS.filter((d) => !usedDest.has(d.name)));
         usedDest.add(dest.name);
         let no;
@@ -563,7 +776,7 @@ function generate(rng, opts) {
         // Kto już płacił w tej sprawie własną kartą, nie przynosi paragonu z cudzą kartą (dwie różne końcówki
         // u jednej osoby zdradzałyby fałszywkę bez odpowiedzi banku).
         const way = forged ? pickWay(T.cardNo[s.id] ? { ...RECEIPT_WAYS, card: 0 } : RECEIPT_WAYS) : null;
-        const place = takePlace((p) => p.venue);
+        const place = takePlace((p, k) => p.venue && needFar(k));
         const t = tPick(place);
         const span = () => [rng.pick([7, 8, 9, 10, 11, 12]) * 60, rng.pick([18, 19, 20, 21, 22, 23]) * 60 + rng.pick([0, 0, 30])];
         const hours = { wd: span(), sat: rng.chance(0.85) ? span() : null, sun: rng.chance(0.6) ? span() : null };
@@ -646,7 +859,7 @@ function generate(rng, opts) {
         const bgPlace = way ? way === 'bg' : rng.chance(trueBg);
         // Fałszywka z tłem częściej na placu: tam więcej godzin odpada, a udział fałszywek ma być podobny w obu miejscach.
         const bgPref = way === 'bg' ? (rng.chance(PHOTO_BG_PLAC) ? 'plac' : 'rynek') : null;
-        const place = takePlace((p, k) => p.photo && (!bgPlace || (bgPref ? k === bgPref : k === 'plac' || k === 'rynek')));
+        const place = takePlace((p, k) => p.photo && needFar(k) && (!bgPlace || (bgPref ? k === bgPref : k === 'plac' || k === 'rynek')));
         // Fałszywy pokaz na placu: „trwa pokaz” mniej więcej tak często jak na prawdziwych zdjęciach.
         const wantShow = way === 'bg' && place === 'plac' ? rng.chance(0.4) : null;
         const okTime = (x) => Math.abs(x - sunset) > 30 && !nearBgEdge(place, x) && (wantShow === null || showAt(x) !== wantShow);
@@ -740,8 +953,23 @@ function generate(rng, opts) {
         usedPlaces.add('kino');
         taken.add('kino');
         const film = rng.pick(FILMS.filter((f) => !T.films.some((x) => x.film === f)));
-        const start = round5(tPick('kino', 18 * 60, 21 * 60 + 30));
-        const dur = rng.int(95, 135);
+        let start;
+        let dur;
+        if (moment && !noAlibi) {
+          // Okno-chwila: cały seans (od początku do końca filmu) osłania okno: początek − dojście przed oknem,
+          // koniec + dojście po oknie.
+          dur = rng.int(95, 135);
+          const d = travel.kino;
+          const lo = Math.max(18 * 60, covHi() - d + 3 - dur);
+          const hi = Math.min(21 * 60 + 30, covLo() + d - 3);
+          const ok = [];
+          for (let x = Math.ceil(lo / 5) * 5; x <= hi; x += 5) ok.push(x);
+          if (!ok.length) retry();
+          start = rng.pick(ok);
+        } else {
+          start = round5(tPick('kino', 18 * 60, 21 * 60 + 30));
+          dur = rng.int(95, 135);
+        }
         let starts;
         if (!forged) {
           starts = [start];
@@ -767,11 +995,40 @@ function generate(rng, opts) {
         break;
       }
       case 'delivery': {
-        const st1 = takePlace((p) => p.street);
-        const st2 = takePlace((p) => p.street);
-        const t1 = tPick(st1, 18 * 60, 22 * 60 + 30);
-        const t2 = t1 + Math.max(rng.int(9, 24), between(st1, st2) + rng.int(5, 10));
-        if (noAlibi && t2 > W1 - travel[st2] - 4 && t2 < W2 + travel[st2] + 4) retry();
+        let st1;
+        let st2;
+        // Okno-chwila: alibi daje jedno doręczenie z daleka (samo, zgodnie z zasadą chwili), drugie jest zwykłym
+        // przystankiem w trasie. Raz alibi daje pierwsze, raz drugie doręczenie.
+        let coverFirst = true;
+        if (moment && !noAlibi) {
+          const free = Object.keys(PLACES).filter((k) => PLACES[k].street && !taken.has(k));
+          const far = free.filter((k) => farFor(k));
+          if (!far.length || free.length < 2) retry();
+          const cover = rng.pick(far);
+          const rest = rng.pick(free.filter((k) => k !== cover));
+          coverFirst = rng.chance(0.5);
+          [st1, st2] = coverFirst ? [cover, rest] : [rest, cover];
+          for (const k of [st1, st2]) { taken.add(k); usedPlaces.add(k); }
+        } else {
+          st1 = takePlace((p) => p.street);
+          st2 = takePlace((p) => p.street);
+        }
+        let t1;
+        let t2;
+        if (moment && !noAlibi) {
+          const gap = Math.max(rng.int(9, 24), between(st1, st2) + rng.int(5, 10));
+          if (coverFirst) {
+            t1 = timeIn(st1, 18 * 60, 22 * 60 + 30);
+            t2 = t1 + gap;
+          } else {
+            t2 = timeIn(st2, 18 * 60, 22 * 60 + 30);
+            t1 = t2 - gap;
+          }
+        } else {
+          t1 = tPick(st1, 18 * 60, 22 * 60 + 30);
+          t2 = t1 + Math.max(rng.int(9, 24), between(st1, st2) + rng.int(5, 10));
+        }
+        if (noAlibi && t2 > hullLo - travel[st2] - 4 && t2 < hullHi + travel[st2] + 4) retry();
         const mkStreet = (street) => {
           const parity = rng.pick(['all', 'all', 'even', 'odd']);
           let max = rng.int(7, 48);
@@ -820,7 +1077,7 @@ function generate(rng, opts) {
         break;
       }
       case 'parking': {
-        const place = takePlace((p) => p.parking);
+        const place = takePlace((p, k) => p.parking && needFar(k));
         const t = tPick(place, 18 * 60, 22 * 60 + 30);
         const zone = rng.pick(['A', 'B', 'C', 'D', 'E'].filter((z) => !T.zones.some((x) => x.zone === z)));
         const span = () => [rng.pick([8, 9]) * 60, rng.pick([15, 16, 17, 18, 20, 22]) * 60];
@@ -846,7 +1103,7 @@ function generate(rng, opts) {
         // Sprzeczność fałszywego biletu: o tej godzinie nic nie odjeżdżało (rozkład) albo wóz z biletu
         // jeździł wtedy na innej linii lub stał w zajezdni (dyspozycja wozów MZK).
         const way = forged ? (rng.chance(BUS_VEHICLE_SHARE) ? 'vehicle' : 'timetable') : null;
-        const place = takePlace((p) => p.stop);
+        const place = takePlace((p, k) => p.stop && needFar(k));
         const line = rng.pick(['3', '7', '12', '15']);
         const mkDeps = (from, every, last) => {
           const res = [];
@@ -976,6 +1233,17 @@ function generate(rng, opts) {
     ? TRAP_BEFORE[(trapShift + trapB++) % TRAP_BEFORE.length](s, t)
     : TRAP_AFTER[(trapShift + trapA++) % TRAP_AFTER.length](s, t));
 
+  // Otrucie: świadek widzi sprawcę na chwilę w czasie okna (to nie alibi: chwila wystarczyła na dosypanie środka).
+  const MOMENT_TEXTS = {
+    teatr: (s, t) => `„O ${fmt(t)} ${pan(s).toLowerCase()} ${s.first} ${g(s, 'kupił', 'kupiła')} w kasie bilet na sobotę i od razu ${g(s, 'wyszedł', 'wyszła')}.”`,
+    pub: (s, t) => `„${pan(s)} ${s.first} ${g(s, 'wpadł', 'wpadła')} o ${fmt(t)}, ${g(s, 'wypił', 'wypiła')} sok przy barze i zaraz ${g(s, 'wyszedł', 'wyszła')}.”`,
+    restauracja: (s, t) => `„O ${fmt(t)} ${pan(s).toLowerCase()} ${s.first} ${g(s, 'odebrał', 'odebrała')} zamówienie na wynos. Nie ${g(s, 'czekał', 'czekała')} ani chwili.”`,
+    kregielnia: (s, t) => `„${pan(s)} ${s.first} ${g(s, 'zajrzał', 'zajrzała')} o ${fmt(t)} zapytać o wolny tor w sobotę. Zaraz ${g(s, 'poszedł', 'poszła')}.”`,
+    hotel: (s, t) => `„O ${fmt(t)} ${pan(s).toLowerCase()} ${s.first} ${g(s, 'zostawił', 'zostawiła')} u mnie paczkę dla gościa i ${g(s, 'wyszedł', 'wyszła')}.”`,
+    biblioteka: (s, t) => `„${pan(s)} ${s.first} ${g(s, 'oddał', 'oddała')} książki o ${fmt(t)}. Wpadł${s.f ? 'a' : ''} i wypad${s.f ? 'ła' : 'ł'}, nawet nie ${g(s, 'zdjął', 'zdjęła')} płaszcza.”`,
+  };
+  const MOMENT_TEXT = (s, place, t) => (MOMENT_TEXTS[place] || ((p, x) => `„${pan(p)} ${p.first} ${g(p, 'był', 'była')} u nas o ${fmt(x)}, ale tylko przez chwilę.”`))(s, t);
+
   const TIP_TEXTS = [
     (s, w, place) => `„${pan(s)} ${s.first} ${g(s, 'kręcił', 'kręciła')} się tamtego wieczoru ${PLACES[place].loc}. O której? Nie ${g(w, 'patrzyłem', 'patrzyłam')} na zegarek.”`,
     (s, w, place) => `„Jestem ${g(w, 'pewien', 'pewna')}, że ${pan(s).toLowerCase()} ${s.first} ${g(s, 'był', 'była')} wieczorem ${PLACES[place].loc}. Czy to było wcześnie, czy późno, tego nie wiem.”`,
@@ -1011,17 +1279,29 @@ function generate(rng, opts) {
       // (trzeba policzyć czasy dotarcia), a nie po prostu „w mieście po odjeździe pociągu”.
       const F = rng.pick(forgedEvs.filter((e) => e.place !== AWAY));
       let t;
+      // Podpalenie: często sprawcę widziano tuż przy godzinie zapłonu (wygląda na alibi na zapłon, a obala fałszywkę).
+      const nearZ = arson && rng.chance(0.6);
+      // Otrucie: często sprawcę widziano w czasie okna (krótki pobyt gdzie indziej nie daje alibi, a obala fałszywkę).
+      const inWin = moment && rng.chance(0.2);
+      const pickT = (lo, hi) => (nearZ && Math.max(lo, arson.Z - 8) <= Math.min(hi, arson.Z + 10)
+        ? rng.int(Math.max(lo, arson.Z - 8), Math.min(hi, arson.Z + 10))
+        : inWin && Math.max(lo, W1) <= Math.min(hi, W2)
+          ? rng.int(Math.max(lo, W1), Math.min(hi, W2))
+          : rng.int(lo, hi));
       if (F.place === AWAY) {
-        t = rng.int(Math.max(F.from + 10, W2 + d + 3), F.from + 90);
+        t = pickT(Math.max(F.from + 10, hullHi + d + 3), F.from + 90);
       } else {
         const D = between(place, F.place);
         if (place === F.place || D < 10) continue;
         // Przy bilecie kolejowym tylko przed odjazdem: „po odjeździe” zdradzałaby sama zasada o wyjeździe, bez liczenia.
         const train = forgedEvs.some((e) => e.place === AWAY);
-        t = rng.int(F.from - (D - 5), train ? F.from - 3 : F.to + (D - 5));
+        t = pickT(F.from - (D - 5), train ? F.from - 3 : F.to + (D - 5));
       }
-      if (!(t <= W1 - d - 3 || t >= W2 + d + 3)) continue;
+      // Pobyt nie może dawać alibi. Okno-chwila: wystarczy, że od t − d do t + d nie mieści się całe okno.
+      if (moment ? !(t <= W2 - d - 3 || t >= W1 + d + 3) : !(t <= hullLo - d - 3 || t >= hullHi + d + 3)) continue;
       if (t < 17 * 60 || t > 23 * 60 + 30) continue;
+      // Otrucie: tuż przed oknem i tuż po nim (do 5 min) nie widać nikogo, także niewinnych, więc i sprawcy nie.
+      if (moment && ((t >= W1 - 5 && t < W1) || (t > W2 && t <= W2 + 5))) continue;
       const ev = { place, from: t, to: t };
       if (!forgedEvs.some((f) => clash(ev, f, -4))) continue;
       if (others.some((o) => clash(ev, o, 4))) continue;
@@ -1032,7 +1312,7 @@ function generate(rng, opts) {
         addCard({
           desk: 'S', kind: 'witness', title: `Zeznanie: ${w.full}`,
           sub: `${PLACES[place].witness[w.f ? 'f' : 'm']} ${PLACES[place].loc}`,
-          lines: [TRAP_TEXT(s, t < W1 ? 'before' : 'after', t)],
+          lines: [moment && t >= W1 - 5 && t <= W2 + 5 ? MOMENT_TEXT(s, place, t) : TRAP_TEXT(s, t < hullLo ? 'before' : 'after', t)],
           facts: [{ t: 'seen', who: s.id, place, from: t, to: t }],
         });
       } else {
@@ -1049,13 +1329,113 @@ function generate(rng, opts) {
     retry();
   }
 
+  /**
+   * Podpalenie: pobyt w okolicy godziny zapłonu (prawdziwe alibi na sam zapłon, ale nie na podłożenie).
+   * Zaczyna się po rozstrzygającym otwarciu (z zapasem na dojście); `strict` – także po drugim otwarciu
+   * (u sprawcy, który nie może mieć alibi na żadne z otwarć). Zwraca najwcześniejszą możliwą godzinę.
+   */
+  // Ta sama granica u wszystkich (po obu otwarciach): inaczej pobyt zaczynający się między końcami otwarć
+  // oczyszczałby niewinnych, bo sprawca nigdy takiego nie ma.
+  const igniteFrom = (place) => hullHi + travel[place] + 3;
   function makeNeutral(source, s, mode) {
+    if (mode === 'short') {
+      // Otrucie: krótki pobyt w czasie okna, który nie daje alibi (od t − d do t + d nie mieści się całe okno).
+      // U niewinnych to drugi pobyt obok prawdziwego alibi, więc miejsce i godzinę wybieramy spośród tych, które
+      // da się z nim pogodzić: także to samo miejsce co ich pobyt (np. ten sam pub) albo miejsce tuż obok.
+      // Bez tego krótki pobyt w oknie mieliby prawie wyłącznie sprawcy.
+      // To samo miejsce tylko wtedy, gdy osoba była tam jedynie przez chwilę (paragon, zdjęcie, odjazd pociągu),
+      // a nie przez dłuższy pobyt: „wpadła i zaraz wyszła” kłóciłoby się z zeznaniem o całym wieczorze.
+      const own = new Set(events[s.id].filter((e) => e.from === e.to).map((e) => e.place));
+      for (const e of events[s.id]) if (e.from !== e.to) own.delete(e.place);
+      const withHours = new Set(T.hours.map((h) => h.place));
+      const cands = [];
+      for (const k of Object.keys(PLACES)) {
+        if (!(source === 'witness' ? PLACES[k].witness : PLACES[k].cctv)) continue;
+        if (k === scene.place || withHours.has(k) || (taken.has(k) && !own.has(k))) continue;
+        const d = travel[k];
+        for (let t = W1; t <= W2; t++) {
+          if (t <= W2 - d - 3 || t >= W1 + d + 3) {
+            const near = events[s.id].some((e) => e.place === k && Math.abs(e.from - t) < 10);
+            if (!near && fits(s.id, [{ place: k, from: t, to: t }])) cands.push([k, t]);
+          }
+        }
+      }
+      if (!cands.length) retry();
+      const [place, t] = rng.pick(cands);
+      taken.add(place);
+      usedPlaces.add(place);
+      if (source === 'witness') {
+        const w = nextWitness();
+        addCard({
+          desk: 'S', kind: 'witness', title: `Zeznanie: ${w.full}`,
+          sub: `${PLACES[place].witness[w.f ? 'f' : 'm']} ${PLACES[place].loc}`,
+          lines: [MOMENT_TEXT(s, place, t)],
+          facts: [{ t: 'seen', who: s.id, place, from: t, to: t }],
+        });
+      } else {
+        addCard({
+          desk: 'R', kind: 'official', title: 'Monitoring miejski',
+          lines: [`Kamera nr ${rng.int(2, 19)} · ${PLACES[place].name}`, `Nagranie z godz. ${fmt(t)}`, `Wyraźnie widać: ${s.full} ${rng.pick(CCTV_DETAILS)}.`],
+          facts: [{ t: 'seen', who: s.id, place, from: t, to: t }],
+        });
+        if (rng.chance(P.tipChance)) makeTip(s, place);
+      }
+      return { place, events: [{ place, from: t, to: t }] };
+    }
+    const ignite = mode === 'ignite' || mode === 'ignite-strict';
+    const Z = arson?.Z;
+    if (ignite && source === 'witness') {
+      const place = takePlace((p) => p.witness);
+      const lo = igniteFrom(place);
+      const w = nextWitness();
+      let ts;
+      if (lo <= Z - 6 && rng.chance(0.6)) {
+        const t1 = rng.int(Math.max(lo, Z - 40), Z - 3);
+        ts = [t1, Math.max(Z + 3, t1 + rng.int(15, 40))];
+      } else {
+        if (Math.max(lo, Z - 8) > Z + 10) retry();
+        ts = [rng.int(Math.max(lo, Z - 8), Z + 10)];
+      }
+      addCard({
+        desk: 'S', kind: 'witness', title: `Zeznanie: ${w.full}`,
+        sub: `${PLACES[place].witness[w.f ? 'f' : 'm']} ${PLACES[place].loc}`,
+        lines: [WITNESS_TEXT[place](s, w, ts)],
+        facts: [{ t: 'seen', who: s.id, place, from: ts[0], to: ts[ts.length - 1] }],
+      });
+      return { place, events: [{ place, from: ts[0], to: ts[ts.length - 1] }] };
+    }
+    if (ignite && source === 'cctv') {
+      const place = takePlace((p) => p.cctv);
+      const lo = Math.max(igniteFrom(place), Z - 8);
+      if (lo > Z + 10) retry();
+      const t = rng.int(lo, Z + 10);
+      addCard({
+        desk: 'R', kind: 'official', title: 'Monitoring miejski',
+        lines: [`Kamera nr ${rng.int(2, 19)} · ${PLACES[place].name}`, `Nagranie z godz. ${fmt(t)}`, `Wyraźnie widać: ${s.full} ${rng.pick(CCTV_DETAILS)}.`],
+        facts: [{ t: 'seen', who: s.id, place, from: t, to: t }],
+      });
+      return { place, events: [{ place, from: t, to: t }] };
+    }
+    if (ignite) {
+      const place = takePlace((p) => p.cardlog);
+      const lo = Math.max(igniteFrom(place), Z - 50);
+      if (lo > Z + 8) retry();
+      const t1 = rng.int(lo, Math.max(lo, Z - 3));
+      const t2 = Math.max(Z + 5, t1 + rng.int(45, 90));
+      if (!T.cardlogs[place]) T.cardlogs[place] = [];
+      T.cardlogs[place].push({ owner: s.id, ownerName: s.full, t1, t2 });
+      return { place, events: [{ place, from: t1, to: t2 }] };
+    }
     if (source === 'witness') {
       const place = takePlace((p) => p.witness);
       const w = nextWitness();
       let ts;
       let text;
-      if (mode === 'clear') {
+      if (mode === 'clear' && moment) {
+        // Okno-chwila: zwykle dwie godziny w zeznaniu (pobyt przez całe okno); jedna godzina tylko z daleka.
+        ts = farFor(place) && rng.chance(0.35) ? [timeIn(place)] : stayIn(place, 20, 110);
+        text = WITNESS_TEXT[place](s, w, ts);
+      } else if (mode === 'clear') {
         const t1 = timeIn(place);
         ts = rng.chance(0.55) ? [t1, t1 + rng.int(20, 55)] : [t1];
         text = WITNESS_TEXT[place](s, w, ts);
@@ -1074,7 +1454,8 @@ function generate(rng, opts) {
       return { place, events: [{ place, from: ts[0], to: ts[ts.length - 1] }] };
     }
     if (source === 'cctv') {
-      const place = takePlace((p) => p.cctv);
+      // Okno-chwila: nagranie z jedną godziną daje alibi tylko z daleka.
+      const place = takePlace((p, k) => p.cctv && (!moment || mode !== 'clear' || farFor(k)));
       const t = mode === 'clear' ? timeIn(place) : trapTime(place).t;
       addCard({
         desk: 'R', kind: 'official', title: 'Monitoring miejski',
@@ -1092,7 +1473,9 @@ function generate(rng, opts) {
     const place = takePlace((p) => p.cardlog);
     let t1;
     let t2;
-    if (mode === 'clear') {
+    if (mode === 'clear' && moment) {
+      [t1, t2] = stayIn(place, 45, 120);
+    } else if (mode === 'clear') {
       t1 = timeIn(place);
       t2 = t1 + rng.int(45, 100);
     } else {
@@ -1120,7 +1503,10 @@ function generate(rng, opts) {
   // więc rodzaj karty nie zdradza, która jest fałszywa.
   const kinds = P.forgeMode === 'table' ? weightedOrder(ALL_KINDS, TABLE_KIND_W) : rng.shuffle(ALL_KINDS);
   // W alibi krzyżowym kłamstwo nie zabiera rodzajów wspólnych dowodów (paragon, zdjęcie, kino).
-  const lieKinds = P.forgeMode === 'cross' ? ['parking', 'delivery'] : LIE_KINDS;
+  // Otrucie nie ma weekendowej odmiany ze wspólnymi dowodami: przy oknie-chwili dwa prawdziwe dowody z alibi
+  // jednej osoby w dwóch różnych miejscach zwykle wzajemnie się wykluczają (oba zabierają całe okno).
+  const weekend = P.forgeMode === 'cross' && !moment;
+  const lieKinds = weekend ? ['parking', 'delivery'] : LIE_KINDS;
   const lieKind = P.innocentLie ? kinds.splice(kinds.findIndex((k) => lieKinds.includes(k)), 1)[0] : null;
   let kp = 0;
 
@@ -1128,8 +1514,7 @@ function generate(rng, opts) {
   // Weekend: zawsze dwa wspólne dowody i jeden zwykły. W około 60% spraw fałszywką jest wspólny dowód sprawcy
   // (alibi krzyżowe), w pozostałych oba wspólne dowody są prawdziwe, a fałszywką jest zwykły dowód sprawcy
   // (zdradza go fizyczna niemożliwość). Z samych akt nie da się więc wskazać fałszywki.
-  const weekend = P.forgeMode === 'cross';
-  const mode = weekend && rng.chance(0.63) ? 'self' : P.forgeMode;
+  const mode = weekend && rng.chance(0.63) ? 'self' : moment && P.forgeMode === 'cross' ? 'self' : P.forgeMode;
   const JOINT_KINDS = ['receipt', 'photo', 'cinema'];
   // Rodzaj dowodu zarezerwowany na fałszywkę krzyżową i na prawdziwy wspólny dowód (zmyłkę).
   // Bilet do kina łatwiej „zgrać” w sprzeczność z pobytem Y, więc losujemy go rzadziej: wtedy rodzaj wspólnego
@@ -1150,10 +1535,14 @@ function generate(rng, opts) {
     [crossKind, jointKind] = forgedFirst ? pair : [pair[1], pair[0]];
     for (const k of pair) kinds.splice(kinds.indexOf(k), 1);
   } else {
+    // Otrucie: prawdziwy wspólny dowód też bywa (gdy da się go pogodzić z innymi alibi obu osób; jeśli nie,
+    // po prostu go nie ma).
     const jointIdx = rng.chance(P.jointDecoyChance) ? kinds.findIndex((k) => JOINT_KINDS.includes(k)) : -1;
     jointKind = jointIdx >= 0 ? kinds.splice(jointIdx, 1)[0] : null;
   }
   const neutralPlace = {};
+  // Prawdziwy pobyt partnerów wspólnych dowodów (Y i N2): nagranie z kamery albo rejestr wejść.
+  const PARTNER_SOURCES = ['cctv', 'cardlog'];
   // Alibi krzyżowe: dwa symetryczne wspólne dowody. Fałszywy (sprawca + Y) i prawdziwy (zmyłka A + N2).
   // A nie ma innego dowodu z alibi (tak jak sprawca), a N2, tak jak Y, ma prawdziwy pobyt tylko
   // na zapieczętowanym nagraniu albo w rejestrze. Żeby wskazać fałszywkę, trzeba to sprawdzić.
@@ -1175,7 +1564,7 @@ function generate(rng, opts) {
     // a trop jest logiczny (Y twierdzi, że był właśnie tam).
     // Bez zeznania-tropu: Y sam mówi, gdzie był, a trop wprost do kamery Y zdradzałby fałszywkę.
     noTip.add(Y.id);
-    neutralPlace[yIdx] = attempt(Y, () => makeNeutral(rng.pick(['cctv', 'cardlog']), Y, 'clear')).place;
+    neutralPlace[yIdx] = attempt(Y, () => makeNeutral(rng.pick(PARTNER_SOURCES), Y, 'clear')).place;
     noTip.delete(Y.id);
     const yEvents = events[Y.id].slice();
     const res = attempt(culprit, () => makeClaim(forgedKind, culprit, false, false, { withP: Y, mustConflict: yEvents }));
@@ -1186,7 +1575,14 @@ function generate(rng, opts) {
     // Fałszywka „fizyczna”: rodzaj losujemy z wagami, bo niektóre rodzaje częściej przechodzą kontrolę
     // jakości. Dzięki temu żaden rodzaj dowodu nie jest „zawsze prawdziwy” ani „zwykle fałszywy”.
     if (mode === 'self') {
-      const W = { receipt: 2.6, photo: 3.8, train: 1.45, parking: 2.3, bus: 1.3, delivery: 0.9, cinema: 0.7 };
+      // Otrucie: osobne wagi (przy oknie-chwili rodzaje inaczej przechodzą kontrolę jakości), dobrane pomiarem tak,
+      // żeby udział fałszywek wśród dowodów z alibi był podobny dla każdego rodzaju.
+      // Podpalenie: też osobne wagi (alibi na oba otwarcia: kino łatwiej, pociąg i parking trudniej przechodzą).
+      const W = moment
+        ? { receipt: 1.7, photo: 2.5, train: 1.26, parking: 1.77, bus: 1.42, delivery: 1.88, cinema: 1.09 }
+        : arson
+          ? { receipt: 2.5, photo: 3.6, train: 2.8, parking: 4.6, bus: 1.6, delivery: 1.1, cinema: 0.27 }
+          : { receipt: 2.6, photo: 3.8, train: 1.45, parking: 2.3, bus: 1.3, delivery: 0.9, cinema: 0.7 };
       const avail = kinds.slice(kp);
       let x = rng.next() * avail.reduce((sum, k) => sum + (W[k] || 1), 0);
       const pick = avail.find((k) => (x -= W[k] || 1) < 0) || avail[avail.length - 1];
@@ -1198,6 +1594,9 @@ function generate(rng, opts) {
     forgedCard = res.card;
     forgedEvents = res.events;
   }
+  // Otrucie: chwila sprawcy przy karafce. Każdy jego prawdziwy pobyt musi dać się z nią pogodzić (z zapasem),
+  // więc w każdej hipotezie sprawca mógł zdążyć na miejsce zbrodni (fałszywka oczywiście tej chwili przeczy).
+  if (poison) events[culprit.id].push({ place: SCENE_EV, from: poison.m0, to: poison.m0 });
   for (const i of decoyIdx) {
     if (i === jointOwnerIdx || i === jointOwner2Idx) continue;
     const kind = kinds[kp++];
@@ -1207,7 +1606,14 @@ function generate(rng, opts) {
     if (neutralPlace[i]) continue;
     if (i === jointPartnerIdx || i === jointPartner2Idx) {
       noTip.add(suspects[i].id);
-      neutralPlace[i] = attempt(suspects[i], () => makeNeutral(rng.pick(['cctv', 'cardlog']), suspects[i], 'clear')).place;
+      // Partner prawdziwego wspólnego dowodu ma alibi na oba otwarcia z tego dowodu, więc przy podpaleniu jego
+      // własny pobyt wystarczy w rozstrzygającym oknie (łatwiej zmieścić obok niego wspólny dowód).
+      looseRange = Boolean(arson);
+      try {
+        neutralPlace[i] = attempt(suspects[i], () => makeNeutral(rng.pick(PARTNER_SOURCES), suspects[i], 'clear')).place;
+      } finally {
+        looseRange = false;
+      }
       noTip.delete(suspects[i].id);
       continue;
     }
@@ -1215,8 +1621,28 @@ function generate(rng, opts) {
   }
   const extraIdx = neutralIdx.slice(0, P.extraTrueItems);
   for (const i of extraIdx) {
+    // Otrucie: dodatkowy prawdziwy dowód osoby z alibi od świadka nie może drugi raz zabierać całego okna
+    // (dwa takie pobyty w różnych miejscach się wykluczają), więc jest dowodem bez alibi.
+    // Najpierw próbujemy dowodu z alibi na samo okno (pobyt w innym miejscu da się czasem pogodzić z alibi od
+    // świadka, gdy oba miejsca leżą daleko i blisko siebie), a dopiero gdy się nie da, dowodu bez alibi.
+    if (moment) {
+      const kind = kinds[kp++];
+      try {
+        attempt(suspects[i], () => makeClaim(kind, suspects[i], false, false, { loose: true }));
+        continue;
+      } catch (e) {
+        if (!(e instanceof RetryError)) throw e;
+      }
+      const kind2 = rng.pick(['receipt', 'parking', 'photo']);
+      try {
+        attempt(suspects[i], () => makeClaim(kind2, suspects[i], false, true, { cover: true }));
+      } catch (e) {
+        if (!(e instanceof RetryError)) throw e;
+      }
+      continue;
+    }
     const kind = kinds[kp++];
-    attempt(suspects[i], () => makeClaim(kind, suspects[i], false));
+    attempt(suspects[i], () => makeClaim(kind, suspects[i], false, false, { loose: true }));
   }
   // Prawdziwe wspólne dowody dwóch niewinnych osób.
   const makeJoint = (kind, pair) => {
@@ -1271,11 +1697,28 @@ function generate(rng, opts) {
   if (lieKind) {
     // W weekend kłamie jedna ze zmyłek (w obu odmianach tak samo, żeby kłamca nie zdradzał odmiany).
     const pool = weekend ? decoyIdx : neutralIdx.filter((i) => !extraIdx.includes(i));
-    const liar = suspects[rng.pick(pool.length ? pool : neutralIdx)];
+    let liar = suspects[rng.pick(pool.length ? pool : neutralIdx)];
     // Kłamstwo zwykle wygląda na alibi (godzina w zasięgu), a od fałszywki sprawcy odróżnia je to,
     // że kłamca ma inne, potwierdzone alibi. Czasem godzina wypada tuż poza zasięgiem.
-    const lieNoAlibi = !rng.chance(P.lieAlibiChance);
-    lieCard = attempt(liar, () => makeClaim(lieKind, liar, true, lieNoAlibi)).card;
+    // Otrucie: kłamca ma prawdziwe alibi na całe okno, więc kłamstwo z alibi musi dać się z nim pogodzić (oba
+    // miejsca daleko od miejsca zdarzenia i blisko siebie). Gdy się nie da, kłamstwo wypada poza zasięgiem.
+    let lieNoAlibi = !rng.chance(P.lieAlibiChance);
+    if (moment && !lieNoAlibi) {
+      // Kłamać może każda osoba z puli: bierzemy pierwszą, u której kłamstwo z alibi da się pogodzić z jej alibi.
+      // (Przy otruciu kłamać może też osoba z własnym prawdziwym dowodem z alibi: to jej inne alibi.)
+      const order = [liar, ...rng.shuffle(innocents).map((i) => suspects[i]).filter((x) => x !== liar)];
+      for (const who of order) {
+        try {
+          lieCard = attempt(who, () => makeClaim(lieKind, who, true, false, { loose: true })).card;
+          liar = who;
+          break;
+        } catch (e) {
+          if (!(e instanceof RetryError)) throw e;
+        }
+      }
+      if (!lieCard) lieNoAlibi = true;
+    }
+    if (!lieCard) lieCard = attempt(liar, () => makeClaim(lieKind, liar, true, lieNoAlibi, { loose: true })).card;
     // Kłamca czasem podaje kłamstwo jako swoje alibi (inaczej kłamstwa nigdy nie byłoby w zeznaniach).
     if (!lieNoAlibi && rng.chance(0.8)) liar.claimCard = lieCard;
   }
@@ -1285,6 +1728,37 @@ function generate(rng, opts) {
   // Pułapka sprawcy jest na nagraniu (z ewentualnym zeznaniem-tropem) mniej więcej tak często jak pułapka
   // któregoś z niewinnych, żeby trop do kamery nie wskazywał ani sprawcy, ani niewinnych.
   else if (P.culpritTrap) attempt(culprit, () => makeNeutral(rng.chance(0.4) ? 'cctv' : rng.pick(['witness', 'cardlog']), culprit, 'trap'));
+
+  // Podpalenie: kilka osób ma prawdziwe alibi na samą godzinę zapłonu (zmyłka: liczy się chwila podłożenia).
+  // Trzy losowe osoby niewinne i czasem sprawca, ale tylko wtedy, gdy taki pobyt nie daje mu alibi na żadne
+  // z otwarć drzwi (często sprawcę i tak widać przy zapłonie na karcie, która obala fałszywkę).
+  if (arson) {
+    const who = [...rng.sample(innocents, 3), ...(rng.chance(0.6) ? [culpritIdx] : [])];
+    for (const i of rng.shuffle(who)) {
+      const s = suspects[i];
+      try {
+        attempt(s, () => makeNeutral(rng.pick(['witness', 'witness', 'cctv', 'cardlog']), s, i === culpritIdx ? 'ignite-strict' : 'ignite'));
+      } catch (e) {
+        if (!(e instanceof RetryError)) throw e;
+      }
+    }
+  }
+
+  // Otrucie: niewinnych też czasem ktoś widzi krótko w czasie okna (obok ich prawdziwego alibi), tak jak sprawcę
+  // na karcie, która obala fałszywkę. Krótki pobyt w oknie nie wskazuje więc sprawcy, tylko trzeba liczyć.
+  // Przy fałszywce tabelowej sprawcy nie widać w oknie (jego fałszywka zabiera całe okno, a tabelowej nie może
+  // obalać też jego pobyt), więc wtedy krótkich pobytów w oknie nie ma nikt.
+  if (poison && mode !== 'table') {
+    for (const i of innocents) {
+      if (!rng.chance(0.9)) continue;
+      const s = suspects[i];
+      try {
+        attempt(s, () => makeNeutral(rng.chance(P.sealedTrapChance) ? 'cctv' : 'witness', s, 'short'));
+      } catch (e) {
+        if (!(e instanceof RetryError)) throw e;
+      }
+    }
+  }
 
   // W raporcie wybiera się fałszywkę spośród dowodów od podejrzanych: musi ich być co najmniej cztery,
   // inaczej dałoby się ją po prostu zgadnąć.
@@ -1626,7 +2100,7 @@ function generate(rng, opts) {
   const owner = scene.owner;
   const initials = owner.full.split(' ').map((x) => x[0]).join('.') + '.';
   const amount = () => `${rng.int(12, 180)} ${rng.pick(['000', '500'])}`;
-  const NOISE = {
+  const NOISE_THEFT = {
     D: [
       () => ({ title: 'Polisa ubezpieczeniowa', lines: [`Polisa nr PL-${rng.int(100000, 999999)}`, `Przedmiot: ${stolenNom}`, `Suma ubezpieczenia: ${amount()} zł`, `Ubezpieczony: ${owner.full}`] }),
       () => ({ title: 'Protokół oględzin', lines: ['Zamek bez śladów forsowania.', 'Drzwi otwarto kodem wpisanym na klawiaturze.', 'Na klamce i klawiaturze brak odcisków palców.'] }),
@@ -1668,8 +2142,79 @@ function generate(rng, opts) {
     ],
   };
 
+  // Szum przy podpaleniu (nikt nie ucierpiał; godzinę zapłonu podaje czujka, a nie zgłoszenie do straży).
+  const NOISE_ARSON = {
+    D: [
+      () => { const call = arson.Z + rng.int(4, 9); return { title: 'Raport straży pożarnej', lines: [`Zgłoszenie pożaru: ${fmt(call)} (sąsiad z ulicy).`, `Przyjazd zastępu: ${fmt(call + rng.int(6, 11))}.`, 'Ogień ugaszony, nikt nie ucierpiał.'] }; },
+      () => ({ title: 'Polisa ubezpieczeniowa', lines: [`Polisa nr PL-${rng.int(100000, 999999)}`, `Przedmiot: ${scene.building} z wyposażeniem`, `Suma ubezpieczenia: ${amount()} zł`, `Ubezpieczony: ${owner.full}`] }),
+      () => ({ title: 'Faktura za serwis alarmu', lines: [`Faktura nr ${rng.int(10, 299)}/2026`, 'Przegląd czujnika drzwi, czujki dymu i synchronizacja zegara.', 'Stan: sprawny, zegar zgodny co do sekundy.'] }),
+      () => ({ title: 'Notatka z tablicy przy drzwiach', lines: [`„Przypominam: kodu nie podajemy nikomu obcemu. ${initials}”`] }),
+      () => ({ title: 'Wycinek z „Gazety Borowickiej”', lines: ['Straż pożarna przypomina: czujka dymu kosztuje mniej niż pizza.', 'Kampania potrwa do końca miesiąca.'] }),
+      () => ({ title: 'Lista osób znających kod', lines: ['Kod zmieniono na początku miesiąca.', `Znają go: ${suspects.map((x) => x.full).join(', ')}.`] }),
+      () => ({ title: 'Umowa z firmą ochroniarską', lines: ['Firma: Ochrona Borowice', 'Zakres: czujnik drzwi i czujka dymu, bez kamer.', 'Patrol przyjeżdża tylko po włączeniu się alarmu.'] }),
+      () => ({ title: 'Rachunek za prąd', lines: ['Zakład Energetyczny Borowice', `Zużycie w poprzednim miesiącu: ${rng.int(40, 160)} kWh`, `Do zapłaty: ${rng.int(60, 190)},${rng.int(10, 99)} zł`] }),
+    ],
+    S: [
+      () => { const w = nextWitness(); return { title: `Zeznanie: ${w.full}`, sub: g(w, 'sąsiad z naprzeciwka', 'sąsiadka z naprzeciwka'), lines: [`„Około ${fmt(arson.Z + rng.int(3, 7))} ${g(w, 'poczułem', 'poczułam')} dym i ${g(w, 'zadzwoniłem', 'zadzwoniłam')} po straż.”`] }; },
+      () => { const w = nextWitness(); return { title: `Zeznanie: ${w.full}`, sub: g(w, 'dozorca sąsiedniej kamienicy', 'dozorczyni sąsiedniej kamienicy'), lines: [`„Około ${fmt(closeT - rng.int(10, 30))} ${g(w, 'zamknąłem', 'zamknęłam')} bramę na podwórko. Nikogo obcego tam nie ${g(w, 'widziałem', 'widziałam')}.”`] }; },
+      () => { const w = nextWitness(); return { title: `Zeznanie: ${w.full}`, sub: g(w, 'taksówkarz', 'taksówkarka'), lines: [`„${g(w, 'Miałem', 'Miałam')} wieczorem tylko dwa kursy, oba na dworzec. Nikogo z tej piątki nie ${g(w, 'wiozłem', 'wiozłam')}.”`] }; },
+      () => { const w = nextWitness(); return { title: `Zeznanie: ${w.full}`, sub: g(w, 'sprzedawca w budce z kebabem', 'sprzedawczyni w budce z kebabem'), lines: ['„Koło 21:00 ktoś w kapturze przebiegł w stronę parku. Chyba biegacz, miał opaskę odblaskową.”'] }; },
+    ],
+    M: NOISE_THEFT.M,
+    Z: [
+      () => ({ title: 'Zdjęcie z oględzin', lines: ['W kącie resztki stopionego minutnika.', 'Obok osmalona puszka po podpałce.'] }),
+      () => ({ title: 'Zdjęcie z oględzin', lines: ['Na wycieraczce ślady piasku z budowy obok.', 'Nie da się ustalić rozmiaru buta.'] }),
+      () => ({ title: 'Zdjęcie klawiatury przy drzwiach', lines: ['Na klawiszach 2, 5, 8 i 0 starta farba.'] }),
+      () => ({ title: 'Zdjęcie z zebrania', lines: ['Wiosną: cała piątka podejrzanych przy jednym stole.', 'Wszyscy uśmiechnięci, z kubkami herbaty.'] }),
+    ],
+    R: NOISE_THEFT.R.filter((fn) => !/Rejestr systemu alarmowego/.test(fn.toString())),
+  };
+  // Szum przy otruciu (nikt nie ucierpiał: poszkodowany przespał wieczór).
+  const ownerFirst = owner.full.split(' ')[0];
+  const victimGen = g(owner, 'poszkodowanego', 'poszkodowanej');
+  const NOISE_POISON = poison ? {
+    D: [
+      () => ({ title: 'Wynik badania wody z karafki', lines: ['Zakład Diagnostyki Borowice', `W wodzie z karafki: środek nasenny, ten sam co we krwi ${victimGen}.`, `Na karafce odciski palców obsługi i ${victimGen}.`] }),
+      () => ({ title: 'Ulotka środka nasennego', lines: ['Sen trwa 6–8 godzin, potem bez skutków ubocznych.', 'Bez smaku i zapachu po rozpuszczeniu w wodzie.', 'Nie łączyć z alkoholem.'] }),
+      () => ({ title: `Rezerwacja: ${scene.room}`, lines: [`${dShort}, od 18:00 do 23:00`, `Zamawia: ${owner.full}`, 'Woda i szklanki w cenie, kawa na zamówienie.'] }),
+      () => (scene.id === 'jutrzenka'
+        ? { title: 'Program koncertu', lines: [`1. Powitanie (dyryguje ${owner.full})`, '2. Pieśni ludowe z okolic Borowic', '3. Jubileuszowy bis'] }
+        : { title: 'Porządek wieczoru', lines: [`1. Powitanie (${owner.full})`, '2. Sprawy bieżące i finanse', '3. Wolne wnioski'] }),
+      () => ({ title: 'Lista osób z dostępem', lines: [`Do ${scene.roomGen} wchodzą: ${suspects.map((x) => x.full).join(', ')}.`, 'Drzwi nie mają zamka ani kamery.'] }),
+      () => ({ title: 'Paragon z apteki (sprzed tygodnia)', lines: ['Apteka „Pod Orłem”', 'Środek nasenny, 20 tabletek', 'płatność: GOTÓWKA'] }),
+    ],
+    S: [
+      () => { const w = nextWitness(); return { title: `Zeznanie: ${w.full}`, sub: g(w, 'portier', 'portierka'), lines: [`„Wieczorem ${g(w, 'widziałem', 'widziałam')} na korytarzu wiele osób. Nikogo z karafką ani z tabletkami nie ${g(w, 'zauważyłem', 'zauważyłam')}.”`] }; },
+      () => { const w = nextWitness(); return { title: `Zeznanie: ${w.full}`, sub: g(w, 'taksówkarz', 'taksówkarka'), lines: [`„${g(w, 'Miałem', 'Miałam')} wieczorem tylko dwa kursy, oba na dworzec. Nikogo z tej piątki nie ${g(w, 'wiozłem', 'wiozłam')}.”`] }; },
+      () => { const w = nextWitness(); return { title: `Zeznanie: ${w.full}`, sub: g(w, 'sprzątacz', 'sprzątaczka'), lines: [`„Szklanki ${g(w, 'umyłem', 'umyłam')} dopiero rano. Karafkę zabrała policja.”`] }; },
+      () => { const w = nextWitness(); return { title: `Zeznanie: ${w.full}`, sub: `${g(w, 'lekarz rodzinny', 'lekarka rodzinna')} ${victimGen}`, lines: [`„${ownerFirst} nigdy nie ${g(owner, 'brał', 'brała')} leków nasennych. Śpi jak suseł bez nich.”`] }; },
+    ],
+    M: NOISE_THEFT.M,
+    Z: [
+      () => ({ title: 'Zdjęcie z oględzin', lines: ['Stół: karafka do połowy pełna, dwie szklanki, notatki.', 'Fotel odsunięty od stołu, na podłodze okulary.'] }),
+      () => ({ title: 'Zdjęcie z oględzin', lines: ['Kosz na śmieci: pusty blister po tabletkach bez nazwy.', 'Odcisków palców brak.'] }),
+      () => ({ title: 'Zdjęcie z zeszłego roku', lines: ['Wszyscy podejrzani przy jednym stole, z kubkami herbaty.', 'Na stole ta sama karafka.'] }),
+    ],
+    R: NOISE_THEFT.R.filter((fn) => !/Rejestr systemu alarmowego/.test(fn.toString())),
+  } : null;
+  const NOISE = arson ? NOISE_ARSON : poison ? NOISE_POISON : NOISE_THEFT;
+
   // Zeznania o motywach (szum, ale budzą podejrzenia).
-  const MOTIVES = [
+  const MOTIVES_ARSON = [
+    (s) => `„${s.first} ${g(s, 'mówił', 'mówiła')}, że ${scene.thisNom} to rudera i szkoda na nią pieniędzy.”`,
+    (s) => `„W zeszłym tygodniu ${s.first} ${g(s, 'pokłócił', 'pokłóciła')} się ${scene.ownerIns} o klucze i kod.”`,
+    (s) => `„${s.first} ${g(s, 'pytał', 'pytała')} mnie niedawno, czy ${scene.buildingAcc} ktoś ubezpieczył.”`,
+    (s) => `„${s.first} od miesięcy ${g(s, 'narzekał', 'narzekała')}, że ${g(s, 'został pominięty', 'została pominięta')} przy podziale pieniędzy.”`,
+    (s) => `„${s.first} ${g(s, 'wiedział', 'wiedziała')}, że czujka dymu nie dzwoni do straży, tylko wyje na miejscu.”`,
+  ];
+  const MOTIVES_POISON = [
+    (s) => `„${s.first} ${g(s, 'mówił', 'mówiła')}, że ${owner.full} za długo ${g(owner, 'rządzi', 'rządzi')} i nikogo nie słucha.”`,
+    (s) => `„W zeszłym tygodniu ${s.first} ${g(s, 'pokłócił', 'pokłóciła')} się ${scene.ownerIns} o pieniądze.”`,
+    (s) => `„${s.first} ${g(s, 'pytał', 'pytała')} mnie niedawno, czy tabletki nasenne mają smak.”`,
+    (s) => `„${s.first} ${g(s, 'wiedział', 'wiedziała')}, że ${ownerFirst} zawsze pije wodę z karafki przed ${scene.event.startsWith('zebranie') ? 'zebraniem' : 'koncertem'}.”`,
+    (s) => `„${s.first} od miesięcy ${g(s, 'narzekał', 'narzekała')}, że ${g(s, 'został pominięty', 'została pominięta')} przy podziale obowiązków.”`,
+  ];
+  const MOTIVES = arson ? MOTIVES_ARSON : poison ? MOTIVES_POISON : [
     (s) => `„${s.first} od miesięcy ${g(s, 'narzekał', 'narzekała')} na brak pieniędzy.”`,
     (s) => `„W zeszłym tygodniu ${s.first} ${g(s, 'pokłócił', 'pokłóciła')} się ${scene.ownerIns} o pieniądze.”`,
     (s) => `„${s.first} ${g(s, 'pytał', 'pytała')} mnie niedawno, ile można dostać za najcenniejsze rzeczy ${scene.inLoc}.”`,
@@ -1683,9 +2228,116 @@ function generate(rng, opts) {
     addCard({ desk: 'S', kind: 'witness', title: `Zeznanie: ${w.full}`, sub: g(w, 'znajomy z okolicy', 'znajoma z okolicy'), lines: [fn(motiveTargets[k])] });
   });
 
+  // Podpalenie: rejestr alarmu z otwarciami drzwi, pamięć czujki dymu, opinia biegłego i zeznanie właściciela.
+  // Karty są jawne (bez koperty): bez nich nie wiadomo, kiedy sprawca był w środku.
+  if (arson) {
+    const ownerG = g(owner, 'właściciela', 'właścicielki');
+    addCard({
+      desk: 'R', title: 'Rejestr systemu alarmowego', sub: `${scene.building} · ${dShort}`,
+      lines: [
+        `${fmt(closeT)} uzbrojony (wyjście ${ownerG})`,
+        ...arson.openings.flatMap(([a, b]) => [`${fmt(a)} rozbrojony kodem, drzwi otwarte`, `${fmt(b)} drzwi zamknięte, uzbrojony`]),
+        'Kod jest jeden, wspólny dla wszystkich.',
+      ],
+      facts: arson.openings.map(([from, to]) => ({ t: 'opening', from, to })),
+    });
+    addCard({
+      desk: 'R', title: 'Pamięć czujki dymu', sub: `${scene.building} · ${dShort}`,
+      lines: [
+        `Czujka nr ${rng.int(1, 4)}: ${fmt(arson.Z)} wykryto dym, alarm pożarowy.`,
+        'Czujka reaguje kilka sekund po zapłonie.',
+      ],
+      facts: [{ t: 'ignition', time: arson.Z }],
+    });
+    addCard({
+      desk: 'D', title: 'Opinia biegłego pożarnictwa', sub: `Komenda Powiatowa PSP · ${dShort}`,
+      lines: [
+        'Źródło ognia: minutnik kuchenny z podpałką.',
+        'Zapłon nastąpił w chwili dzwonka minutnika.',
+        `Tarcza stopiona, z mechanizmu: nastaw od${NB}${arson.Rmin} do${NB}${arson.Rmax}${NB}min.`,
+        'Minutnik nastawiono w chwili podłożenia.',
+      ],
+      facts: [{ t: 'timer', min: arson.Rmin, max: arson.Rmax }],
+    });
+    // Bez „na chwilę” i „od razu”: oba otwarcia mają długości z tego samego zakresu, a zeznanie nie może
+    // zdradzać, które z nich było właściciela.
+    const back = rng.pick([
+      [`${g(owner, 'wróciłem', 'wróciłam')} po telefon, który został na półce przy drzwiach`, `Trochę go ${g(owner, 'szukałem', 'szukałam')}.`],
+      [`${g(owner, 'zajrzałem', 'zajrzałam')} jeszcze sprawdzić, czy ${g(owner, 'zgasiłem', 'zgasiłam')} światło`, 'Wszystko było w porządku.'],
+      [`${g(owner, 'wróciłem', 'wróciłam')} po klucze od samochodu`, `${g(owner, 'Znalazłem', 'Znalazłam')} je dopiero w drugiej kurtce.`],
+      [`${g(owner, 'wróciłem', 'wróciłam')} jeszcze ${scene.ownerErrand}`, `Nic dziwnego nie ${g(owner, 'zauważyłem', 'zauważyłam')}.`],
+    ]);
+    addCard({
+      desk: 'S', kind: 'witness', title: `Zeznanie: ${owner.full}`, sub: scene.ownerRole,
+      lines: [`„${g(owner, 'Wyszedłem', 'Wyszłam')} o ${fmt(closeT)} i ${g(owner, 'uzbroiłem', 'uzbroiłam')} alarm. Potem ${back[0]}. ${back[1]} O której? Nie pamiętam, nie ${g(owner, 'patrzyłem', 'patrzyłam')} na zegarek.”`],
+    });
+  }
+
+  // Otrucie: zeszyt obsługi (postawienie karafki i wejścia obsługi), zeznanie poszkodowanego (dwie szklanki),
+  // zeznanie obsługi (przy którym wejściu wymieniono wodę: dolna granica okna), opinia lekarza (w której szklance
+  // na pewno był środek: górna granica) i czasem zeznanie barmana (godzina bez znaczenia). Karty są jawne.
+  if (poison) {
+    const staff = nextWitness();
+    const barW = nextWitness();
+    const staffRole = scene.staff[staff.f ? 'f' : 'm'];
+    const staffShort = `${staff.full.split(' ')[0][0]}.${NB}${staff.full.split(' ').slice(1).join(' ')}`;
+    const [g0, g1] = poison.glasses;
+    const [v0, v1] = poison.visits;
+    const other = rng.pick([[18 * 60 + rng.int(5, 40), `${scene.otherRoom}: sprzątanie po obiedzie`], [g1 + rng.int(25, 50), 'zaplecze: odbiór dostawy']]);
+    const brought = rng.pick(['ciasteczka', 'kawę w termosie', 'serwetki', 'drugi komplet szklanek']);
+    const logRows = [
+      [poison.set, `${scene.room}: przygotowanie, karafka z wodą i szklanki`],
+      [v0, `${scene.room}: obsługa (${staffShort})`],
+      [v1, `${scene.room}: obsługa (${staffShort})`],
+      other,
+    ].sort((a, b) => a[0] - b[0]);
+    addCard({
+      desk: 'R', title: 'Zeszyt obsługi', sub: `${scene.mapLabel} · ${dShort}`,
+      lines: [...logRows.map(([t, txt]) => `${fmt(t)} ${txt}`), 'Zapisuje obsługa, każde wejście z godziną.'],
+      facts: [{ t: 'carafe', time: poison.set, kind: 'set' }, { t: 'carafe', time: v0, kind: 'visit' }, { t: 'carafe', time: v1, kind: 'visit' }],
+    });
+    const step = rng.pick([
+      [`${g(owner, 'wyszedłem', 'wyszłam')} na korytarz zadzwonić`, 'Wróciłem', 'Wróciłam'],
+      [`${g(owner, 'zszedłem', 'zeszłam')} na chwilę na dół po notatki`, 'Wróciłem', 'Wróciłam'],
+    ]);
+    addCard({
+      desk: 'S', kind: 'witness', title: `Zeznanie: ${owner.full}`, sub: scene.ownerRole,
+      lines: [`„O ${fmt(g0)} ${g(owner, 'wypiłem', 'wypiłam')} pierwszą szklankę wody z karafki i od razu ${step[0]}. ${g(owner, step[1], step[2])} o ${fmt(rng.int(g0 + 1, g1 - 1))} i o ${fmt(g1)} ${g(owner, 'wypiłem', 'wypiłam')} drugą szklankę. Potem ${g(owner, 'usiadłem', 'usiadłam')} w fotelu i nic więcej nie pamiętam.”`],
+      facts: [{ t: 'glass', time: g0 }, { t: 'glass', time: g1 }],
+    });
+    const refillText = `${g(staff, 'wylałem', 'wylałam')} wodę z karafki i ${g(staff, 'nalałem', 'nalałam')} świeżej, prosto z kranu`;
+    addCard({
+      desk: 'S', kind: 'witness', title: `Zeznanie: ${staff.full}`, sub: staffRole,
+      lines: [poison.refillIdx
+        ? `„O ${fmt(v0)} ${g(staff, 'przyniosłem', 'przyniosłam')} ${brought}, karafki nie ${g(staff, 'ruszałem', 'ruszałam')}. O ${fmt(v1)} ${refillText}.”`
+        : `„O ${fmt(v0)} ${refillText}. O ${fmt(v1)} ${g(staff, 'przyniosłem', 'przyniosłam')} jeszcze ${brought}, ale karafki już nie ${g(staff, 'ruszałem', 'ruszałam')}.”`],
+      facts: [{ t: 'refill', time: poison.A }],
+    });
+    addCard({
+      desk: 'D', title: 'Opinia lekarza', sub: `Pogotowie Ratunkowe Borowice · ${dShort}`,
+      lines: [
+        `Pacjent${owner.f ? 'ka' : ''}: ${owner.full}. Głęboki sen po środku nasennym.`,
+        ...(poison.dosedIdx
+          ? [`Środek był na pewno w drugiej szklance, wypitej o${NB}${fmt(poison.B)}.`, 'O pierwszej szklance nie da się tego powiedzieć.']
+          : [`Środek był już w pierwszej szklance wody, wypitej o${NB}${fmt(poison.B)}.`]),
+        `Rano pacjent${owner.f ? 'ka obudziła' : ' obudził'} się ${g(owner, 'zdrowy', 'zdrowa')}, nikt nie ucierpiał.`,
+      ],
+      facts: [{ t: 'dosed', time: poison.B }],
+    });
+    // Barman przy drugiej karafce: tylko w części spraw i w kilku wersjach (gracz sam ocenia, że to nie ta karafka).
+    if (rng.chance(0.5)) {
+      const barLine = rng.pick([
+        `„O ${fmt(poison.bar)} ${g(barW, 'napełniłem', 'napełniłam')} drugą karafkę, tę ${scene.bar}. Stała u mnie przy barze przez cały wieczór.”`,
+        `„O ${fmt(poison.bar)} ${g(barW, 'przyniosłem', 'przyniosłam')} z piwnicy skrzynkę wody mineralnej ${scene.bar}. Nikogo po drodze nie ${g(barW, 'spotkałem', 'spotkałam')}.”`,
+        `„O ${fmt(poison.bar)} ${g(barW, 'myłem', 'myłam')} karafki ${scene.bar}. Jednej brakowało, ale tę obsługa wzięła wcześniej do ${scene.roomGen}.”`,
+      ]);
+      addCard({ desk: 'S', kind: 'witness', title: `Zeznanie: ${barW.full}`, sub: g(barW, 'barman', 'barmanka'), lines: [barLine] });
+    }
+  }
+
   // Plan miasta: kratki miejsca kradzieży, wszystkich miejsc z kart i kilku dodatkowych.
   // Z kratek gracz liczy czasy dotarcia (w poziomie + w pionie, razy MIN_PER_CELL minut).
-  const mapPlaces = [...usedPlaces, ...rng.sample(Object.keys(PLACES).filter((k) => !usedPlaces.has(k)), rng.int(2, 4))]
+  const mapPlaces = [...usedPlaces, ...rng.sample(Object.keys(PLACES).filter((k) => !usedPlaces.has(k) && k !== scene.place), rng.int(2, 4))]
     .sort((a, b) => PLACES[a].name.localeCompare(PLACES[b].name, 'pl'));
   addCard({
     desk: 'M',
@@ -1693,7 +2345,7 @@ function generate(rng, opts) {
     sub: `1 kratka = ${MIN_PER_CELL} min drogi · liczcie kratki w poziomie i w pionie`,
     mapCard: true,
     lines: [
-      `Miejsce kradzieży: ${scene.name}, kratka ${sceneCell}`,
+      `Miejsce ${CR.gen}: ${scene.name}, kratka ${sceneCell}`,
       ...mapPlaces.map((p) => `${PLACES[p].name}: ${PLACE_CELLS[p]}`),
     ],
     facts: [{ t: 'grid', perCell: MIN_PER_CELL, scene: sceneCell }, ...mapPlaces.map((p) => ({ t: 'pos', place: p, cell: PLACE_CELLS[p] }))],
@@ -1730,6 +2382,8 @@ function generate(rng, opts) {
     if (card.kind !== 'official') return null;
     const types = new Set((card.facts || []).map((f) => f.t));
     if (types.has('travel') || types.has('grid')) return null;
+    if (types.has('opening') || types.has('ignition') || types.has('timer')) return null;
+    if (types.has('carafe') || types.has('dosed')) return null;
     if (types.has('train')) return { label: 'Pobierz rozkład jazdy ze stacji Borowice', cost: 30 };
     if (types.has('bus')) return { label: `Pobierz rozkład MZK: ${card.title.replace(/^Przystanek (.+): linia (\S+)$/, 'linia $2, przystanek $1')}`, cost: 30 };
     if (types.has('street')) return { label: 'Zapytaj urząd o numerację budynków', cost: 30 };
@@ -1769,6 +2423,28 @@ function generate(rng, opts) {
   });
 
 
+  const wd = `${WEEKDAYS_ACC[weekday][0].toUpperCase()}${WEEKDAYS_ACC[weekday].slice(1)}`;
+  // Podpalenie: osobny tytuł, intro i pola z otwarciami drzwi oraz godziną zapłonu (do pokazania w aktach;
+  // które otwarcie jest właściwe, gracz ustala sam). Kradzież zostaje bez nowych pól (jak przed v10).
+  const arsonFields = arson ? {
+    crimeType: crime,
+    title: scene.title,
+    damage: stolen,
+    intro: `${scene.name}, ${scene.address}. ${wd}, ${dateLong(crimeIso)}, ${scene.ownerRole} ${owner.full} ${g(owner, 'wyszedł', 'wyszła')} o ${fmt(closeT)} i ${g(owner, 'uzbroił', 'uzbroiła')} alarm. Rejestr alarmu zapisał potem dwa otwarcia drzwi kodem: ${arson.openings.map(([a, b]) => `${fmt(a)}–${fmt(b)}`).join(' i ')}. O ${fmt(arson.Z)} czujka dymu wykryła ogień. Straż pożarna szybko go ugasiła i nikt nie ucierpiał, ale spłonęły ${stolen}. Biegły ustalił, że pożar wywołał minutnik z podpałką. Kod do drzwi znało pięć osób i to one są podejrzanymi.`,
+    openings: arson.openings.map(([from, to]) => ({ from, to })),
+    ignition: arson.Z,
+  } : null;
+
+  // Otrucie: tytuł, intro i pola z godzinami karafki (do pokazania w aktach; które z nich wyznaczają okno,
+  // gracz ustala z kart).
+  const poisonFields = poison ? {
+    crimeType: crime,
+    title: scene.title,
+    intro: `${scene.name}, ${scene.address}. ${wd}, ${dateLong(crimeIso)}, o ${fmt(poison.set)} obsługa postawiła ${scene.roomLoc} karafkę z wodą i szklanki, a potem zaglądała tam jeszcze o ${fmt(poison.visits[0])} i o ${fmt(poison.visits[1])}. ${scene.ownerRole.charAt(0).toUpperCase()}${scene.ownerRole.slice(1)} ${owner.full} ${g(owner, 'wypił', 'wypiła')} z karafki dwie szklanki wody, o ${fmt(poison.glasses[0])} i o ${fmt(poison.glasses[1])}, a o ${fmt(poison.asleep)} ${g(owner, 'zasnął', 'zasnęła')} w fotelu i ${g(owner, 'przespał', 'przespała')} ${scene.event}. Lekarz z pogotowia stwierdził środek nasenny, który ktoś dosypał do karafki. Na szczęście nikt nie ucierpiał. Do ${scene.roomGen} mogło wejść pięć osób (${scene.group}) i to one są podejrzanymi.`,
+    carafe: { set: poison.set, visits: poison.visits, glasses: poison.glasses, asleep: poison.asleep },
+  } : null;
+  const special = arsonFields || poisonFields;
+
   return {
     version: 1,
     kind: opts.kind,
@@ -1777,12 +2453,17 @@ function generate(rng, opts) {
     date: opts.date,
     crimeDate: { iso: crimeIso, weekday, label: `${WEEKDAYS[weekday]}, ${dateLong(crimeIso)}` },
     difficulty: opts.difficulty,
-    title: `Kradzież ${scene.inLoc}`,
-    stolen: { acc: stolen, nom: stolenNom },
+    ...(special ? { crimeType: special.crimeType } : {}),
+    title: special ? special.title : `Kradzież ${scene.inLoc}`,
+    ...(arsonFields ? { damage: arsonFields.damage } : poisonFields ? {} : { stolen: { acc: stolen, nom: stolenNom } }),
     owner: { full: owner.full, f: owner.f, role: scene.ownerRole },
-    scene: { name: scene.name, address: scene.address, short: scene.short, inLoc: scene.inLoc },
-    intro: `${scene.name}, ${scene.address}. ${WEEKDAYS_ACC[weekday][0].toUpperCase()}${WEEKDAYS_ACC[weekday].slice(1)}, ${dateLong(crimeIso)}, ${scene.ownerRole} ${owner.full} ${g(owner, 'wyszedł', 'wyszła')} o ${fmt(closeT)} i ${g(owner, 'zamknął', 'zamknęła')} drzwi. System alarmowy zarejestrował otwarcie drzwi kodem o ${fmt(W1)} i ich zamknięcie o ${fmt(W2)}. Rano okazało się, że skradziono ${stolen}. Kod znało pięć osób i to one są podejrzanymi.`,
+    scene: { name: scene.name, address: scene.address, short: scene.short, inLoc: scene.inLoc, ...(scene.mapLabel ? { mapLabel: scene.mapLabel } : {}), ...(poisonFields ? { event: scene.event, room: scene.room } : {}) },
+    intro: special ? special.intro : `${scene.name}, ${scene.address}. ${wd}, ${dateLong(crimeIso)}, ${scene.ownerRole} ${owner.full} ${g(owner, 'wyszedł', 'wyszła')} o ${fmt(closeT)} i ${g(owner, 'zamknął', 'zamknęła')} drzwi. System alarmowy zarejestrował otwarcie drzwi kodem o ${fmt(W1)} i ich zamknięcie o ${fmt(W2)}. Rano okazało się, że skradziono ${stolen}. Kod znało pięć osób i to one są podejrzanymi.`,
+    // Okno zbrodni (rozwiązanie): przy podpaleniu rozstrzygające otwarcie drzwi. Solver przy podpaleniu
+    // nie czyta tego pola, tylko wybiera okno z rejestru alarmu, czujki i opinii biegłego.
     window: { from: W1, to: W2 },
+    ...(arsonFields ? { openings: arsonFields.openings, ignition: arsonFields.ignition } : {}),
+    ...(poisonFields ? { carafe: poisonFields.carafe } : {}),
     suspects: suspects.map(({ id, full, first, f, role, alibi, items, fullAcc, ins, gen }) => ({ id, full, first, f, role, alibi, items, fullAcc, ins, gen })),
     desks: DESK_DEFS,
     cards: publicCards,

@@ -6,7 +6,7 @@
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { buildDailyCase, buildPracticeCase } from '../js/generator.js';
 import { investigationBudget } from '../js/solver.js';
-import { rulesFor, DESK_DEFS } from '../js/data.js';
+import { rulesFor, DESK_DEFS, crimeOf } from '../js/data.js';
 import { fmt } from '../js/time.js';
 
 const args = process.argv.slice(2);
@@ -46,12 +46,14 @@ if (toOpen.length) {
 }
 
 console.log(`# ${c.title}`);
-console.log(`Trudność: ${c.difficulty}/7 · kradzież: ${c.crimeDate.label}\n`);
+console.log(`Trudność: ${c.difficulty}/7 · ${crimeOf(c).noun}: ${c.crimeDate.label}\n`);
 console.log(c.intro);
-console.log(`Okno: ${fmt(c.window.from)}–${fmt(c.window.to)}\n`);
+console.log(c.openings
+  ? `Otwarcia drzwi: ${c.openings.map((o) => `${fmt(o.from)}–${fmt(o.to)}`).join(', ')} · zapłon ${fmt(c.ignition)}\n`
+  : `Okno: ${fmt(c.window.from)}–${fmt(c.window.to)}\n`);
 console.log('## Zasady');
 rulesFor(c).forEach((r, i) => console.log(`${i + 1}. ${r}`));
-if (c.innocentLie) console.log('UWAGA: w tej sprawie kłamią dwie osoby. Jeden fałszywy dowód podrzucił sprawca. Drugi to kłamstwo niewinnej osoby, która ukrywała coś niezwiązanego z kradzieżą. Kłamca ma poza nim inne, potwierdzone alibi.');
+if (c.innocentLie) console.log(`UWAGA: w tej sprawie kłamią dwie osoby. Jeden fałszywy dowód podrzucił sprawca. Drugi to kłamstwo niewinnej osoby, która ukrywała coś niezwiązanego z ${crimeOf(c).ins}. Kłamca ma poza nim inne, potwierdzone alibi.`);
 console.log('\n## Podejrzani');
 for (const s of c.suspects) console.log(`- ${s.full} (${s.role}): ${s.alibi}`);
 for (const d of DESK_DEFS) {

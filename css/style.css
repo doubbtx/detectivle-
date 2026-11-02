@@ -816,6 +816,40 @@ button.chip { cursor: pointer; }
 .wx-tick { position: absolute; top: 1.75rem; transform: translateX(-50%); font: 600 0.72rem var(--font-doc); color: var(--ink-soft); }
 .wx-tick:first-of-type { transform: none; }
 .wx-tick:last-of-type { transform: translateX(-100%); }
+/* Podpalenie: rejestr alarmu, czujka dymu, opinia biegłego */
+.al-track { background: linear-gradient(90deg, #2f3557, #1f2340); }
+.al-open { position: absolute; top: 0; bottom: 0; display: grid; place-items: center; background: #f2c94c; color: #2c2a26; font: 700 0.8rem var(--font-doc); border-left: 2px solid #b3261e; border-right: 2px solid #b3261e; min-width: 14px; box-sizing: border-box; }
+/* Wąski pas (krótkie otwarcie): mniejszy numer, mieści się między krawędziami (min. 14 px). */
+.al-open.narrow { font-size: 0.68rem; }
+.smoke-box { display: inline-flex; align-items: center; gap: 0.55rem; margin: 0.4rem 0 0.2rem; padding: 0.35rem 0.8rem; border-radius: 999px; background: #2b1f1d; color: #ffd8cf; }
+.smoke-box .ico { width: 1.4rem; height: 1.4rem; color: #ff8a65; }
+.smoke-box b { font: 700 1.5rem var(--font-doc); letter-spacing: 0.04em; }
+.smoke-box span { font-size: 0.75rem; opacity: 0.85; }
+.tm-wrap { display: flex; align-items: center; gap: 0.8rem; margin: 0.4rem 0 0.2rem; }
+.tm-dial { width: 7.5rem; height: 7.5rem; flex: none; }
+.tm-face { fill: var(--sheet-alt, #f4f1e8); stroke: var(--ink-soft); stroke-width: 2; }
+.tm-range { fill: color-mix(in srgb, var(--stamp) 35%, transparent); stroke: var(--stamp); stroke-width: 1.5; }
+.tm-ticks line { stroke: var(--ink-soft); stroke-width: 1.4; }
+.tm-labels text { font: 700 9px var(--font-doc); fill: var(--ink-soft); }
+.tm-hub { fill: var(--ink-soft); }
+.tm-cap { margin: 0; font-size: var(--step--1); color: var(--ink-soft); line-height: 1.3; }
+.tm-cap b { font: 700 1.25rem var(--font-doc); color: var(--stamp); }
+/* Okno przy podpaleniu: kilka otwarć i zapłon */
+.window.w-multi { flex-wrap: wrap; gap: 0.35rem 1.1rem; }
+.akta-head .window.w-multi .w-time { font-size: clamp(1.25rem, 5.4vw, 1.9rem); }
+.window.w-multi .w-ign .w-time { color: var(--ink); }
+.bd-window.alt { background: repeating-linear-gradient(135deg, color-mix(in srgb, var(--stamp) 18%, transparent) 0 4px, transparent 4px 8px); }
+.bd-ign { position: absolute; top: -2px; bottom: -2px; width: 0; border-left: 2px dashed #e0742c; }
+.lg-ign { width: 0; border-left: 2px dashed #e0742c; border-radius: 0; background: none; }
+/* Otrucie: godziny karafki w aktach i kreski na tablicy */
+.akta-head .window.w-moment .w-time { font-size: clamp(1.05rem, 4.4vw, 1.55rem); }
+.bd-mark { position: absolute; top: -2px; bottom: -2px; width: 0; border-left: 2px dotted #3f7fb0; }
+.lg-mark { width: 0; border-left: 2px dotted #3f7fb0; border-radius: 0; background: none; }
+.lab-box { display: flex; align-items: center; gap: 0.7rem; margin: 0.4rem 0 0.2rem; }
+.lab-box .ico { width: 2.2rem; height: 2.2rem; color: #3f7fb0; flex: none; }
+.lab-box b { font: 700 1.4rem var(--font-doc); color: var(--stamp); }
+.lab-box span { display: block; font-size: var(--step--1); color: var(--ink-soft); line-height: 1.3; }
+.log-bar .al-open { background: #cfe3f2; border-color: #3f7fb0; }
 /* Zasady w skrócie */
 .rules-short ul { list-style: none; padding: 0; margin: 0.4rem 0 0.6rem; display: grid; gap: 0.45rem; }
 .rules-short li { display: flex; gap: 0.6rem; align-items: flex-start; font-size: var(--step-0); line-height: 1.4; }
@@ -913,7 +947,7 @@ button.chip { cursor: pointer; }
 .bd-unknown { display: grid; place-items: center; background: var(--sheet-alt); border: 1px dashed var(--rule); font: 700 1.2rem var(--font-display); color: var(--ink-soft); }
 .bd-track { min-width: 0; }
 .bd-lane { position: relative; height: 1.6rem; border-radius: 4px; background: repeating-linear-gradient(90deg, var(--sheet-alt) 0 1px, transparent 1px 100%); background-color: color-mix(in srgb, var(--ink) 4%, var(--sheet)); }
-.bd-window { position: absolute; top: 0; bottom: 0; background: color-mix(in srgb, var(--stamp) 22%, transparent); border-left: 2px solid var(--stamp); border-right: 2px solid var(--stamp); }
+.bd-window { position: absolute; top: 0; bottom: 0; background: color-mix(in srgb, var(--stamp) 22%, transparent); border-left: 2px solid var(--stamp); border-right: 2px solid var(--stamp); min-width: 8px; box-sizing: border-box; }
 .bd-dot, .bd-bar { position: absolute; top: 50%; border: 2px solid var(--sheet); background: var(--ink); cursor: pointer; padding: 0; }
 .bd-dot { width: 0.95rem; height: 0.95rem; border-radius: 50%; transform: translate(-50%, -50%); }
 .bd-bar { height: 0.8rem; border-radius: 999px; transform: translateY(-50%); }

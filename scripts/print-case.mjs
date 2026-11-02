@@ -1,7 +1,7 @@
 // Wypisuje sprawę jako tekst. Użycie:
 //   node scripts/print-case.mjs 2026-11-08            (sprawa dnia)
 //   node scripts/print-case.mjs K7Q2                  (trening)
-//   dodaj --solution, żeby zobaczyć rozwiązanie
+//   dodaj --solution, żeby zobaczyć rozwiązanie, a --gen, żeby pominąć zamrożony plik z cases/
 import { buildDailyCase, buildPracticeCase } from '../js/generator.js';
 import { solveCase } from '../js/solver.js';
 import { fmt } from '../js/time.js';
@@ -12,13 +12,15 @@ const showSolution = process.argv.includes('--solution');
 import { existsSync, readFileSync } from 'node:fs';
 const frozen = new URL(`../cases/${arg}.json`, import.meta.url);
 const isDate = /^\d{4}-\d{2}-\d{2}$/.test(arg);
-const c = isDate && existsSync(frozen) ? JSON.parse(readFileSync(frozen, 'utf8')) : isDate ? buildDailyCase(arg) : buildPracticeCase(arg);
+const c = isDate && existsSync(frozen) && !process.argv.includes('--gen') ? JSON.parse(readFileSync(frozen, 'utf8')) : isDate ? buildDailyCase(arg) : buildPracticeCase(arg);
 const name = (id) => c.suspects.find((s) => s.id === id)?.full;
 
 console.log(`# ${c.title}${c.number ? ` (sprawa #${c.number} · ${c.fingerprint})` : ` (trening ${c.code})`}`);
 console.log(`Trudność: ${c.difficulty}/7 · zbrodnia: ${c.crimeDate.label}`);
 console.log(`\n${c.intro}`);
-console.log(`Okno: ${fmt(c.window.from)}–${fmt(c.window.to)}\n`);
+console.log(c.openings
+  ? `Otwarcia drzwi: ${c.openings.map((o) => `${fmt(o.from)}–${fmt(o.to)}`).join(', ')} · zapłon ${fmt(c.ignition)}\n`
+  : `Okno: ${fmt(c.window.from)}–${fmt(c.window.to)}\n`);
 console.log('## Zasady');
 rulesFor(c).forEach((r, i) => console.log(`${i + 1}. ${r}`));
 if (c.innocentLie) console.log('UWAGA: w tej sprawie kłamią dwie osoby. Jeden fałszywy dowód podrzucił sprawca, drugi to kłamstwo niewinnej osoby, która ma inne, potwierdzone alibi.');
@@ -36,6 +38,7 @@ for (const d of c.desks) {
 if (showSolution) {
   const r = solveCase(c);
   console.log(`\n## Rozwiązanie: ${name(c.solution.culprit)}, fałszywka ${c.solution.forged}`);
+  if (r.explain.window?.reason) console.log(`Okno: ${r.explain.window.reason}`);
   console.log(`Powód: ${r.explain.forged.reason}`);
   for (const [id, items] of Object.entries(r.explain.suspects)) {
     console.log(`- ${name(id)}: ${items.map((i) => `${r.describeClear(i)} [${i.refs.join(', ')}]`).join(' | ')}`);

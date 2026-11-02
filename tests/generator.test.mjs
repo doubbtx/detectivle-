@@ -168,6 +168,16 @@ test('prawdziwe pobyty każdej osoby są fizycznie spójne (osobna implementacja
       }
     }
     // Sprawca: żaden jego prawdziwy pobyt nie wyklucza obecności na miejscu zbrodni.
+    if (c.crimeType === 'poison') {
+      // Okno-chwila: istnieje chwila okna, w której sprawca mógł być przy karafce mimo wszystkich swoich pobytów.
+      const own = stays[c.solution.culprit] || [];
+      let free = false;
+      for (let m = c.window.from; m <= c.window.to && !free; m++) {
+        free = own.every((st) => (st.place === '@away' ? m < st.from : travel[st.place] === undefined || m <= st.from - travel[st.place] || m >= st.to + travel[st.place]));
+      }
+      assert.ok(free, `${iso}: prawdziwe pobyty sprawcy wykluczają każdą chwilę okna`);
+      continue;
+    }
     for (const st of stays[c.solution.culprit] || []) {
       if (travel[st.place] === undefined) continue;
       assert.ok(!(st.from < c.window.to + travel[st.place] && st.to > c.window.from - travel[st.place]), `${iso}: prawdziwy pobyt sprawcy ${st.card} daje mu alibi`);

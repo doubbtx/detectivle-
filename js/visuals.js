@@ -19,6 +19,13 @@ export function cardLook(k) {
   if (k.title === 'Monitoring miejski') return 'cctv';
   if (has(k, 'train') || has(k, 'bus') || has(k, 'vehicle')) return 'board';
   if (has(k, 'weather')) return 'weather';
+  // Podpalenie: rejestr alarmu (pasek z otwarciami drzwi), czujka dymu, opinia biegłego (tarcza minutnika).
+  if (has(k, 'opening')) return 'alarm';
+  if (has(k, 'ignition')) return 'smoke';
+  if (has(k, 'timer')) return 'expert';
+  // Otrucie: zeszyt obsługi (pasek godzin z wejściami do sali), opinia lekarza (szklanka z godziną).
+  if (has(k, 'carafe')) return 'servicelog';
+  if (has(k, 'dosed')) return 'doctor';
   return null;
 }
 
@@ -28,6 +35,13 @@ export function cardIcon(k) {
   if (cl) return { train: 'train-front', bus: 'bus-front', cinema: 'clapperboard', parking: 'ticket', receipt: 'receipt', photo: 'camera', delivery: 'smartphone' }[cl.kind] || 'file-text';
   if (k.kind === 'witness') return 'message-circle';
   if (/Monitoring|Kamera/.test(k.title)) return 'cctv';
+  if (has(k, 'opening')) return 'door-open';
+  if (has(k, 'ignition')) return 'alarm-smoke';
+  if (has(k, 'timer')) return 'timer';
+  if (/^Raport (OSP|straży)/.test(k.title)) return 'siren';
+  if (has(k, 'carafe')) return 'clipboard-list';
+  if (has(k, 'dosed')) return 'stethoscope';
+  if (/karafki|nasenn/.test(k.title)) return 'glass-water';
   if (has(k, 'train')) return 'train-front';
   if (has(k, 'bus')) return 'bus-front';
   if (has(k, 'weather')) return 'cloud-rain';
@@ -133,6 +147,65 @@ export function cardVisual(k, { suspectById }) {
     const ticks = [16, 18, 20, 22, 24].map((h) => `<span class="wx-tick" style="left:${pct(h * 60)}%">${h}</span>`).join('');
     const segs = rains.map((r) => `<span class="wx-rain" style="left:${pct(r.from)}%;width:${pct(r.to) - pct(r.from)}%">${icon('cloud-rain')}</span>`).join('');
     return `<div class="wx-bar" aria-hidden="true"><div class="wx-track">${segs}</div>${ticks}</div>`;
+  }
+  if (look === 'alarm') {
+    // Pasek godzin z otwarciami drzwi (godziny zostają w liniach karty).
+    const ops = (k.facts || []).filter((f) => f.t === 'opening');
+    const A = Math.floor((Math.min(...ops.map((o) => o.from)) - 20) / 60) * 60;
+    const B = Math.max(A + 120, Math.ceil((Math.max(...ops.map((o) => o.to)) + 20) / 60) * 60);
+    const pct = (m) => ((m - A) / (B - A)) * 100;
+    const ticks = [];
+    for (let h = A / 60; h * 60 <= B; h++) ticks.push(`<span class="wx-tick" style="left:${pct(h * 60)}%">${h % 24}</span>`);
+    // Krótkie otwarcie (poniżej ok. 6% paska): numer nad paskiem zamiast w środku.
+    const segs = ops.map((o, i) => `<span class="al-open${pct(o.to) - pct(o.from) < 6 ? ' narrow' : ''}" data-n="${i + 1}" style="left:${pct(o.from)}%;width:${Math.max(3, pct(o.to) - pct(o.from))}%" title="${fmt(o.from)}–${fmt(o.to)}">${i + 1}</span>`).join('');
+    return `<div class="wx-bar al-bar" aria-hidden="true"><div class="wx-track al-track">${segs}</div>${ticks.join('')}</div>`;
+  }
+  if (look === 'servicelog') {
+    // Pasek godzin z wejściami obsługi do sali (godziny zostają w liniach karty).
+    const ts = (k.facts || []).filter((f) => f.t === 'carafe').map((f) => f.time);
+    const A = Math.floor((Math.min(...ts) - 20) / 60) * 60;
+    const B = Math.max(A + 120, Math.ceil((Math.max(...ts) + 20) / 60) * 60);
+    const pct = (m) => ((m - A) / (B - A)) * 100;
+    const ticks = [];
+    for (let h = A / 60; h * 60 <= B; h++) ticks.push(`<span class="wx-tick" style="left:${pct(h * 60)}%">${h % 24}</span>`);
+    const segs = ts.map((t, i) => `<span class="al-open" style="left:${pct(t) - 1.5}%;width:3%" title="${fmt(t)}">${i + 1}</span>`).join('');
+    return `<div class="wx-bar al-bar log-bar" aria-hidden="true"><div class="wx-track">${segs}</div>${ticks.join('')}</div>`;
+  }
+  if (look === 'doctor') {
+    const t = (k.facts || []).find((f) => f.t === 'dosed')?.time;
+    return `<div class="lab-box" aria-hidden="true">${icon('glass-water')}<p><b>${t === undefined ? '' : fmt(t)}</b><span>${/drugiej szklance/.test(k.lines.join(' ')) ? 'środek na pewno w drugiej szklance' : 'środek już w pierwszej szklance'}</span></p></div>`;
+  }
+  if (look === 'smoke') {
+    const t = (k.facts || []).find((f) => f.t === 'ignition')?.time;
+    return `<div class="smoke-box" aria-hidden="true">${icon('alarm-smoke')}<b>${t === undefined ? '' : fmt(t)}</b><span>dym · alarm</span></div>`;
+  }
+  if (look === 'expert') {
+    // Tarcza minutnika z zaznaczonym możliwym nastawem (od–do podaje też linia karty).
+    const tm = (k.facts || []).find((f) => f.t === 'timer');
+    if (!tm) return '';
+    // Tarcza 60 min (jak zwykły minutnik kuchenny), a przy dłuższym nastawie 90 min.
+    const full = tm.max <= 60 ? 60 : 90;
+    const step = full === 60 ? 15 : 30;
+    const R = 44;
+    const pt = (min, r = R) => {
+      const a = (min / full) * 2 * Math.PI - Math.PI / 2;
+      return [60 + r * Math.cos(a), 60 + r * Math.sin(a)];
+    };
+    const [x1, y1] = pt(tm.min);
+    const [x2, y2] = pt(tm.max);
+    const large = (tm.max - tm.min) / full > 0.5 ? 1 : 0;
+    const ticks = [];
+    for (let m = 0; m < full; m += 5) {
+      const [a, b] = pt(m, R + 6);
+      const [c, d] = pt(m, R + (m % step ? 10 : 13));
+      ticks.push(`<line x1="${a.toFixed(1)}" y1="${b.toFixed(1)}" x2="${c.toFixed(1)}" y2="${d.toFixed(1)}"/>`);
+    }
+    const labels = Array.from({ length: full / step }, (_, i) => i * step).map((m) => {
+      const [a, b] = pt(m, R - 12);
+      return `<text x="${a.toFixed(1)}" y="${(b + 4).toFixed(1)}" text-anchor="middle">${m}</text>`;
+    }).join('');
+    const sector = tm.max > tm.min ? `<path class="tm-range" d="M 60 60 L ${x1.toFixed(1)} ${y1.toFixed(1)} A ${R} ${R} 0 ${large} 1 ${x2.toFixed(1)} ${y2.toFixed(1)} Z"/>` : '';
+    return `<div class="tm-wrap" aria-hidden="true"><svg class="tm-dial" viewBox="0 0 120 120"><circle class="tm-face" cx="60" cy="60" r="${R + 14}"/>${sector}<g class="tm-ticks">${ticks.join('')}</g><g class="tm-labels">${labels}</g><circle class="tm-hub" cx="60" cy="60" r="4"/></svg><p class="tm-cap">nastaw<br><b>${tm.min}–${tm.max} min</b></p></div>`;
   }
   if (look === 'cctv') {
     const time = (k.lines[1] || '').match(/(\d{1,2}:\d{2})/)?.[1] || '';

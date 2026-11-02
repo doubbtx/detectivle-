@@ -3,6 +3,7 @@
 
 import { makeRng } from './rng.js';
 import { addDays, dateLong, WEEKDAYS_ACC } from './time.js';
+import { crimeOf, POISON_SCENES, ARSON_SCENES } from './data.js';
 
 const cap = (s) => s.charAt(0).toUpperCase() + s.slice(1);
 
@@ -38,8 +39,23 @@ function confession(code, p, weekday) {
   return T[code] || `Ten dowód ${g('podrobiłem', 'podrobiłam')}, żeby mieć alibi.`;
 }
 
-function motive(rng, p) {
+function motive(rng, p, crime, c) {
   const g = (m, f) => (p.f ? f : m);
+  if (crime === 'poison') {
+    // Przyznania zależą od miejsca (zebranie Towarzystwa, koncert chóru).
+    // Przyznanie pasuje do roli sprawcy (solo śpiewa chórzysta, sprawozdanie z kasy poprawia skarbnik).
+    const sc = POISON_SCENES.find((x) => x.name === c.scene?.name) || POISON_SCENES[0];
+    const fits = (m) => !m.roles || m.roles.some((i) => [sc.roles[i].m, sc.roles[i].f].includes(p.role));
+    return rng.pick(sc.motives.filter(fits)).text(g);
+  }
+  if (crime === 'arson') {
+    return rng.pick([
+      `${g('Chciałem', 'Chciałam')}, żeby to miejsce zamknęli, a teren poszedł na sprzedaż.`,
+      `${g('Chciałem', 'Chciałam')} się odegrać za dawne krzywdy. Nie ${g('chciałem', 'chciałam')}, żeby ktoś ucierpiał.`,
+      `${g('Myślałem', 'Myślałam')}, że spłoną tylko stare graty, a ja będę ${g('miał', 'miała')} spokój.`,
+      `${g('Liczyłem', 'Liczyłam')}, że w zamieszaniu nikt nie zajrzy do papierów, które tam leżały.`,
+    ]);
+  }
   return rng.pick([
     `${g('Potrzebowałem', 'Potrzebowałam')} pieniędzy na spłatę długów.`,
     `${g('Miałem', 'Miałam')} już kupca z Warszawy.`,
@@ -68,9 +84,24 @@ export function buildEpilogue(c, sol, outcome) {
   const nextDay = addDays(c.crimeDate.iso, 1);
   const time = `${rng.int(6, 8)}:${String(rng.int(0, 5) * 10 + rng.int(0, 9)).padStart(2, '0')}`;
   const hiding = rng.pick(['w starej walizce w piwnicy', 'w schowku na dworcu', 'w bagażniku samochodu', 'w szafie pod stertą ubrań', 'w pudle po butach na pawlaczu']);
-  const quote = `„${confession(code, culprit, c.crimeDate.weekday)} ${motive(rng, culprit)}”`;
+  const cr = crimeOf(c);
+  const arson = cr.id === 'arson';
+  const poison = cr.id === 'poison';
+  const quote = `„${confession(code, culprit, c.crimeDate.weekday)} ${motive(rng, culprit, cr.id, c)}”`;
   const who = culprit.fullAcc || culprit.full;
-  const recovered = `${cap(c.stolen?.acc || 'skradziony przedmiot')} odnaleziono ${hiding} i zwrócono do ${c.scene.short}.`;
+  // Przy podpaleniu nie ma łupu: epilog mówi, że nikt nie ucierpiał, i co dalej z miejscem pożaru.
+  // Przy otruciu (środek nasenny): poszkodowany przespał wieczór i rano był zdrów.
+  const og = (m, f) => (c.owner?.f ? f : m);
+  const asc = arson ? ARSON_SCENES.find((x) => x.name === c.scene?.name) || ARSON_SCENES[0] : null;
+  const psc = poison ? POISON_SCENES.find((x) => x.name === c.scene?.name) || POISON_SCENES[0] : null;
+  // Pożar szybko ugaszono: bez „odbudowy”; szkody pokrywa sprawca (raz, bez zbiórki).
+  const recovered = arson
+    ? (outcome === 'failed'
+      ? `Nikt nie ucierpiał. ${cap(asc.buildingAcc)} dawno już posprzątano, a za spalone ${c.damage || 'rzeczy'} ${g('zapłacił', 'zapłaciła')} ${culprit.full}.`
+      : `Nikt nie ucierpiał. ${asc.crew} już sprzątają ${asc.buildingAcc} po pożarze, a ${culprit.full} ${g('obiecał', 'obiecała')} pokryć szkody.`)
+    : poison
+      ? `Nikt nie ucierpiał. ${c.owner.full} ${og('przespał', 'przespała')} ${c.scene.event || 'cały wieczór'}, a rano ${og('obudził się wypoczęty', 'obudziła się wypoczęta')} jak nigdy. ${culprit.full} ${g('przeprosił', 'przeprosiła')} i ${g('obiecał', 'obiecała')} ${rng.pick([`przeprosić ${psc.body} na piśmie`, `przez rok rozstawiać krzesła przed ${psc.meetings}`, 'opłacić salę na kolejny wieczór'])}.`
+      : `${cap(c.stolen?.acc || 'skradziony przedmiot')} odnaleziono ${hiding} i zwrócono do ${c.scene.short}.`;
   const title = (k) => `„${k.title.replace(/„([^”]*)”/g, '»$1«')}”`;
 
   // Kłamstwo niewinnej osoby (sprawy od piątku).
@@ -84,7 +115,7 @@ export function buildEpilogue(c, sol, outcome) {
       `${lg('chciał', 'chciała')} ukryć przed szefem, że ${lg('wyszedł', 'wyszła')} wcześniej z pracy`,
       `${lg('krył', 'kryła')} znajomego, z którym ${lg('był umówiony', 'była umówiona')}`,
     ]);
-    return `Przy okazji wyszło na jaw, że ${liar.full} ${lg('skłamał', 'skłamała')} (${card.id} „${card.title}”), bo ${excuse}. Z kradzieżą nie ${lg('miał', 'miała')} nic wspólnego.`;
+    return `Przy okazji wyszło na jaw, że ${liar.full} ${lg('skłamał', 'skłamała')} (${card.id} „${card.title}”), bo ${excuse}. Z ${cr.ins} nie ${lg('miał', 'miała')} nic wspólnego.`;
   });
 
   if (outcome === 'revealed') {
@@ -103,7 +134,11 @@ export function buildEpilogue(c, sol, outcome) {
       heading: 'Sprawa umorzona',
       meta: dateLong(addDays(c.crimeDate.iso, 21)),
       paragraphs: [
-        `Śledztwo utknęło w martwym punkcie. Dopiero po trzech tygodniach policja zatrzymała ${who} przy próbie sprzedaży łupu.`,
+        arson
+          ? `Śledztwo utknęło w martwym punkcie. Dopiero po trzech tygodniach policja zatrzymała ${who}, gdy ${g('kupował', 'kupowała')} w sklepie drugi taki sam minutnik.`
+          : poison
+            ? `Śledztwo utknęło w martwym punkcie. Dopiero po trzech tygodniach policja zatrzymała ${who}, gdy ${g('kupował', 'kupowała')} w aptece kolejne opakowanie tego samego środka nasennego.`
+            : `Śledztwo utknęło w martwym punkcie. Dopiero po trzech tygodniach policja zatrzymała ${who} przy próbie sprzedaży łupu.`,
         `W protokole przesłuchania zapisano, że alibi opierało się na fałszywce ${forged.id} ${title(forged)}, którą obalała karta ${proof.id} ${title(proof)}.`,
         ...lieLines,
         recovered,

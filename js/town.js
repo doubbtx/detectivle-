@@ -28,6 +28,10 @@ export const OFFICE_CELL = 'H7';
 export const SCENE_CELLS = {
   antykwariat: 'H5', galeria: 'L5', zegarmistrz: 'I8', jubiler: 'K8', muzeum: 'G7',
   lutnik: 'M7', ksiegarnia: 'J4', fotograf: 'N9', cukiernia: 'H9',
+  // podpalenia (ARSON_SCENES): szopa kajakowa nad Borówką, magazyn galerii na końcu ul. Rycerskiej
+  przystan: 'A12', magazyn: 'M1',
+  // otrucia (POISON_SCENES): sala kominkowa hotelu „Zacisze” (to samo pole co hotel z PLACES), Dom Kultury przy parku
+  zacisze: 'D9', jutrzenka: 'R5',
 };
 
 /** 'J7' → [9, 6] (kolumna, wiersz od zera). */

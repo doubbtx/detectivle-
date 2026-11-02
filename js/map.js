@@ -155,8 +155,10 @@ function routePath(a, b) {
  * @param {string} [o.office] pole biura detektywa (ekran główny)
  * @param {{cell: string, items: string[]}[]} [o.plaques] tabliczki rozwiązanych spraw
  * @param {string} [o.sceneAct] akcja po kliknięciu miejsca kradzieży (domyślnie wybór na planie)
+ * @param {string} [o.sceneKind] rodzaj miejsca zdarzenia do opisu („Miejsce kradzieży”, „Miejsce podpalenia”)
+ * @param {string} [o.sceneIcon] ikona znacznika miejsca zdarzenia (lupa przy kradzieży, płomień przy podpaleniu)
  */
-export function renderTownSvg({ places, scene, sceneLabel = 'Miejsce kradzieży', active = null, selected = [], office = null, plaques = [], sceneAct = 'map-pick' }) {
+export function renderTownSvg({ places, scene, sceneLabel = 'Miejsce kradzieży', active = null, selected = [], office = null, plaques = [], sceneAct = 'map-pick', sceneKind = 'Miejsce kradzieży', sceneIcon = 'search' }) {
   const p = [];
   p.push(`<svg class="town" viewBox="0 0 ${W} ${H}" role="img" aria-label="Plan Borowic">`);
   p.push(`<rect class="m-land" x="0" y="0" width="${W}" height="${H}"/>`);
@@ -224,6 +226,8 @@ export function renderTownSvg({ places, scene, sceneLabel = 'Miejsce kradzieży'
   const isOn = (k) => !active || active.has(k);
   const order = Object.keys(PLACE_CELLS).sort((a, b) => Number(isOn(a)) - Number(isOn(b)));
   for (const key of order) {
+    // Miejsce zdarzenia w budynku z planu (otrucie w hotelu „Zacisze”): rysujemy tylko znacznik zdarzenia.
+    if (scene && PLACE_CELLS[key] === SCENE_CELLS[scene]) continue;
     const [x, y] = parseCell(PLACE_CELLS[key]);
     const on = isOn(key);
     const sel = selected.includes(key);
@@ -255,10 +259,10 @@ export function renderTownSvg({ places, scene, sceneLabel = 'Miejsce kradzieży'
     const mx = cx(x);
     const my = cy(y);
     const sel = selected.includes('scene');
-    p.push(`<g class="t-scene${sel ? ' sel' : ''}" data-act="${sceneAct}" data-place="scene" tabindex="0" role="button" aria-pressed="${sel}" aria-label="Miejsce kradzieży: ${esc(sceneLabel)}, pole ${SCENE_CELLS[scene]}">`
+    p.push(`<g class="t-scene${sel ? ' sel' : ''}" data-act="${sceneAct}" data-place="scene" tabindex="0" role="button" aria-pressed="${sel}" aria-label="${esc(sceneKind)}: ${esc(sceneLabel)}, pole ${SCENE_CELLS[scene]}">`
       + `<circle class="t-hit" cx="${mx}" cy="${my - 14}" r="22"/>`
       + `<path d="M ${mx} ${my + 8} C ${mx - 5} ${my + 1}, ${mx - 16} ${my - 7}, ${mx - 16} ${my - 18} A 16 16 0 1 1 ${mx + 16} ${my - 18} C ${mx + 16} ${my - 7}, ${mx + 5} ${my + 1}, ${mx} ${my + 8} Z"/>`
-      + icon('search', mx, my - 18, 17, 't-scene-ico')
+      + icon(sceneIcon, mx, my - 18, 17, 't-scene-ico')
       + '</g>');
   }
   p.push('</svg>');

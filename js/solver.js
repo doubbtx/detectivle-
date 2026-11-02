@@ -2,7 +2,7 @@
 // nie zagląda do pola `solution`. Dzięki temu sprawdza, czy sprawa z generatora
 // ma dokładnie jedno rozwiązanie, i układa wyjaśnienie na ekran wyniku.
 
-import { PLACES, TRAIN_NOTES, TEAM_DESKS } from './data.js';
+import { PLACES, TRAIN_NOTES, TEAM_DESKS, crimeOf } from './data.js';
 import { dayType, fmt, WEEKDAYS_ACC } from './time.js';
 import { cellsApart, blocksText } from './town.js';
 
@@ -23,8 +23,11 @@ function openAt(hours, dt, t) {
 export function solveCase(c) {
   const weekday = c.crimeDate.weekday;
   const dt = dayType(weekday);
-  const W1 = c.window.from;
-  const W2 = c.window.to;
+  const crime = crimeOf(c);
+  // Okno zbrodni. Przy kradzieży podaje je akta (c.window), przy podpaleniu solver wybiera je sam
+  // z otwarć drzwi w rejestrze alarmu, godziny zapłonu i nastawu minutnika (niżej).
+  let W1 = c.window?.from;
+  let W2 = c.window?.to;
   const crimeIso = c.crimeDate.iso;
   const suspects = new Map(c.suspects.map((s) => [s.id, s]));
 
@@ -54,6 +57,17 @@ export function solveCase(c) {
   const vehicles = new Map();
   let clockLight = null;
   let scaffold = null;
+  // Podpalenie (od generatora v10): otwarcia drzwi, zapłon z czujki dymu, nastaw minutnika z opinii biegłego.
+  const openings = [];
+  let ignition = null;
+  let timer = null;
+  // Otrucie (okno-chwila): postawienie karafki i wejścia obsługi (kandydaci na dolną granicę okna), wymiana wody
+  // (dolna granica), szklanki wypite przez poszkodowanego (kandydaci na górną granicę), szklanka ze środkiem
+  // według lekarza (górna granica).
+  const carafeTimes = [];
+  const refills = [];
+  const glasses = [];
+  const dosed = [];
 
   for (const card of c.cards) {
     for (const f of card.facts || []) {
@@ -83,6 +97,13 @@ export function solveCase(c) {
         case 'fiscal': { if (!fiscal.has(f.place)) fiscal.set(f.place, []); fiscal.get(f.place).push({ ...f, ref }); break; }
         case 'bankcard': bankCards.set(f.no, { ...f, ref }); break;
         case 'price': { if (!prices.has(f.place)) prices.set(f.place, []); prices.get(f.place).push({ ...f, ref }); break; }
+        case 'opening': openings.push({ from: f.from, to: f.to, ref }); break;
+        case 'ignition': ignition = { time: f.time, ref }; break;
+        case 'timer': timer = { min: f.min, max: f.max, ref }; break;
+        case 'carafe': carafeTimes.push({ time: f.time, kind: f.kind, ref }); break;
+        case 'refill': refills.push({ time: f.time, ref }); break;
+        case 'glass': glasses.push({ time: f.time, ref }); break;
+        case 'dosed': dosed.push({ time: f.time, ref }); break;
         default: break;
       }
     }
@@ -100,10 +121,18 @@ export function solveCase(c) {
     seen.push({ who: owner.who, place: log.place, from: log.from, to: log.to, refs, via: 'card' });
   }
 
-  /** Czy pobyt w miejscu `place` w czasie [from, to] wyklucza bycie na miejscu zbrodni od W1 do W2? */
-  function clears(place, from, to) {
+  // Otrucie: sprawca był na miejscu tylko przez chwilę gdzieś w oknie W1–W2 (a nie przez całe okno).
+  const moment = crime.windowFrom === 'moment';
+
+  /**
+   * Czy pobyt w miejscu `place` w czasie [from, to] wyklucza bycie na miejscu zbrodni od W1 do W2?
+   * Okno-chwila: pobyt wyklucza każdą chwilę z przedziału (from − d, to + d), więc daje alibi tylko wtedy,
+   * gdy ten przedział obejmuje całe okno. `away`: po tej godzinie osoby nie było w mieście (pociąg).
+   */
+  function clears(place, from, to, away = false) {
     const tr = travel.get(place);
     if (!tr) return null;
+    if (moment) return from - tr.min < W1 && (away || to + tr.min > W2) ? tr : null;
     return from < W2 + tr.min && to > W1 - tr.min ? tr : null;
   }
 
@@ -116,7 +145,8 @@ export function solveCase(c) {
     switch (cl.kind) {
       case 'train': {
         const row = trains.get(cl.no);
-        out.sightings.push({ place: 'dworzec', from: cl.time, to: cl.time });
+        // `away`: po odjeździe tej osoby nie ma w mieście (liczy się przy oknie-chwili).
+        out.sightings.push({ place: 'dworzec', from: cl.time, to: cl.time, away: true });
         if (!row) {
           if (!trains.size) { out.unknown = true; break; }
           out.contradicted = true;
@@ -137,7 +167,7 @@ export function solveCase(c) {
           if (lref && lref !== row.ref) out.refs.push(lref);
           out.contradicted = true;
           out.reasonCodes.push('train-day');
-          out.reason = `pociąg ${cl.no} ma w rozkładzie [${row.ref}] znak „${row.note}”, czyli ${note.text}${lref && lref !== row.ref ? ` [${lref}]` : ''}, a kradzież wydarzyła się ${WEEKDAYS_ACC[weekday]}`;
+          out.reason = `pociąg ${cl.no} ma w rozkładzie [${row.ref}] znak „${row.note}”, czyli ${note.text}${lref && lref !== row.ref ? ` [${lref}]` : ''}, a ${crime.happened} ${WEEKDAYS_ACC[weekday]}`;
           break;
         }
         if (row.note && legend.get(row.note) && legend.get(row.note) !== row.ref) out.refs.push(legend.get(row.note));
@@ -379,7 +409,7 @@ export function solveCase(c) {
     // Wspólny dowód (np. zdjęcie dwóch osób) dotyczy też osób z listy `with`.
     e.with = Array.isArray(cl.with) ? cl.with.filter((id) => suspects.has(id)) : [];
     // Prawdziwy bilet kolejowy oznacza, że po odjeździe tej osoby nie było już w mieście.
-    e.events = e.sightings.map((x) => ({ ...x, refs: [e.card] }));
+    e.events = e.sightings.map(({ away, ...x }) => ({ ...x, refs: [e.card] }));
     if (cl.kind === 'train' && !e.contradicted && !e.unknown) e.events.push({ place: AWAY, from: cl.time + 1, to: FAR, refs: [e.card] });
     return e;
   });
@@ -388,9 +418,12 @@ export function solveCase(c) {
   function clearingFrom(sightings, refsBase) {
     const res = [];
     for (const s of sightings) {
-      const tr = clears(s.place, s.from, s.to);
-      if (tr) res.push({ place: s.place, from: s.from, to: s.to, travel: tr.min, refs: [...refsBase, tr.ref] });
+      const tr = clears(s.place, s.from, s.to, s.away);
+      if (tr) res.push({ place: s.place, from: s.from, to: s.to, travel: tr.min, refs: [...refsBase, tr.ref], ...(moment && s.away ? { away: true } : {}) });
     }
+    // Okno-chwila: każdy pobyt liczy się osobno (tak mówi zasada chwili). Dwa doręczenia kuriera, które dopiero
+    // razem wykluczałyby każdą chwilę okna, nie dają alibi; taka osoba po prostu nie mogła być sprawcą (nie ma
+    // wolnej chwili), co sprawdza warunek fizyczny niżej.
     return res;
   }
 
@@ -441,14 +474,38 @@ export function solveCase(c) {
     return evs;
   }
 
-  const neutralClears = new Map();
-  for (const s of seen) {
-    if (!suspects.has(s.who)) continue;
-    const cl = clearingFrom([s], s.refs);
-    if (!cl.length) continue;
-    if (!neutralClears.has(s.who)) neutralClears.set(s.who, []);
-    neutralClears.get(s.who).push(...cl);
+  /** Niezależne alibi (świadkowie, kamery, rejestry) dla bieżącego okna W1–W2. */
+  function computeNeutralClears() {
+    const map = new Map();
+    for (const s of seen) {
+      if (!suspects.has(s.who)) continue;
+      const cl = clearingFrom([s], s.refs);
+      if (!cl.length) continue;
+      if (!map.has(s.who)) map.set(s.who, []);
+      map.get(s.who).push(...cl);
+    }
+    return map;
   }
+
+  // Okna do sprawdzenia. Przy podpaleniu: otwarcia drzwi przed zapłonem, w których dało się podłożyć minutnik
+  // (chwila podłożenia leży w [zapłon − nastaw maks., zapłon − nastaw min.]). Bez opinii biegłego albo czujki
+  // każde otwarcie jest możliwe, a bez rejestru alarmu nie ma żadnego okna.
+  // Przy otruciu: od ostatniej wymiany wody do pierwszej szklanki ze środkiem. Bez zeznania o wymianie wody
+  // dolną granicą może być każde wejście obsługi albo postawienie karafki; bez opinii lekarza górną granicą
+  // może być każda szklanka (nie wiadomo, w której był już środek). Każda para to osobna hipoteza.
+  const fromOpenings = crime.windowFrom === 'openings';
+  const multiWin = crime.windowFrom !== 'case';
+  let windows;
+  if (fromOpenings) {
+    windows = openings.filter((o) => (!ignition || o.from <= ignition.time)
+      && (!ignition || !timer || (o.to >= ignition.time - timer.max && o.from <= ignition.time - timer.min)));
+  } else if (moment) {
+    const lows = refills.length ? [Math.max(...refills.map((x) => x.time))] : [...new Set(carafeTimes.map((x) => x.time))];
+    const highs = dosed.length ? [Math.min(...dosed.map((x) => x.time))] : [...new Set(glasses.map((x) => x.time))];
+    windows = [];
+    for (const lo of lows.sort((a, b) => a - b)) for (const hi of highs.sort((a, b) => a - b)) if (lo < hi) windows.push({ from: lo, to: hi });
+  } else windows = [{ from: W1, to: W2 }];
+  let neutralClears = new Map();
 
   // Wszystkie hipotezy: (sprawca, sfałszowany dowód tego sprawcy).
   // Zasada: fałszywka sprawcy daje mu alibi na czas kradzieży. W sprawach z kłamstwem
@@ -464,34 +521,62 @@ export function solveCase(c) {
     }
     return items;
   };
+  /** Okno-chwila: pierwsza chwila okna, w której osoba z pobytami `evs` mogła być na miejscu zbrodni (albo null). */
+  function momentFor(evs) {
+    for (let m = W1; m <= W2; m++) {
+      const at = { place: SCENE, from: m, to: m };
+      if (evs.every((e) => !conflict(at, e))) return m;
+    }
+    return null;
+  }
   const consistent = [];
-  for (const sus of c.suspects) {
-    for (const forged of evaluated.filter((e) => e.who === sus.id)) {
-      if (!givesAlibi(forged)) continue;
-      const lies = evaluated.filter((e) => e !== forged && e.contradicted);
-      if (lies.length > maxLies) continue;
-      if (lies.some((e) => e.who === sus.id)) continue;
-      const falseCards = new Set([forged.card, ...lies.map((e) => e.card)]);
-      if (lies.some((e) => !clearedBy(e.who, falseCards).length)) continue;
-      if (neutralClears.has(sus.id)) continue;
-      const ownTrue = evaluated.filter((e) => (e.who === sus.id || e.with.includes(sus.id)) && !falseCards.has(e.card));
-      if (ownTrue.some((e) => givesAlibi(e))) continue;
-      // Każda osoba musi dać się fizycznie „przeprowadzić” przez wszystkie swoje prawdziwe pobyty,
-      // a sprawca dodatkowo przez pobyt na miejscu zbrodni.
-      const physicalOk = c.suspects.every((p) => {
-        const evs = trueEvents(p.id, falseCards);
-        if (p.id === sus.id) evs.push({ place: SCENE, from: W1, to: W2, refs: [] });
-        return !firstConflict(evs);
-      });
-      if (!physicalOk) continue;
-      consistent.push({ culprit: sus.id, forged: forged.card });
+  for (const win of windows) {
+    W1 = win.from;
+    W2 = win.to;
+    neutralClears = computeNeutralClears();
+    for (const sus of c.suspects) {
+      for (const forged of evaluated.filter((e) => e.who === sus.id)) {
+        if (!givesAlibi(forged)) continue;
+        const lies = evaluated.filter((e) => e !== forged && e.contradicted);
+        if (lies.length > maxLies) continue;
+        if (lies.some((e) => e.who === sus.id)) continue;
+        const falseCards = new Set([forged.card, ...lies.map((e) => e.card)]);
+        if (lies.some((e) => !clearedBy(e.who, falseCards).length)) continue;
+        if (neutralClears.has(sus.id)) continue;
+        const ownTrue = evaluated.filter((e) => (e.who === sus.id || e.with.includes(sus.id)) && !falseCards.has(e.card));
+        if (ownTrue.some((e) => givesAlibi(e))) continue;
+        // Każda osoba musi dać się fizycznie „przeprowadzić” przez wszystkie swoje prawdziwe pobyty,
+        // a sprawca dodatkowo przez pobyt na miejscu zbrodni.
+        // Okno-chwila: sprawca musiał zdążyć na miejsce w jakiejś chwili okna (wystarczy jedna).
+        const physicalOk = c.suspects.every((p) => {
+          const evs = trueEvents(p.id, falseCards);
+          if (p.id === sus.id && moment) return !firstConflict(evs) && momentFor(evs) !== null;
+          if (p.id === sus.id) evs.push({ place: SCENE, from: W1, to: W2, refs: [] });
+          return !firstConflict(evs);
+        });
+        if (!physicalOk) continue;
+        // Przy podpaleniu i otruciu hipoteza obejmuje też okno: to samo rozwiązanie w dwóch oknach to dwie hipotezy.
+        consistent.push(multiWin ? { culprit: sus.id, forged: forged.card, window: { from: W1, to: W2 } } : { culprit: sus.id, forged: forged.card });
+      }
     }
   }
 
-  const unique = consistent.length === 1 ? consistent[0] : null;
+  const uniqueHyp = consistent.length === 1 ? consistent[0] : null;
+  const unique = uniqueHyp ? { culprit: uniqueHyp.culprit, forged: uniqueHyp.forged } : null;
+  // Dalsze wyjaśnienia liczymy w oknie jedynej hipotezy (przy podpaleniu) albo w oknie z akt.
+  if (uniqueHyp?.window) {
+    W1 = uniqueHyp.window.from;
+    W2 = uniqueHyp.window.to;
+  } else if (multiWin && windows.length) {
+    W1 = windows[0].from;
+    W2 = windows[0].to;
+  }
+  neutralClears = computeNeutralClears();
 
   // Wyjaśnienie: kto i czym ma potwierdzone alibi.
-  const explain = { suspects: {}, forged: null, lies: [] };
+  const explain = { suspects: {}, forged: null, lies: [], window: null };
+  if (unique && fromOpenings) explain.window = explainWindow();
+  if (unique && moment) explain.window = explainMoment();
   if (unique) {
     const f = byCard.get(unique.forged);
     explain.forged = { card: f.card, kind: f.kind, reason: f.reason, reasonCodes: f.reasonCodes, refs: [f.card, ...f.refs], proofRefs: [...f.refs], physical: false, ...(f.variant ? { variant: f.variant } : {}) };
@@ -515,6 +600,31 @@ export function solveCase(c) {
       }
       explain.suspects[sus.id] = items;
     }
+  }
+
+  /** Podpalenie: krok „wybór okna” (które otwarcie drzwi mieści się w widełkach minutnika). */
+  function explainWindow() {
+    const chosen = { from: W1, to: W2 };
+    const others = openings.filter((o) => o.from !== W1 || o.to !== W2);
+    const refs = [...new Set([openings[0]?.ref, ignition?.ref, timer?.ref].filter(Boolean))];
+    if (!ignition || !timer) return { ...chosen, others, refs, reason: '' };
+    const a = ignition.time - timer.max;
+    const b = ignition.time - timer.min;
+    const span = (o) => `${fmt(o.from)}–${fmt(o.to)}`;
+    const why = others.map((o) => `${span(o)} wypada ${o.to < a ? 'za wcześnie' : 'za późno'}`).join(', a ');
+    const reason = `czujka dymu zapisała zapłon o ${fmt(ignition.time)} [${ignition.ref}], a według opinii biegłego [${timer.ref}] minutnik nastawiono na ${timer.min}–${timer.max} min, więc podłożono go między ${fmt(a)} a ${fmt(b)}; z otwarć drzwi w rejestrze alarmu [${openings[0].ref}] w ten przedział trafia tylko ${span(chosen)}${why ? `, a ${why}` : ''}`;
+    return { ...chosen, others, refs, ignition: ignition.time, min: timer.min, max: timer.max, from2: a, to2: b, reason };
+  }
+
+  /** Otrucie: krok „okno zdarzenia” (od wymiany wody w karafce do pierwszej szklanki ze środkiem). */
+  function explainMoment() {
+    const lo = refills.length ? refills.reduce((a, b) => (b.time > a.time ? b : a)) : null;
+    const hi = dosed.length ? dosed.reduce((a, b) => (b.time < a.time ? b : a)) : null;
+    const refs = [...new Set([lo?.ref, hi?.ref].filter(Boolean))];
+    const reason = lo && hi
+      ? `wodę w karafce wymieniono o ${fmt(lo.time)} [${lo.ref}], a według lekarza środek był już w szklance wypitej o ${fmt(hi.time)} [${hi.ref}], więc dosypano go w jakiejś chwili między ${fmt(W1)} a ${fmt(W2)}; inne godziny z kart tego okna nie zmieniają`
+      : '';
+    return { from: W1, to: W2, others: [], refs, reason, moment: true };
   }
 
   /** Fałszywka zgodna z tabelami: szukamy pobytu, którego nie da się z nią pogodzić. */
@@ -585,11 +695,36 @@ export function solveCase(c) {
     travel,
     between,
     window: { W1, W2 },
+    // Okna, które zostały po odrzuceniu otwarć niepasujących do minutnika (przy kradzieży: okno z akt,
+    // przy otruciu: pary granic okna możliwe według kart).
+    windows,
+    moment,
+    // Czy dowód (gdyby był prawdziwy) daje alibi w oknie rozwiązania.
+    givesAlibi,
     describeClear(item) {
       const when = item.from === item.to ? `o ${fmt(item.from)}` : `od ${fmt(item.from)} do ${fmt(item.to)}`;
-      return `${placeLoc(item.place)} ${when} (dotarcie: ${item.travel} min)`;
+      return `${placeLoc(item.place)} ${when}${item.away ? ', potem wyjazd z miasta' : ''} (dotarcie: ${item.travel} min)`;
     },
   };
+}
+
+/** Ile różnych okien zostaje w spójnych hipotezach (hipotezy w jednym oknie liczą się raz). */
+const windowsLeft = (res) => new Set(res.consistent.map((h) => (h.window ? `${h.window.from}-${h.window.to}` : '-'))).size;
+
+/** Karty, które wyznaczają okno (bez nich zostaje kilka okien kandydujących). */
+const WINDOW_FACTS = { openings: ['timer', 'ignition'], moment: ['refill', 'dosed'] };
+
+/**
+ * Czy krok „wybór okna” jest potrzebny do werdyktu: bez kart wyznaczających okno spójne hipotezy dają więcej niż
+ * jedną parę (sprawca, fałszywka). Dziś generator buduje sprawy tak, że w każdym oknie kandydującym wychodzi to
+ * samo rozwiązanie, więc okno jest częścią opowieści, a nie dowodu.
+ */
+export function windowStepNeeded(c, res = solveCase(c)) {
+  const facts = WINDOW_FACTS[crimeOf(c).windowFrom];
+  if (!facts || !res.explain.window) return false;
+  const rest = c.cards.filter((k) => !(k.facts || []).some((f) => facts.includes(f.t)));
+  const pairs = new Set(solveCase({ ...c, cards: rest }).consistent.map((h) => `${h.culprit}/${h.forged}`));
+  return pairs.size !== 1;
 }
 
 /** Kontrola jakości sprawy z generatora. Zwraca listę problemów (pusta = OK). */
@@ -603,7 +738,8 @@ export function qualityIssues(c, res = solveCase(c)) {
     issues.push('rozwiązanie solvera różni się od zamierzonego');
   }
   const forged = res.evaluated.find((e) => e.card === c.solution.forged);
-  const travelOk = forged.sightings.some((s) => {
+  // Okno-chwila: fałszywka musi wykluczać każdą chwilę okna (solver liczy to w oknie rozwiązania).
+  const travelOk = res.moment ? res.givesAlibi(forged) : forged.sightings.some((s) => {
     const min = res.travel.get(s.place)?.min;
     if (min === undefined) return false;
     return s.from < c.window.to + min && s.to > c.window.from - min;
@@ -669,6 +805,26 @@ export function qualityIssues(c, res = solveCase(c)) {
   for (const desk of ['D', 'S', 'M', 'Z', 'R']) {
     if (!c.cards.some((k) => k.desk === desk)) issues.push(`puste biurko ${desk}`);
   }
+  // Podpalenie: okno wynika jednoznacznie z rejestru alarmu, czujki i opinii biegłego, a bez opinii biegłego
+  // nie da się go wybrać przez samo wykluczanie (w obu otwarciach wychodzi spójna hipoteza).
+  if (crimeOf(c).windowFrom === 'openings') {
+    if (res.windows.length !== 1) issues.push(`otwarć pasujących do minutnika: ${res.windows.length}`);
+    else if (res.windows[0].from !== c.window.from || res.windows[0].to !== c.window.to) issues.push('minutnik wskazuje inne otwarcie niż zamierzone');
+    const noTimer = c.cards.filter((k) => !(k.facts || []).some((f) => f.t === 'timer'));
+    if (noTimer.length === c.cards.length) issues.push('brak opinii biegłego o minutniku');
+    else if (windowsLeft(solveCase({ ...c, cards: noTimer })) < 2) issues.push('okno da się wybrać bez opinii biegłego');
+  }
+  // Otrucie: granice okna podają karty (wymiana wody, opinia lekarza). Bez którejkolwiek z nich okna nie da się
+  // ustalić: zostają co najmniej dwie hipotezy (różne okna z tym samym rozwiązaniem).
+  if (crimeOf(c).windowFrom === 'moment') {
+    if (res.windows.length !== 1) issues.push(`możliwych okien: ${res.windows.length}`);
+    else if (res.windows[0].from !== c.window.from || res.windows[0].to !== c.window.to) issues.push('karty wyznaczają inne okno niż zamierzone');
+    for (const [t, what] of [['refill', 'zeznania o wymianie wody'], ['dosed', 'opinii lekarza']]) {
+      const rest = c.cards.filter((k) => !(k.facts || []).some((f) => f.t === t));
+      if (rest.length === c.cards.length) issues.push(`brak ${what}`);
+      else if (windowsLeft(solveCase({ ...c, cards: rest })) < 2) issues.push(`okno da się ustalić bez ${what}`);
+    }
+  }
   return issues;
 }
 
@@ -686,7 +842,7 @@ export function investigationProfile(c, res = solveCase(c)) {
   const hasSupplied = new Set(c.cards.filter((k) => k.kind === 'supplied').map((k) => k.by));
   for (const [who, items] of res.neutralClears) if (hasSupplied.has(who)) for (const it of items) for (const r of it.refs) if (cost(r)) need.add(r);
   const minimal = new Set();
-  for (const ex of [res.explain.forged, ...(res.explain.lies || [])]) {
+  for (const ex of [res.explain.forged, ...(res.explain.lies || []), res.explain.window]) {
     if (ex) for (const r of ex.refs) if (cost(r)) minimal.add(r);
   }
   // Minimalna ścieżka (np. kamera z pułapką na sprawcę) też wchodzi do pełnego sprawdzenia.
@@ -723,11 +879,15 @@ export function investigationBudget(c, desks) {
  * (fałszywka + karty, które ją obalają, łącznie z czasami dotarcia; plus kłamstwo niewinnej
  * osoby i jego obalenie). 2 = jedno sprawdzenie w tabeli, 5+ = łańcuch wniosków.
  */
-export function proofDepth(res) {
+export function proofDepth(res, c = null) {
   if (!res.explain.forged) return 0;
+  // Podpalenie i otrucie: krok „wybór okna” liczy się tylko wtedy, gdy bez niego werdykt nie jest jednoznaczny
+  // (`c` podane; bez `c` liczymy go zawsze, jak dawniej).
+  const win = res.explain.window && (!c || windowStepNeeded(c, res)) ? res.explain.window.refs : [];
+  const forgedRefs = [...res.explain.forged.refs, ...win];
   const lie = res.explain.lies?.[0];
-  if (!lie) return new Set(res.explain.forged.refs).size;
+  if (!lie) return new Set(forgedRefs).size;
   // Kłamstwo: karta i jej obalenie, a do tego czas dotarcia (gdy nie daje alibi) albo najtańsze inne alibi kłamcy.
   const extra = lie.alibi ? (lie.cleared || []).reduce((best, it) => (!best || it.refs.length < best.length ? it.refs : best), null) || [] : (lie.stops || []).map((x) => x.travelRef).concat(lie.travelRef);
-  return new Set(res.explain.forged.refs).size + new Set([...lie.refs, ...extra].filter(Boolean)).size;
+  return new Set(forgedRefs).size + new Set([...lie.refs, ...extra].filter(Boolean)).size;
 }
