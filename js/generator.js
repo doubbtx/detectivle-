@@ -9,7 +9,7 @@
 import { makeRng, hashString } from './rng.js';
 import {
   CHARACTERS, ROLES, WITNESSES, SCENES, PLACES, TRAIN_DESTINATIONS, TRAIN_NOTES, FILMS,
-  VENUE_ITEMS, CCTV_DETAILS, PHOTO_POSES, DESK_DEFS, ITEM_NOM,
+  VENUE_ITEMS, CCTV_DETAILS, PHOTO_POSES, DESK_DEFS, ITEM_NOM, CARD_HOLDERS,
 } from './data.js';
 import {
   fmt, fmtHour, addDays, weekdayOf, dayType, dateLong, dateShort, sunsetFor, daysBetween,
@@ -22,7 +22,7 @@ import { PLACE_CELLS, SCENE_CELLS, MIN_PER_CELL, minutesApart } from './town.js'
  * Wersja generatora. Podbij ją przy każdej zmianie, która zmienia treść spraw.
  * Opublikowane sprawy (cases/*.json) i tak się nie zmienią, bo gra czyta je z plików.
  */
-export const GENERATOR_VERSION = 8;
+export const GENERATOR_VERSION = 9;
 
 /** Krótki „odcisk” sprawy: 4 znaki, po których ekipa sprawdza, że ma te same akta. */
 export function caseFingerprint(c) {
@@ -95,6 +95,19 @@ const retry = () => {
 const ALL_KINDS = ['train', 'receipt', 'photo', 'cinema', 'delivery', 'parking', 'bus'];
 /** Rodzaje dowodów, którymi może skłamać niewinna osoba. */
 const LIE_KINDS = ['receipt', 'photo', 'parking', 'delivery'];
+/** Jak fałszywy paragon kłóci się z tabelą (wagi losowania). */
+const RECEIPT_WAYS = { hours: 0.6, price: 1, card: 1, number: 1 };
+/** Jak często fałszywe zdjęcie zdradza tło (pokaz, zegar na ratuszu) zamiast nieba albo chodnika. */
+const PHOTO_BG_SHARE = 0.7;
+/** Fałszywe zdjęcie z tłem: jak często z placu (tam więcej godzin odpada, więc bez tego częściej wypadałby Rynek). */
+const PHOTO_BG_PLAC = 0.6;
+/** Jak często fragment raportu kasy przy prawdziwym paragonie kończy się przed jego godziną. */
+const FISCAL_CUT_SHARE = 0.32;
+/** Jak często fałszywy bilet autobusowy zdradza numer wozu (dyspozycja MZK) zamiast rozkładu. */
+const BUS_VEHICLE_SHARE = 0.7;
+const BUS_LINES = ['3', '7', '12', '15'];
+/** Wagi rodzajów dowodów w sprawach z fałszywką tabelową (pn–wt). */
+const TABLE_KIND_W = { receipt: 1.5, photo: 1.8, bus: 1.8 };
 
 export function buildDailyCase(iso) {
   return buildCase({
@@ -253,7 +266,42 @@ function generate(rng, opts) {
   };
 
   // Wspólne tabele faktów (każda trafia na jedną kartę urzędową).
-  const T = { trains: [], hours: [], films: [], streets: [], zones: [], buses: [], weather: null, cardlogs: {} };
+  // prices: cenniki lokali; bank/cardNo: końcówki kart płatniczych; fiscal: raporty kas fiskalnych;
+  // vehicles: dyspozycja wozów MZK; zgk: komunikat ZGK (pokazy na Placu Wolności, zegar na ratuszu);
+  // need: tabele, bez których fałszywki (albo kłamstwa) nie da się obalić.
+  const T = {
+    trains: [], hours: [], films: [], streets: [], zones: [], buses: [], weather: null, cardlogs: {},
+    prices: {}, bank: [], cardNo: {}, fiscal: {}, vehicles: [], zgk: null, need: {},
+    // foreign: osoby, które przyniosły paragon opłacony cudzą kartą (ich inne paragony są za gotówkę);
+    // bgPhoto: w sprawie jest zdjęcie z placu albo z Rynku (wtedy zawsze leży komunikat ZGK).
+    foreign: {}, bgPhoto: false,
+  };
+  // Komunikat ZGK: pokazy na Placu Wolności (od kwietnia do października fontanna, zimą iluminacja pomnika),
+  // podświetlenie tarczy zegara na ratuszu i ewentualny remont wieży (rusztowanie zasłania tarczę).
+  {
+    const month = Number(crimeIso.slice(5, 7));
+    const dur = rng.pick([15, 20]);
+    const shows = [];
+    for (let a = round5(17 * 60 + 25 + rng.int(0, 25)); a < 22 * 60 + 20; a = round5(a + dur + rng.int(15, 35))) shows.push(a);
+    const r = rng.next();
+    let scaffold = null;
+    if (r < 0.3) scaffold = { from: addDays(crimeIso, -rng.int(2, 30)), to: addDays(crimeIso, rng.int(3, 30)) };
+    else if (r < 0.65 && rng.chance(0.5)) {
+      const to = addDays(crimeIso, -rng.int(3, 40));
+      scaffold = { from: addDays(to, -rng.int(7, 30)), to };
+    } else if (r < 0.65) {
+      const from = addDays(crimeIso, rng.int(2, 25));
+      scaffold = { from, to: addDays(from, rng.int(7, 30)) };
+    }
+    T.zgk = { kind: month >= 4 && month <= 10 ? 'fountain' : 'lights', dur, shows, light: [round5(rng.int(16 * 60, 17 * 60 + 30)), rng.pick([22 * 60, 22 * 60 + 30, 23 * 60])], scaffold };
+  }
+  const showAt = (t) => T.zgk.shows.some((a) => a <= t && t < a + T.zgk.dur);
+  const scaffoldOn = () => Boolean(T.zgk.scaffold) && T.zgk.scaffold.from <= crimeIso && crimeIso <= T.zgk.scaffold.to;
+  const clockAt = (t) => (scaffoldOn() ? 'scaffold' : T.zgk.light[0] <= t && t < T.zgk.light[1] ? 'lit' : 'dark');
+  /** Godzina zdjęcia tuż przy początku albo końcu pokazu (podświetlenia): nie bierzemy, żeby nie było sporów o minutę. */
+  const nearBgEdge = (place, t) => (place === 'plac'
+    ? T.zgk.shows.some((a) => Math.abs(t - a) <= 2 || Math.abs(t - a - T.zgk.dur) <= 2)
+    : place === 'rynek' && T.zgk.light.some((x) => Math.abs(t - x) <= 2));
   const usedTrainNos = new Set();
   const usedDest = new Set();
 
@@ -262,6 +310,7 @@ function generate(rng, opts) {
     streets: T.streets.length, zones: T.zones.length, buses: T.buses.length, weather: T.weather,
     cardlogs: JSON.stringify(T.cardlogs), taken: [...taken], used: [...usedPlaces],
     nos: [...usedTrainNos], dest: [...usedDest], widx: witnessIdx,
+    ext: JSON.stringify({ prices: T.prices, bank: T.bank, cardNo: T.cardNo, fiscal: T.fiscal, vehicles: T.vehicles, zgk: T.zgk, need: T.need, foreign: T.foreign, bgPhoto: T.bgPhoto }),
   });
   const restore = (sn, s) => {
     const removed = new Set(cards.slice(sn.cards));
@@ -270,6 +319,7 @@ function generate(rng, opts) {
     T.streets.length = sn.streets; T.zones.length = sn.zones; T.buses.length = sn.buses;
     T.weather = sn.weather;
     T.cardlogs = JSON.parse(sn.cardlogs);
+    Object.assign(T, JSON.parse(sn.ext));
     const reset = (set, list) => { set.clear(); list.forEach((x) => set.add(x)); };
     reset(taken, sn.taken); reset(usedPlaces, sn.used); reset(usedTrainNos, sn.nos); reset(usedDest, sn.dest);
     witnessIdx = sn.widx;
@@ -321,6 +371,121 @@ function generate(rng, opts) {
   };
   const zIns = (ins) => (/^[sSzZśŚźŹżŻwWfF][^aeiouyąęóAEIOUYĄĘÓ]/.test(ins) ? `ze ${ins}` : `z ${ins}`);
   const initialName = (p) => `${p.first[0]}. ${p.full.split(' ').slice(1).join(' ')}`;
+
+  // --- Szczegóły sprawdzane w tabelach (cennik, karta płatnicza, kasa fiskalna, tło zdjęcia, wóz MZK) ---
+  /** Sposób, w jaki fałszywka (albo kłamstwo) kłóci się z tabelą: losowany z wagami. */
+  const pickWay = (weights) => {
+    const keys = Object.keys(weights);
+    let x = rng.next() * keys.reduce((a, k) => a + weights[k], 0);
+    return keys.find((k) => (x -= weights[k]) < 0) || keys[keys.length - 1];
+  };
+  /** Losowa kolejność z wagami (losowanie bez zwracania). */
+  const weightedOrder = (list, weights) => {
+    const rest = list.slice();
+    const out = [];
+    while (rest.length) {
+      let x = rng.next() * rest.reduce((a, k) => a + (weights[k] || 1), 0);
+      let i = rest.findIndex((k) => (x -= weights[k] || 1) < 0);
+      if (i < 0) i = rest.length - 1;
+      out.push(rest.splice(i, 1)[0]);
+    }
+    return out;
+  };
+  const dayMonth = (iso) => { const [, m, d] = iso.split('-'); return `${Number(d)}.${m}`; };
+  const zl = (cents) => `${Math.floor(cents / 100)},${String(cents % 100).padStart(2, '0')}`;
+  /** Ceny w lokalu w tej sprawie (lekko inne niż w VENUE_ITEMS, żeby nie dało się ich znać na pamięć). */
+  const venuePrices = (place) => {
+    if (!T.prices[place]) {
+      const base = VENUE_ITEMS[place] || [['Usługa', '10,00']];
+      const items = base.map(([n, pr]) => [n, Math.max(250, Math.round(Number(pr.replace(',', '.')) * 100) + rng.pick([-200, -100, -50, 0, 0, 50, 100, 200]))]);
+      T.prices[place] = { items, change: null };
+    }
+    return T.prices[place];
+  };
+  /** Zmiana ceny jednej pozycji: od `since` obowiązuje `after` (wcześniej `before`). */
+  const addPriceChange = (place) => {
+    const pr = venuePrices(place);
+    if (pr.change) return pr.change;
+    const idx = rng.int(0, pr.items.length - 1);
+    const before = pr.items[idx][1];
+    // Zwykle zmiana sprzed kilku dni; czasem od dnia po kradzieży (cennik jest już nowy, paragon jeszcze nie).
+    // Dzień zmiany nigdy nie jest dniem kradzieży (żeby nie było sporu, czy cenę zmieniono w ciągu dnia).
+    const since = rng.chance(0.25) ? addDays(crimeIso, 1) : addDays(crimeIso, -rng.int(1, 24));
+    // Podwyżka o ok. 8–22%, w krokach po 0,50 zł.
+    const step = Math.max(50, Math.round((before * (0.08 + rng.next() * 0.14)) / 50) * 50);
+    pr.change = { idx, since, before, after: before + step };
+    return pr.change;
+  };
+  /** Końcówka karty płatniczej osoby (jedna na sprawę, ta sama na wszystkich jej paragonach). */
+  const newEnding = () => {
+    let no;
+    do no = String(rng.int(1000, 9999)); while (T.bank.some((r) => r.no === no));
+    return no;
+  };
+  const endingFor = (p) => {
+    if (!T.cardNo[p.id]) {
+      T.cardNo[p.id] = newEnding();
+      T.bank.push({ no: T.cardNo[p.id], who: p.id, name: p.full, f: p.f });
+    }
+    return T.cardNo[p.id];
+  };
+  /** Karta kogoś spoza sprawy (paragon prawdziwy, ale podsunięty przez inną osobę). */
+  const outsiderCard = () => {
+    const h = rng.pick(CARD_HOLDERS.filter((x) => !T.bank.some((r) => r.name === x.full)));
+    const row = { no: newEnding(), who: null, name: h.full, f: h.f };
+    T.bank.push(row);
+    return row.no;
+  };
+  const pad4 = (n) => String(n).padStart(4, '0');
+  /**
+   * Fragment raportu kasy fiskalnej wokół paragonu nr `n` z godziny `t` (numeracja rośnie z czasem).
+   * `bad`: numer paragonu nie pasuje do raportu (wyższy niż numer wydany później albo niższy niż wcześniejszy).
+   */
+  const fiscalAround = (t, open, bad) => {
+    const n0 = rng.int(40, 1800);
+    const lo = Math.max(16 * 60, open[0] + 5);
+    const hi = open[1] - 3;
+    const rows = [];
+    // Fragment raportu czasem kończy się przed godziną paragonu, także przy prawdziwym paragonie:
+    // wtedy brak wiersza „po” nie zdradza paragonu z godziną po zamknięciu lokalu.
+    const cut = !bad && rng.chance(FISCAL_CUT_SHARE);
+    let tb = Math.min(t, hi + 1);
+    let nb = n0;
+    for (let k = rng.int(1, 2) + (t + 10 > hi || cut ? 1 : 0); k > 0; k--) {
+      tb -= rng.int(6, 45);
+      nb -= rng.int(1, 5);
+      if (tb < lo || nb < 1) break;
+      rows.push({ no: nb, t: tb });
+    }
+    let ta = t;
+    let na = n0;
+    for (let k = cut ? 0 : rng.int(1, 2); k > 0; k--) {
+      ta += rng.int(6, 45);
+      na += rng.int(1, 5);
+      if (ta > hi) break;
+      rows.push({ no: na, t: ta });
+    }
+    if (rows.length < 2) retry();
+    rows.sort((a, b) => a.t - b.t);
+    let n = n0;
+    if (bad) {
+      const after = rows.filter((r) => r.t >= t + 5);
+      const before = rows.filter((r) => r.t <= t - 5 && r.no > 3);
+      const opts = [...(after.length ? ['high'] : []), ...(before.length ? ['low'] : [])];
+      if (!opts.length) retry();
+      for (let k = 0; k < 10 && (n === n0 || rows.some((r) => r.no === n)); k++) {
+        n = rng.pick(opts) === 'high' ? rng.pick(after).no + rng.int(1, 3) : rng.pick(before).no - rng.int(1, 3);
+      }
+      if (n === n0 || rows.some((r) => r.no === n)) retry();
+    }
+    return { n, rows };
+  };
+  const priceOn = (place, idx) => {
+    const pr = T.prices[place];
+    const ch = pr.change;
+    if (ch && ch.idx === idx) return crimeIso >= ch.since ? ch.after : ch.before;
+    return pr.items[idx][1];
+  };
 
   // --- Dowody dostarczone przez podejrzanych --------------------------------
   /** Godzina tuż poza zasięgiem: z tego miejsca dało się jeszcze zdążyć na kradzież (albo wrócić po niej). */
@@ -393,11 +558,16 @@ function generate(rng, opts) {
         break;
       }
       case 'receipt': {
+        // Sprzeczność fałszywego paragonu: godziny otwarcia, cena sprzed (albo po) zmianie w cenniku,
+        // karta płatnicza innej osoby albo numer paragonu niepasujący do raportu kasy.
+        // Kto już płacił w tej sprawie własną kartą, nie przynosi paragonu z cudzą kartą (dwie różne końcówki
+        // u jednej osoby zdradzałyby fałszywkę bez odpowiedzi banku).
+        const way = forged ? pickWay(T.cardNo[s.id] ? { ...RECEIPT_WAYS, card: 0 } : RECEIPT_WAYS) : null;
         const place = takePlace((p) => p.venue);
         const t = tPick(place);
         const span = () => [rng.pick([7, 8, 9, 10, 11, 12]) * 60, rng.pick([18, 19, 20, 21, 22, 23]) * 60 + rng.pick([0, 0, 30])];
         const hours = { wd: span(), sat: rng.chance(0.85) ? span() : null, sun: rng.chance(0.6) ? span() : null };
-        if (!forged) {
+        if (way !== 'hours') {
           hours[dt] = [rng.pick([8, 9, 10, 11, 12]) * 60, Math.ceil((t + rng.int(6, 70)) / 30) * 30];
         } else if (dt !== 'wd' && rng.chance(0.4)) {
           hours[dt] = null;
@@ -405,33 +575,87 @@ function generate(rng, opts) {
           hours[dt] = [rng.pick([8, 9, 10]) * 60, Math.floor((t - rng.int(8, 60)) / 30) * 30];
         }
         T.hours.push({ place, ...hours });
-        const baseItems = VENUE_ITEMS[place] || [['Usługa', '10,00']];
-        const items = withP ? baseItems.map(([n, pr]) => [`2× ${n}`, (Number(pr.replace(',', '.')) * 2).toFixed(2).replace('.', ',')]) : baseItems;
-        const total = items.reduce((sum, [, price]) => sum + Number(price.replace(',', '.')), 0);
+        // Numer paragonu: każda kasa numeruje paragony po kolei; raport kasy podaje kilka numerów z godzinami.
+        let rno;
+        if (hours[dt]) {
+          const fx = fiscalAround(t, hours[dt], way === 'number');
+          rno = fx.n;
+          T.fiscal[place] = fx.rows;
+          if (way === 'number') T.need.fiscal = place;
+        } else rno = rng.int(40, 1800);
+        // Ceny: prawdziwy paragon ma cenę obowiązującą w dniu kradzieży, fałszywy starą (albo jeszcze nową).
+        const pr = venuePrices(place);
+        // Lokal z paragonu ma zmianę ceny w cenniku tak samo często przy prawdziwym, jak i przy fałszywym paragonie
+        // (fałszywka „cenowa” zawsze ją ma, więc pozostałe fałszywki rzadziej).
+        if (way === 'price' || rng.chance(forged ? 0.42 : 0.6)) addPriceChange(place);
+        const unit = pr.items.map((_, i) => priceOn(place, i));
+        if (way === 'price') {
+          const ch = pr.change;
+          unit[ch.idx] = crimeIso >= ch.since ? ch.before : ch.after;
+          T.need.price = true;
+        }
+        const q = withP ? 2 : 1;
+        const items = pr.items.map(([n], i) => ({ n, q, p: unit[i] * q }));
+        const total = items.reduce((sum, it) => sum + it.p, 0);
+        // Płatność: każdy paragon ma końcówkę karty albo „GOTÓWKA”. Fałszywy: karta kogoś spoza sprawy.
+        let payLine;
+        let payCards = null;
+        if (withP) {
+          if (T.foreign[s.id] || T.foreign[withP.id]) retry();
+          payCards = [endingFor(s), endingFor(withP)];
+          payLine = `płatność dzielona, 2 karty: ${initialName(s)} (…${payCards[0]}), ${initialName(withP)} (…${payCards[1]})`;
+        } else if (way === 'card') {
+          payCards = [outsiderCard()];
+          payLine = `płatność kartą …${payCards[0]}`;
+          T.need.bank = true;
+          T.foreign[s.id] = true;
+        } else if (T.foreign[s.id] || rng.chance(forged ? 0.4 : 0.3)) {
+          // Fałszywka „kartą innej osoby” zawsze ma kartę, więc pozostałe fałszywki częściej mają gotówkę:
+          // wtedy gotówka i karta są wśród fałszywek tak samo częste jak wśród prawdziwych paragonów.
+          payLine = 'płatność: GOTÓWKA';
+        } else {
+          payCards = [endingFor(s)];
+          payLine = `płatność kartą …${payCards[0]}`;
+        }
         card = addCard({
           desk: 'D', kind: 'supplied', by, title: 'Paragon fiskalny',
           lines: [
             PLACES[place].name,
             PLACES[place].address,
-            `${dShort} godz. ${fmt(t)}`,
-            ...items.map(([n, pr]) => `${n} ${pr}`),
-            `SUMA PLN ${total.toFixed(2).replace('.', ',')}`,
-            ...(withP ? [`płatność dzielona, 2 karty: ${initialName(s)} (…${rng.int(1000, 9999)}), ${initialName(withP)} (…${rng.int(1000, 9999)})`] : []),
+            `${dShort} godz. ${fmt(t)} · nr ${pad4(rno)}`,
+            ...items.map((it) => `${q > 1 ? `${q}× ` : ''}${it.n} ${zl(it.p)}`),
+            `SUMA PLN ${zl(total)}`,
+            payLine,
           ],
-          facts: [{ t: 'claim', kind, who: by, place, time: t, ...(withP ? { with: [withP.id] } : {}) }],
+          facts: [{ t: 'claim', kind, who: by, place, time: t, rno, items, ...(payCards ? { cards: payCards } : {}), ...(withP ? { with: [withP.id] } : {}) }],
         });
         evs = [{ place, from: t, to: t }];
         card.alibi = (id) => `Twierdzi, że ${g(s, 'był', 'była')} ${PLACES[place].loc}${withP ? ` razem ${zIns(withP.ins)}` : ''} (paragon: ${id}).`;
         break;
       }
       case 'photo': {
-        const place = takePlace((p) => p.photo);
+        // Sprzeczność fałszywego zdjęcia: niebo albo chodnik (pogoda, zachód słońca) albo tło z komunikatu ZGK
+        // (pokaz na Placu Wolności, zegar na ratuszu).
+        const way = forged ? (rng.chance(PHOTO_BG_SHARE) ? 'bg' : 'sky') : null;
+        // Pn–wt (fałszywka tabelowa) zdjęcia częściej są z placu albo Rynku, także prawdziwe: miejsce zdjęcia
+        // nie zdradza, które jest fałszywe.
+        // Tak samo w piątek, gdy kłamstwem niewinnej osoby może być zdjęcie.
+        // Udziały dobrane pomiarem: przy kłamstwie część prób z tłem odpada, więc kłamstwa rzadziej niż 70% są z placu
+        // albo z Rynku.
+        const trueBg = P.forgeMode === 'table' ? PHOTO_BG_SHARE : P.innocentLie && P.forgeMode !== 'cross' ? 0.58 : 0;
+        const bgPlace = way ? way === 'bg' : rng.chance(trueBg);
+        // Fałszywka z tłem częściej na placu: tam więcej godzin odpada, a udział fałszywek ma być podobny w obu miejscach.
+        const bgPref = way === 'bg' ? (rng.chance(PHOTO_BG_PLAC) ? 'plac' : 'rynek') : null;
+        const place = takePlace((p, k) => p.photo && (!bgPlace || (bgPref ? k === bgPref : k === 'plac' || k === 'rynek')));
+        // Fałszywy pokaz na placu: „trwa pokaz” mniej więcej tak często jak na prawdziwych zdjęciach.
+        const wantShow = way === 'bg' && place === 'plac' ? rng.chance(0.4) : null;
+        const okTime = (x) => Math.abs(x - sunset) > 30 && !nearBgEdge(place, x) && (wantShow === null || showAt(x) !== wantShow);
         let t = 0;
-        for (let k = 0; k < 6; k++) {
+        for (let k = 0; k < 8; k++) {
           t = tPick(place);
-          if (Math.abs(t - sunset) > 30) break;
+          if (okTime(t)) break;
         }
-        if (Math.abs(t - sunset) <= 30) retry();
+        if (!okTime(t)) retry();
         const natural = t < sunset ? 'day' : 'night';
         let sky = natural;
         let ground;
@@ -447,9 +671,10 @@ function generate(rng, opts) {
           return [[start, start + round5(rng.int(30, 80))]];
         };
         let rain;
-        if (forged) {
+        if (way === 'sky') {
           const opts = ['dry'];
-          if (natural === 'night') opts.push('daylight');
+          // Jasne niebo tylko niedługo po zachodzie: inaczej („jasno o 20:16 w listopadzie”) fałszywkę widać bez tabeli.
+          if (natural === 'night' && t - sunset <= 75) opts.push('daylight');
           if (rng.pick(opts) === 'daylight') {
             sky = 'day';
             const wet = rng.chance(0.5);
@@ -464,6 +689,36 @@ function generate(rng, opts) {
           ground = wet ? 'wet' : 'dry';
           rain = wet ? rainAround() : dryAround();
         }
+        // Tło: każde zdjęcie z Placu Wolności opisuje pokaz, a każde z Rynku tarczę zegara na ratuszu.
+        const bg = {};
+        let bgLine = null;
+        if (place === 'plac') {
+          bg.show = way === 'bg' ? !showAt(t) : showAt(t);
+          bg.showKind = T.zgk.kind;
+          bgLine = T.zgk.kind === 'fountain'
+            ? (bg.show ? 'Fontanna przy pomniku: trwa pokaz wody i świateł.' : 'Fontanna przy pomniku: woda spokojna, bez pokazu.')
+            : (bg.show ? 'Pomnik w tle: trwa pokaz świateł, kolorowe smugi.' : 'Pomnik w tle: nieoświetlony, bez pokazu.');
+        } else if (place === 'rynek') {
+          if (way === 'bg') {
+            // Zdjęcie z innego dnia. Stan tarczy losujemy tak, jak wypada na prawdziwych zdjęciach
+            // (podświetlona albo w rusztowaniu; ciemnej tarczy prawdziwe zdjęcia nie mają, bo godziny zdjęć
+            // mieszczą się w oknie podświetlenia), a komunikat ZGK ustawiamy tak, żeby tego wieczoru tarcza
+            // wyglądała inaczej.
+            bg.clock = pickWay({ lit: 0.77, scaffold: 0.23 });
+            const activeScaffold = () => ({ from: addDays(crimeIso, -rng.int(2, 30)), to: addDays(crimeIso, rng.int(3, 30)) });
+            if (bg.clock === 'scaffold') {
+              // Remont wieży był, ale wcześniej (zdjęcie sprzed kilku tygodni).
+              if (scaffoldOn() || !T.zgk.scaffold || T.zgk.scaffold.from > crimeIso) {
+                const to = addDays(crimeIso, -rng.int(3, 30));
+                T.zgk.scaffold = { from: addDays(to, -rng.int(7, 30)), to };
+              }
+            } else if (clockAt(t) === bg.clock) T.zgk.scaffold = activeScaffold();
+            if (clockAt(t) === bg.clock) retry();
+          } else bg.clock = clockAt(t);
+          bgLine = { lit: 'Zegar na ratuszu: tarcza podświetlona.', dark: 'Zegar na ratuszu: tarcza ciemna.', scaffold: 'Wieża ratusza w rusztowaniu, tarczy zegara nie widać.' }[bg.clock];
+        }
+        if (way === 'bg') T.need.zgk = true;
+        if (place === 'plac' || place === 'rynek') T.bgPhoto = true;
         T.weather = { rain };
         const skyText = sky === 'day' ? 'jasne niebo, słońce nisko nad dachami' : 'ciemne niebo, palą się latarnie';
         const groundText = ground === 'dry' ? 'suchy chodnik, nikt nie ma parasola' : 'mokry bruk, kałuże, ludzie pod parasolami';
@@ -473,8 +728,9 @@ function generate(rng, opts) {
             `${PLACES[place].name} · metadane pliku: ${dShort}, ${fmt(t)}`,
             withP ? `Na zdjęciu: ${s.first} i ${withP.first} ${rng.pick(POSES_TWO[place] || POSES_TWO.any)}.` : `Na zdjęciu: ${s.first} ${rng.pick(POSES_ONE[place] || PHOTO_POSES)}.`,
             `W tle: ${skyText}; ${groundText}.`,
+            ...(bgLine ? [bgLine] : []),
           ],
-          facts: [{ t: 'claim', kind, who: by, place, time: t, sky, ground, ...(withP ? { with: [withP.id] } : {}) }],
+          facts: [{ t: 'claim', kind, who: by, place, time: t, sky, ground, ...bg, ...(withP ? { with: [withP.id] } : {}) }],
         });
         evs = [{ place, from: t, to: t }];
         card.alibi = (id) => `Twierdzi, że ${g(s, 'spacerował', 'spacerowała')} ${PLACES[place].walk}${withP ? ` razem ${zIns(withP.ins)}` : ''} (zdjęcie: ${id}).`;
@@ -587,6 +843,9 @@ function generate(rng, opts) {
         break;
       }
       case 'bus': {
+        // Sprzeczność fałszywego biletu: o tej godzinie nic nie odjeżdżało (rozkład) albo wóz z biletu
+        // jeździł wtedy na innej linii lub stał w zajezdni (dyspozycja wozów MZK).
+        const way = forged ? (rng.chance(BUS_VEHICLE_SHARE) ? 'vehicle' : 'timetable') : null;
         const place = takePlace((p) => p.stop);
         const line = rng.pick(['3', '7', '12', '15']);
         const mkDeps = (from, every, last) => {
@@ -602,7 +861,7 @@ function generate(rng, opts) {
         const [lo, hi] = clearRange(place);
         const today = deps[dt];
         let t;
-        if (!forged) {
+        if (way !== 'timetable') {
           const ok = today.filter((d) => d >= lo && d + 2 <= hi);
           if (!ok.length) retry();
           t = rng.pick(ok) + rng.int(0, 2);
@@ -620,6 +879,39 @@ function generate(rng, opts) {
           t = rng.pick(options);
           if (today.some((d) => t >= d && t - d <= 2)) retry();
         }
+        // Wóz: prawdziwy bilet ma wóz, który o tej godzinie jeździł na tej linii.
+        let car;
+        do car = rng.int(201, 589); while (T.vehicles.some((v) => v.car === car));
+        const other = () => rng.pick(BUS_LINES.filter((l) => l !== line));
+        const runs = [];
+        const lastDep = today[today.length - 1];
+        if (way === 'timetable' && lastDep !== undefined && t > lastDep + 2) {
+          // Bilet „po ostatnim autobusie”: wóz kończy kursy na tej linii zaraz po ostatnim odjeździe z przystanku,
+          // żeby dyspozycja nie wyglądała na potwierdzenie biletu (wóz i tak nie kursuje już na tej linii).
+          const b = Math.floor((lastDep + Math.max(0, Math.min(rng.int(3, 20), t - 6 - lastDep))) / 5) * 5;
+          runs.push({ line, from: round5(b - rng.int(70, 180)), to: b });
+          if (b >= 20 * 60 && rng.chance(0.5)) runs.unshift({ line: other(), from: round5(b - rng.int(260, 330)), to: round5(b - rng.int(200, 240)) });
+        } else if (way !== 'vehicle') {
+          const a = round5(t - rng.int(25, 160));
+          const b = round5(t + rng.int(25, 160));
+          runs.push({ line, from: a, to: Math.min(b, 23 * 60 + 55) });
+          if (rng.chance(0.5)) runs.unshift({ line: other(), from: round5(a - rng.int(70, 180)), to: round5(a - rng.int(15, 40)) });
+          else if (rng.chance(0.5) && b < 22 * 60) runs.push({ line: other(), from: round5(b + rng.int(15, 40)), to: Math.min(23 * 60 + 55, round5(b + rng.int(70, 180))) });
+        } else if (rng.chance(0.5)) {
+          // Zjazd do zajezdni: wóz skończył kursy na tej linii przed skasowaniem biletu.
+          const end = round5(t - rng.int(8, 45));
+          runs.push({ line, from: round5(end - rng.int(70, 200)), to: end });
+          if (rng.chance(0.6)) runs.push({ line: other(), from: round5(t + rng.int(8, 45)), to: Math.min(23 * 60 + 55, round5(t + rng.int(90, 200))) });
+        } else {
+          // Wóz jeździł wtedy na innej linii.
+          const a = round5(t - rng.int(25, 160));
+          const b = round5(t + rng.int(25, 160));
+          runs.push({ line: other(), from: a, to: Math.min(b, 23 * 60 + 55) });
+          if (rng.chance(0.6)) runs.unshift({ line, from: round5(a - rng.int(70, 180)), to: round5(a - rng.int(15, 40)) });
+        }
+        if (runs.some((r) => Math.abs(r.from - t) <= 3 || Math.abs(r.to - t) <= 3 || r.from < 14 * 60)) retry();
+        T.vehicles.push({ car, runs });
+        if (way === 'vehicle') T.need.vehicles = true;
         T.buses.push({ stop: place, line, deps });
         card = addCard({
           desk: 'D', kind: 'supplied', by, title: 'Bilet autobusowy',
@@ -627,8 +919,9 @@ function generate(rng, opts) {
             'MZK Borowice · bilet 60-minutowy',
             `skasowano: ${dShort}, ${fmt(t)}`,
             `linia ${line}, ${PLACES[place].name}`,
+            `wóz nr ${car}`,
           ],
-          facts: [{ t: 'claim', kind, who: by, stop: place, line, time: t }],
+          facts: [{ t: 'claim', kind, who: by, stop: place, line, time: t, car }],
         });
         evs = [{ place, from: t, to: t }];
         card.alibi = (id) => `Twierdzi, że ${g(s, 'jechał', 'jechała')} autobusem linii ${line} (bilet: ${id}).`;
@@ -822,7 +1115,10 @@ function generate(rng, opts) {
   const innocents = [0, 1, 2, 3, 4].filter((i) => i !== culpritIdx);
   const decoyIdx = rng.sample(innocents, P.decoys);
   const neutralIdx = innocents.filter((i) => !decoyIdx.includes(i));
-  const kinds = rng.shuffle(ALL_KINDS);
+  // Pn–wt (fałszywka tabelowa) paragon, zdjęcie i bilet autobusowy pojawiają się częściej, bo mają najwięcej
+  // sposobów obalenia. Wagi dotyczą kolejności wszystkich rodzajów (fałszywki i prawdziwych dowodów naraz),
+  // więc rodzaj karty nie zdradza, która jest fałszywa.
+  const kinds = P.forgeMode === 'table' ? weightedOrder(ALL_KINDS, TABLE_KIND_W) : rng.shuffle(ALL_KINDS);
   // W alibi krzyżowym kłamstwo nie zabiera rodzajów wspólnych dowodów (paragon, zdjęcie, kino).
   const lieKinds = P.forgeMode === 'cross' ? ['parking', 'delivery'] : LIE_KINDS;
   const lieKind = P.innocentLie ? kinds.splice(kinds.findIndex((k) => lieKinds.includes(k)), 1)[0] : null;
@@ -890,7 +1186,7 @@ function generate(rng, opts) {
     // Fałszywka „fizyczna”: rodzaj losujemy z wagami, bo niektóre rodzaje częściej przechodzą kontrolę
     // jakości. Dzięki temu żaden rodzaj dowodu nie jest „zawsze prawdziwy” ani „zwykle fałszywy”.
     if (mode === 'self') {
-      const W = { receipt: 3.2, photo: 3.8, train: 1.45, parking: 2.3, bus: 1.3, delivery: 0.9, cinema: 0.7 };
+      const W = { receipt: 2.6, photo: 3.8, train: 1.45, parking: 2.3, bus: 1.3, delivery: 0.9, cinema: 0.7 };
       const avail = kinds.slice(kp);
       let x = rng.next() * avail.reduce((sum, k) => sum + (W[k] || 1), 0);
       const pick = avail.find((k) => (x -= W[k] || 1) < 0) || avail[avail.length - 1];
@@ -1042,6 +1338,100 @@ function generate(rng, opts) {
     });
   }
 
+  // Tabele do paragonów, zdjęć z placu i Rynku oraz biletów autobusowych leżą zawsze, gdy w sprawie jest dowód
+  // danego rodzaju (tak jak godziny otwarcia i pogoda), a nie tylko wtedy, gdy obalają fałszywkę: inaczej sama
+  // obecność tabeli wskazywałaby, który dowód jest fałszywy.
+  const NB = '\u00a0';
+  const WJ = '\u2060';
+  /** Przedział godzin, którego przeglądarka nie łamie w pół. */
+  const hhSpan = (a, b) => `${fmt(a)}${WJ}–${WJ}${fmt(b)}`;
+
+  // Cenniki lokali: zmiany cen z ostatniego miesiąca (lokale z paragonów i kilka innych)
+  if (wantTable(Object.keys(T.prices).length > 0)) {
+    const extra = Object.keys(PLACES).filter((k) => PLACES[k].venue && !T.prices[k]);
+    for (const place of rng.sample(extra, Math.min(extra.length, Math.max(1, 3 - Object.keys(T.prices).length) + rng.int(0, 1)))) {
+      venuePrices(place);
+      if (rng.chance(0.6)) addPriceChange(place);
+    }
+    // Najpierw zmiany cen (od najstarszej), na końcu lokale bez zmian.
+    const rows = rng.shuffle(Object.keys(T.prices)).sort((a, b) => {
+      const ca = T.prices[a].change;
+      const cb = T.prices[b].change;
+      return (ca ? 0 : 1) - (cb ? 0 : 1) || (ca && cb ? (ca.since < cb.since ? -1 : ca.since > cb.since ? 1 : 0) : 0);
+    });
+    addCard({
+      desk: 'R', title: 'Cenniki lokali',
+      sub: 'zmiany cen ogłoszone w ostatnim miesiącu',
+      lines: [
+        ...rows.map((place) => {
+          const ch = T.prices[place].change;
+          return ch
+            ? `${PLACES[place].name}, od ${dayMonth(ch.since)}: ${T.prices[place].items[ch.idx][0]} ${zl(ch.after)} (było ${zl(ch.before)})`
+            : `${PLACES[place].name}: ceny bez zmian`;
+        }),
+        'Nowa cena obowiązuje od otwarcia lokalu w podanym dniu.',
+        'Kasa nalicza cenę obowiązującą w dniu sprzedaży.',
+      ],
+      facts: rows.flatMap((place) => {
+        const ch = T.prices[place].change;
+        return [{ t: 'pricelist', place }, ...(ch ? [{ t: 'price', place, item: T.prices[place].items[ch.idx][0], since: ch.since, before: ch.before, after: ch.after }] : [])];
+      }),
+    });
+  }
+
+  // Odpowiedź banku: właściciele kart z paragonów (i kilku innych kart)
+  if (wantTable(T.bank.length > 0)) {
+    const outsiders = T.bank.filter((r) => !r.who).length;
+    for (let k = 0, n = outsiders ? rng.int(0, 1) : rng.int(1, 2); k < n; k++) outsiderCard();
+    const without = rng.shuffle(suspects.filter((p) => !T.cardNo[p.id]));
+    if (without.length && rng.chance(0.5)) endingFor(without.pop());
+    while (T.bank.length < 3 && without.length) endingFor(without.pop());
+    addCard({
+      desk: 'R', title: 'Odpowiedź banku',
+      sub: 'Bank Spółdzielczy w Borowicach: właściciele kart',
+      lines: rng.shuffle(T.bank).map((r) => `karta${NB}…${r.no}: ${r.name.replace(/ /g, NB)}`),
+      facts: T.bank.map((r) => ({ t: 'bankcard', no: r.no, who: r.who, name: r.name, f: r.f })),
+    });
+  }
+
+  // Raporty kas fiskalnych: kilka numerów z godzinami w co najmniej dwóch lokalach
+  if (wantTable(Object.keys(T.fiscal).length > 0)) {
+    // Wszystkie lokale z paragonów (czynne tego dnia) są w raporcie, a do tego lokale spoza sprawy.
+    const listed = Object.keys(T.fiscal);
+    const fromReceipts = listed.length;
+    const extra = rng.shuffle(Object.keys(PLACES).filter((k) => PLACES[k].venue && !T.fiscal[k]));
+    for (const place of extra) {
+      if (listed.length >= 2 && (listed.length >= 3 || rng.chance(0.5))) break;
+      const h = T.hours.find((x) => x.place === place);
+      const open = h ? h[dt] : [8 * 60, 22 * 60];
+      if (!open || open[1] < 18 * 60) continue;
+      const rows = [];
+      let tt = Math.max(16 * 60, open[0]) + rng.int(10, 60);
+      let no = rng.int(40, 1800);
+      for (let k = rng.int(3, 4); k > 0 && tt < open[1] - 3; k--) {
+        rows.push({ no, t: tt });
+        tt += rng.int(15, 60);
+        no += rng.int(2, 9);
+      }
+      if (rows.length < 2) continue;
+      T.fiscal[place] = rows;
+      listed.push(place);
+    }
+    if (listed.length >= 2) {
+      const order = rng.shuffle(listed);
+      addCard({
+        desk: 'R', title: 'Raporty kas fiskalnych',
+        sub: 'fragmenty kopii elektronicznej',
+        lines: [
+          // Lokal w osobnej linii, pod nim wpisy; żaden wpis „nr … o …” nie łamie się w pół.
+          ...order.flatMap((place) => [`${PLACES[place].name}:`, T.fiscal[place].map((r) => `nr${NB}${pad4(r.no)}${NB}o${NB}${fmt(r.t)}`).join(`${NB}· `)]),
+          'W każdej kasie numery paragonów rosną z każdym wydrukiem.',
+        ],
+        facts: order.flatMap((place) => T.fiscal[place].map((r) => ({ t: 'fiscal', place, no: r.no, time: r.t }))),
+      });
+    } else if (fromReceipts) retry();
+  }
+
   // Pogoda i zachód słońca
   const hasPhoto = Boolean(T.weather);
   if (hasPhoto || rng.chance(P.noiseTableChance)) {
@@ -1068,6 +1458,27 @@ function generate(rng, opts) {
     } else {
       addCard({ desk: 'R', title: 'Stacja meteorologiczna Borowice', sub: dShort, lines: [...segs, sunsetLine], facts: [...wf, { t: 'sunset', time: sunset }] });
     }
+  }
+
+  // Komunikat ZGK: pokazy na Placu Wolności i zegar na ratuszu
+  if (wantTable(T.bgPhoto)) {
+    const z = T.zgk;
+    addCard({
+      desk: 'M', title: 'Komunikat ZGK Borowice',
+      sub: `Zakład Gospodarki Komunalnej · ${dShort}`,
+      lines: [
+        `${z.kind === 'fountain' ? 'Fontanna na Placu Wolności' : 'Iluminacja pomnika, Plac Wolności'}, pokazy po ${z.dur} min:`,
+        z.shows.map(fmt).join(`${NB}· `),
+        `Ratusz: tarcza zegara podświetlona${NB}${hhSpan(z.light[0], z.light[1])}.`,
+        ...(z.scaffold ? [`Remont wieży ratusza ${dayMonth(z.scaffold.from)}–${dayMonth(z.scaffold.to)}: rusztowanie zasłania tarczę zegara.`] : []),
+        'Pokazy i podświetlenie działają dokładnie w podanych godzinach.',
+      ],
+      facts: [
+        { t: 'shows', place: 'plac', kind: z.kind, starts: z.shows, dur: z.dur },
+        { t: 'clocklight', from: z.light[0], to: z.light[1] },
+        ...(z.scaffold ? [{ t: 'scaffold', from: z.scaffold.from, to: z.scaffold.to }] : []),
+      ],
+    });
   }
 
   // Repertuar kina
@@ -1149,6 +1560,31 @@ function generate(rng, opts) {
         'Autobus zatrzymuje się na przystanku tylko na chwilę. Bilet kasuje się od razu po wejściu, najpóźniej 2 minuty po rozkładowej godzinie odjazdu.',
       ],
       facts: [{ t: 'bus', stop: b.stop, line: b.line, deps: b.deps }],
+    });
+  }
+
+  // Dyspozycja wozów MZK: który wóz na której linii i w jakich godzinach
+  if (wantTable(T.vehicles.length > 0)) {
+    const busLines = T.buses.map((b) => b.line);
+    for (let k = rng.int(2, 3); k > 0; k--) {
+      let car;
+      do car = rng.int(201, 589); while (T.vehicles.some((v) => v.car === car));
+      const l1 = busLines.length && rng.chance(0.6) ? rng.pick(busLines) : rng.pick(BUS_LINES);
+      const a = round5(rng.int(15 * 60, 19 * 60));
+      const b = round5(a + rng.int(90, 240));
+      const runs = [{ line: l1, from: a, to: Math.min(b, 23 * 60 + 55) }];
+      if (b < 22 * 60 && rng.chance(0.5)) runs.push({ line: rng.pick(BUS_LINES.filter((l) => l !== l1)), from: round5(b + rng.int(15, 50)), to: Math.min(23 * 60 + 55, round5(b + rng.int(90, 200))) });
+      T.vehicles.push({ car, runs });
+    }
+    const list = T.vehicles.slice().sort((x, y) => x.car - y.car);
+    addCard({
+      desk: 'M', title: 'Dyspozycja wozów MZK',
+      sub: dShort,
+      lines: [
+        ...list.map((v) => `wóz ${v.car}: ${v.runs.map((r) => `linia${NB}${r.line}${NB}${hhSpan(r.from, r.to)}`).join(', ')}`),
+        'Między kursami i poza podanymi godzinami wóz nie kursuje (postój w zajezdni).',
+      ],
+      facts: list.map((v) => ({ t: 'vehicle', car: v.car, runs: v.runs })),
     });
   }
 
@@ -1298,6 +1734,11 @@ function generate(rng, opts) {
     if (types.has('bus')) return { label: `Pobierz rozkład MZK: ${card.title.replace(/^Przystanek (.+): linia (\S+)$/, 'linia $2, przystanek $1')}`, cost: 30 };
     if (types.has('street')) return { label: 'Zapytaj urząd o numerację budynków', cost: 30 };
     if (types.has('hours')) return { label: 'Zapytaj urząd o godziny otwarcia lokali', cost: 30 };
+    if (types.has('vehicle')) return { label: 'Pobierz dyspozycję wozów MZK', cost: 15 };
+    if (types.has('shows')) return { label: 'Pobierz komunikat ZGK', cost: 15 };
+    if (types.has('fiscal')) return { label: 'Zażądaj raportów z kas fiskalnych', cost: 30 };
+    if (types.has('bankcard')) return { label: 'Wystąp do banku o właścicieli kart', cost: 30 };
+    if (types.has('pricelist')) return { label: 'Poproś lokale o cenniki', cost: 15 };
     if (types.has('weather')) return { label: 'Zamów raport ze stacji meteo', cost: 30 };
     if (types.has('screening')) return { label: 'Pobierz repertuar kina „Mewa”', cost: 15 };
     if (types.has('zone')) return { label: 'Pobierz uchwałę o strefach parkowania', cost: 30 };

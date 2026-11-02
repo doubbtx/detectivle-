@@ -17,7 +17,7 @@ export function cardLook(k) {
   if (cl) return { train: 'ticket', bus: 'ticket', cinema: 'ticket', parking: 'ticket', receipt: 'receipt', photo: 'photo', delivery: 'phone' }[cl.kind] || null;
   if (k.kind === 'witness') return 'witness';
   if (k.title === 'Monitoring miejski') return 'cctv';
-  if (has(k, 'train') || has(k, 'bus')) return 'board';
+  if (has(k, 'train') || has(k, 'bus') || has(k, 'vehicle')) return 'board';
   if (has(k, 'weather')) return 'weather';
   return null;
 }
@@ -33,6 +33,11 @@ export function cardIcon(k) {
   if (has(k, 'weather')) return 'cloud-rain';
   if (has(k, 'sunset')) return 'sun';
   if (has(k, 'hours')) return 'clock';
+  if (has(k, 'pricelist')) return 'tag';
+  if (has(k, 'bankcard')) return 'credit-card';
+  if (has(k, 'fiscal')) return 'printer';
+  if (has(k, 'shows')) return (k.facts || []).find((f) => f.t === 'shows').kind === 'fountain' ? 'droplets' : 'sparkles';
+  if (has(k, 'vehicle')) return 'warehouse';
   if (has(k, 'screening')) return 'clapperboard';
   if (has(k, 'grid')) return 'map';
   if (has(k, 'cardlog') || has(k, 'cardowner')) return 'file-text';
@@ -62,11 +67,27 @@ function photoScene(cl) {
     for (let x = 6; x < W; x += 18) p.push(`<line x1="${x}" y1="82" x2="${x}" y2="92" stroke="${ink}" stroke-width="2"/>`);
     p.push(`<line x1="0" y1="82" x2="${W}" y2="82" stroke="${ink}" stroke-width="2"/>`);
   } else if (place === 'plac') {
-    p.push(`<rect x="126" y="54" width="28" height="56" fill="${ink}"/><rect x="118" y="104" width="44" height="8" fill="${ink}"/><circle cx="140" cy="48" r="9" fill="${ink}"/>`);
     p.push(`<rect x="10" y="70" width="70" height="44" fill="${ink}" opacity="0.7"/><rect x="200" y="64" width="72" height="50" fill="${ink}" opacity="0.7"/>`);
+    // Pokaz z komunikatu ZGK: latem strumienie fontanny, zimą kolorowe światła na pomniku (rysunek = tekst karty).
+    if (cl.show && cl.showKind === 'lights') {
+      for (const [x, c] of [[96, '#e05a9b'], [184, '#4fb3e8'], [140, '#f2c94c']]) p.push(`<polygon points="${x},112 ${x === 140 ? 128 : x < 140 ? 122 : 146},40 ${x === 140 ? 152 : x < 140 ? 136 : 160},40" fill="${c}" opacity="0.35"/>`);
+    }
+    p.push(`<rect x="126" y="54" width="28" height="56" fill="${ink}"/><rect x="118" y="104" width="44" height="8" fill="${ink}"/><circle cx="140" cy="48" r="9" fill="${ink}"/>`);
+    if (cl.showKind === 'fountain') {
+      p.push(`<ellipse cx="140" cy="112" rx="46" ry="6" fill="${night ? '#2f4f7a' : '#8fc1e3'}" stroke="${ink}" stroke-width="2"/>`);
+      if (cl.show) for (const dx of [-34, -18, 18, 34]) p.push(`<path d="M ${140 + dx} 110 Q ${140 + dx * 0.6} ${62} ${140 + dx * 0.25} 108" fill="none" stroke="${night ? '#9fd4ff' : '#e9f6ff'}" stroke-width="3" opacity="0.9"/>`);
+    }
   } else {
-    // Rynek z ratuszem
-    p.push(`<rect x="96" y="52" width="88" height="62" fill="${ink}"/><rect x="128" y="22" width="24" height="32" fill="${ink}"/><polygon points="126,22 140,8 154,22" fill="${ink}"/><circle cx="140" cy="36" r="6" fill="${night ? '#f2d27a' : '#efe6d2'}"/>`);
+    // Rynek z ratuszem; tarcza zegara podświetlona, ciemna albo zasłonięta rusztowaniem (jak w opisie zdjęcia).
+    const clock = cl.clock || (night ? 'lit' : 'day');
+    p.push(`<rect x="96" y="52" width="88" height="62" fill="${ink}"/><rect x="128" y="22" width="24" height="32" fill="${ink}"/><polygon points="126,22 140,8 154,22" fill="${ink}"/>`);
+    if (clock === 'scaffold') {
+      for (let x = 122; x <= 158; x += 9) p.push(`<line x1="${x}" y1="14" x2="${x}" y2="56" stroke="#b08a4a" stroke-width="2"/>`);
+      for (let y = 18; y <= 54; y += 9) p.push(`<line x1="120" y1="${y}" x2="160" y2="${y}" stroke="#b08a4a" stroke-width="2"/>`);
+    } else {
+      if (clock === 'lit') p.push('<circle cx="140" cy="36" r="11" fill="#f2d27a" opacity="0.3"/>');
+      p.push(`<circle cx="140" cy="36" r="6" fill="${clock === 'lit' ? '#f2d27a' : clock === 'dark' ? '#3a3f55' : '#efe6d2'}"/>`);
+    }
     p.push(`<rect x="8" y="72" width="70" height="42" fill="${ink}" opacity="0.7"/><rect x="204" y="68" width="68" height="46" fill="${ink}" opacity="0.7"/>`);
     if (night) for (const [x, y] of [[106, 66], [120, 66], [160, 66], [174, 66], [20, 84], [44, 84], [216, 80], [244, 80]]) p.push(`<rect x="${x}" y="${y}" width="6" height="8" fill="#f2d27a" opacity="0.85"/>`);
   }

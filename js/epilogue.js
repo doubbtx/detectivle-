@@ -18,6 +18,13 @@ function confession(code, p, weekday) {
     'photo-dark': `Zdjęcie było z innego wieczoru. ${g('Zapomniałem', 'Zapomniałam')}, że o tej porze było jeszcze jasno.`,
     'photo-dry': `Zdjęcie było z innego wieczoru. Nie ${g('wiedziałem', 'wiedziałam')}, że tamtego wieczoru lało jak z cebra.`,
     'photo-wet': `Zdjęcie było z deszczowego dnia. Nie ${g('pomyślałem', 'pomyślałam')}, że tamtego wieczoru było sucho.`,
+    'receipt-price': `Paragon był sprzed kilku tygodni, ${g('zmieniłem', 'zmieniłam')} tylko datę. Nie ${g('zauważyłem', 'zauważyłam')}, że w międzyczasie zmieniły się ceny.`,
+    'receipt-price-early': `Paragon był z następnego dnia, ${g('cofnąłem', 'cofnęłam')} tylko datę. Nie ${g('wiedziałem', 'wiedziałam')}, że od rana obowiązywała już nowa cena.`,
+    'receipt-card': `Paragon ${g('dostałem', 'dostałam')} od znajomej osoby, która naprawdę tam była. Nie ${g('pomyślałem', 'pomyślałam')}, że bank powie, czyja to karta.`,
+    'receipt-number': `Na prawdziwym paragonie ${g('przerobiłem', 'przerobiłam')} godzinę. Nie ${g('wiedziałem', 'wiedziałam')}, że kasa numeruje paragony po kolei.`,
+    'photo-show': `Zdjęcie ${g('zrobiłem', 'zrobiłam')} innego wieczoru i ${g('zmieniłem', 'zmieniłam')} godzinę w pliku. Nie ${g('pomyślałem', 'pomyślałam')} o pokazach na placu.`,
+    'photo-clock': `Zdjęcie było z innego dnia. Nie ${g('zwróciłem', 'zwróciłam')} uwagi na zegar na ratuszu w tle.`,
+    'bus-vehicle': `Bilet był z innego kursu, ${g('przerobiłem', 'przerobiłam')} godzinę. Nie ${g('wiedziałem', 'wiedziałam')}, że po numerze wozu da się to sprawdzić.`,
     'no-screening': `Bilet był z innego seansu. ${g('Przerobiłem', 'Przerobiłam')} godzinę i nie ${g('sprawdziłem', 'sprawdziłam')} repertuaru.`,
     'no-number': `W aplikacji ${g('dopisałem', 'dopisałam')} jedno doręczenie pod wymyślony adres. Nie ${g('wiedziałem', 'wiedziałam')}, że takiego numeru nie ma.`,
     parity: `W aplikacji ${g('dopisałem', 'dopisałam')} doręczenie pod wymyślony numer. Nie ${g('wiedziałem', 'wiedziałam')}, że po tej stronie ulicy takich numerów nie ma.`,
@@ -54,7 +61,9 @@ export function buildEpilogue(c, sol, outcome) {
   const forged = c.cards.find((k) => k.id === c.solution.forged);
   const proofId = (sol.explain.forged.proofRefs || sol.explain.forged.refs).find((r) => r !== forged.id);
   const proof = c.cards.find((k) => k.id === proofId);
-  const code = sol.explain.forged.reasonCodes?.[0];
+  const code0 = sol.explain.forged.reasonCodes?.[0];
+  // Fałszywka z ceną, która zaczęła obowiązywać dopiero po kradzieży: paragon z dnia po kradzieży.
+  const code = code0 === 'receipt-price' && sol.explain.forged.variant === 'price-early' ? 'receipt-price-early' : code0;
   const arrestLoc = rng.pick(['w domu', 'w drodze do pracy', 'przed swoim blokiem', `na dworcu, z biletem w jedną stronę w kieszeni`]);
   const nextDay = addDays(c.crimeDate.iso, 1);
   const time = `${rng.int(6, 8)}:${String(rng.int(0, 5) * 10 + rng.int(0, 9)).padStart(2, '0')}`;

@@ -61,6 +61,18 @@ export const WITNESSES = [
   { full: 'Elżbieta Pająk', f: true },
 ];
 
+/** Posiadacze kart płatniczych spoza sprawy (pojawiają się w odpowiedzi banku). */
+export const CARD_HOLDERS = [
+  { full: 'Renata Zawadzka', f: true },
+  { full: 'Bogdan Kasprzak', f: false },
+  { full: 'Urszula Lipińska', f: true },
+  { full: 'Marian Olszewski', f: false },
+  { full: 'Dorota Kubiak', f: true },
+  { full: 'Zbigniew Wróbel', f: false },
+  { full: 'Alicja Michalska', f: true },
+  { full: 'Kazimierz Sadowski', f: false },
+];
+
 /** Mianownik przedmiotów, których biernik brzmi inaczej (do kart „Przedmiot: …”). */
 export const ITEM_NOM = {
   'kolekcję przedwojennych pocztówek z Borowic': 'kolekcja przedwojennych pocztówek z Borowic',
@@ -221,9 +233,9 @@ export const PHOTO_POSES = [
 export const DESK_DEFS = [
   { id: 'D', name: 'Dokumenty', hint: 'bilety, paragony, akta' },
   { id: 'S', name: 'Świadkowie', hint: 'zeznania' },
-  { id: 'M', name: 'Mapa i rozkłady', hint: 'plan miasta, rozkłady jazdy' },
+  { id: 'M', name: 'Mapa i rozkłady', hint: 'plan miasta, rozkłady jazdy, komunikaty MZK i ZGK' },
   { id: 'Z', name: 'Zdjęcia', hint: 'zdjęcia, zrzuty ekranu' },
-  { id: 'R', name: 'Rejestry', hint: 'nagrania z kamer, godziny otwarcia, pogoda, karty wejściowe' },
+  { id: 'R', name: 'Rejestry', hint: 'kamery, godziny otwarcia, pogoda, karty wejściowe, cenniki, bank, kasy' },
 ];
 
 /**
@@ -255,6 +267,12 @@ export const RULE_LIE = 'W tej sprawie fałszywe są dwa dowody dostarczone prze
 /** Zasada nr 4 w sprawach z planem miasta (od generatora v8): czasy liczy się z przecznic. */
 export const RULE_MAP = 'Czasy dotarcia liczycie z planu Borowic (biurko „Mapa i rozkłady”). Ulice tworzą siatkę, a przejście o jedną przecznicę, czyli jedno pole planu w poziomie albo w pionie, trwa 2 minuty, pieszo, rowerem czy autem tak samo. Czas między dwoma miejscami to liczba przecznic w poziomie plus w pionie razy 2 min (np. z C14 do M10: 10 + 4 = 14 przecznic, czyli 28 min). Szybciej się nie da, a w każdą stronę jest tyle samo. Przez rzekę prowadzi most na każdej ulicy.';
 
+/** Dopisek do zasady nr 6 w sprawach z odpowiedzią banku (końcówki kart na paragonach). */
+export const RULE_CARD = 'Paragon opłacony kartą dowodzi obecności właściciela karty, a nie tego, kto paragon przyniósł. Jeśli według banku karta należy do kogoś innego, ten dowód jest fałszywy.';
+
+/** Czy sprawa ma odpowiedź banku z właścicielami kart. */
+export const hasBankCards = (c) => c.cards.some((k) => (k.facts || []).some((f) => f.t === 'bankcard'));
+
 /** Czy sprawa ma plan miasta (karta z polami miejsc). */
 export const hasTownMap = (c) => c.cards.some((k) => (k.facts || []).some((f) => f.t === 'grid'));
 
@@ -271,13 +289,14 @@ export function rulesShortFor(c) {
     ['search', 'Fałszywkę zdradza tabela urzędowa albo to, że ktoś był gdzie indziej i nie zdążyłby dotrzeć. Wspólny dowód dwóch osób jest prawdziwy tylko wtedy, gdy obie naprawdę tam były.'],
     ['footprints', 'Prawdziwy dowód = ta osoba tam była. Kino: cały seans. Pociąg: potem nie było jej w mieście.'],
     ['clock', 'Zegary są zgodne, rozkłady i godziny obowiązują dokładnie tak, jak na kartach.'],
+    ...(hasBankCards(c) ? [['receipt', 'Paragon opłacony kartą = był tam właściciel karty (podaje go bank).']] : []),
   ];
 }
 
 /** Zasady dla danej sprawy. */
 export function rulesFor(c) {
   const map = hasTownMap(c);
-  return RULES.map((r, i) => (i === 2 && c.innocentLie ? RULE_LIE : i === 3 && map ? RULE_MAP : r));
+  return RULES.map((r, i) => (i === 2 && c.innocentLie ? RULE_LIE : i === 3 && map ? RULE_MAP : i === 5 && hasBankCards(c) ? `${r} ${RULE_CARD}` : r));
 }
 
 /**
@@ -295,7 +314,9 @@ export const REASONS = {
   receipt: [
     ['closed-day', 'lokal był w ten dzień tygodnia nieczynny'],
     ['closed-early', 'o tej godzinie lokal był już zamknięty'],
-    ['receipt-items', 'w tym lokalu nie sprzedaje się takich rzeczy'],
+    ['receipt-price', 'na paragonie jest cena, która tego dnia nie obowiązywała'],
+    ['receipt-card', 'paragon opłacono kartą innej osoby'],
+    ['receipt-number', 'numer paragonu nie pasuje do raportu kasy'],
     ['physical', 'tę osobę widziano wtedy gdzie indziej i nie zdążyłaby dotrzeć'],
     ['physical-other', 'drugą osobę z dowodu widziano wtedy gdzie indziej'],
   ],
@@ -304,6 +325,8 @@ export const REASONS = {
     ['photo-dark', 'na zdjęciu jest ciemno, a słońce jeszcze nie zaszło'],
     ['photo-dry', 'na zdjęciu jest sucho, a wtedy padało'],
     ['photo-wet', 'na zdjęciu są kałuże, a od dawna nie padało'],
+    ['photo-show', 'pokaz na Placu Wolności wygląda inaczej niż według komunikatu ZGK'],
+    ['photo-clock', 'zegar na ratuszu wygląda inaczej niż według komunikatu ZGK'],
     ['physical', 'tę osobę widziano wtedy gdzie indziej i nie zdążyłaby dotrzeć'],
     ['physical-other', 'drugą osobę z dowodu widziano wtedy gdzie indziej'],
   ],
@@ -331,7 +354,7 @@ export const REASONS = {
   bus: [
     ['bus-after-last', 'ostatni autobus odjechał wcześniej'],
     ['bus-no-departure', 'o tej godzinie żaden autobus nie odjeżdżał z przystanku'],
-    ['bus-no-stop', 'ta linia nie zatrzymuje się na tym przystanku'],
+    ['bus-vehicle', 'ten wóz nie jeździł wtedy na tej linii'],
     ['physical', 'tę osobę widziano wtedy gdzie indziej i nie zdążyłaby dotrzeć'],
     ['physical-other', 'drugą osobę z dowodu widziano wtedy gdzie indziej'],
   ],

@@ -12,6 +12,8 @@ const FAR = 100000;
 
 const placeName = (key) => PLACES[key]?.name ?? key;
 const placeLoc = (key) => PLACES[key]?.loc ?? key;
+const zl = (cents) => `${Math.floor(cents / 100)},${String(cents % 100).padStart(2, '0')}`;
+const dayMonth = (iso) => { const [, m, d] = iso.split('-'); return `${Number(d)}.${m}`; };
 
 function openAt(hours, dt, t) {
   const span = hours[dt];
@@ -23,6 +25,7 @@ export function solveCase(c) {
   const dt = dayType(weekday);
   const W1 = c.window.from;
   const W2 = c.window.to;
+  const crimeIso = c.crimeDate.iso;
   const suspects = new Map(c.suspects.map((s) => [s.id, s]));
 
   const travel = new Map();
@@ -43,6 +46,14 @@ export function solveCase(c) {
   const cardlogs = [];
   const cardOwners = new Map();
   const claims = [];
+  // Szczegóły sprawdzane w tabelach (od generatora v9).
+  const prices = new Map();
+  const bankCards = new Map();
+  const fiscal = new Map();
+  let shows = null;
+  const vehicles = new Map();
+  let clockLight = null;
+  let scaffold = null;
 
   for (const card of c.cards) {
     for (const f of card.facts || []) {
@@ -65,6 +76,13 @@ export function solveCase(c) {
         case 'cardlog': cardlogs.push({ ...f, ref }); break;
         case 'cardowner': cardOwners.set(`${f.place}#${f.card}`, { who: f.who, ref }); break;
         case 'claim': claims.push({ ...f, card: ref }); break;
+        case 'vehicle': vehicles.set(f.car, { ...f, ref }); break;
+        case 'shows': shows = { ...f, ref }; break;
+        case 'clocklight': clockLight = { ...f, ref }; break;
+        case 'scaffold': scaffold = { ...f, ref }; break;
+        case 'fiscal': { if (!fiscal.has(f.place)) fiscal.set(f.place, []); fiscal.get(f.place).push({ ...f, ref }); break; }
+        case 'bankcard': bankCards.set(f.no, { ...f, ref }); break;
+        case 'price': { if (!prices.has(f.place)) prices.set(f.place, []); prices.get(f.place).push({ ...f, ref }); break; }
         default: break;
       }
     }
@@ -127,24 +145,82 @@ export function solveCase(c) {
         break;
       }
       case 'receipt': {
-        const h = hours.get(cl.place);
         out.sightings.push({ place: cl.place, from: cl.time, to: cl.time });
-        if (!h) { out.unknown = true; break; }
-        out.refs.push(h.ref);
-        if (!openAt(h, dt, cl.time)) {
+        const problems = [];
+        const checked = [];
+        const h = hours.get(cl.place);
+        if (h) {
+          if (!openAt(h, dt, cl.time)) {
+            problems.push({
+              codes: h[dt] ? ['closed-early'] : ['closed-day', 'closed-early'],
+              ref: h.ref,
+              text: h[dt]
+                ? `${placeName(cl.place)} – lokal czynny tego dnia tylko do ${fmt(h[dt][1])} [${h.ref}], a paragon ma godzinę ${fmt(cl.time)}`
+                : `${placeName(cl.place)} – lokal nieczynny w ten dzień tygodnia [${h.ref}], a paragon ma godzinę ${fmt(cl.time)}`,
+            });
+          } else checked.push({ ref: h.ref, note: `${placeName(cl.place)} – lokal był wtedy otwarty [${h.ref}]` });
+        }
+        for (const row of prices.get(cl.place) || []) {
+          const it = (cl.items || []).find((x) => x.n === row.item);
+          if (!it) continue;
+          const unit = Math.round(it.p / (it.q || 1));
+          const now = crimeIso >= row.since;
+          const expect = now ? row.after : row.before;
+          if (unit !== expect) {
+            problems.push({
+              codes: ['receipt-price'], ref: row.ref,
+              text: now
+                ? `według cennika [${row.ref}] od ${dayMonth(row.since)} ${row.item} kosztuje ${zl(row.after)} zł, a paragon z ${dayMonth(crimeIso)} ma jeszcze starą cenę ${zl(unit)} zł`
+                : `według cennika [${row.ref}] ${row.item} kosztuje ${zl(row.after)} zł dopiero od ${dayMonth(row.since)}, a paragon z ${dayMonth(crimeIso)} ma już tę cenę`,
+              early: !now,
+            });
+          } else checked.push({ ref: row.ref, note: `ceny zgadzają się z cennikiem [${row.ref}]` });
+        }
+        if (cl.rno !== undefined && fiscal.has(cl.place)) {
+          const rows = fiscal.get(cl.place);
+          const pad4 = (n) => String(n).padStart(4, '0');
+          const bad = rows.filter((r) => (r.no < cl.rno && r.time > cl.time) || (r.no > cl.rno && r.time < cl.time) || (r.no === cl.rno && r.time !== cl.time))
+            .sort((a, b) => Math.abs(a.no - cl.rno) - Math.abs(b.no - cl.rno))[0];
+          if (bad) {
+            problems.push({
+              codes: ['receipt-number'], ref: bad.ref,
+              text: bad.no < cl.rno
+                ? `paragon nr ${pad4(cl.rno)} ma godzinę ${fmt(cl.time)}, a według raportu kasy [${bad.ref}] wcześniejszy numer ${pad4(bad.no)} wydano dopiero o ${fmt(bad.time)}; numeracja jest kolejna`
+                : bad.no > cl.rno
+                  ? `paragon nr ${pad4(cl.rno)} ma godzinę ${fmt(cl.time)}, a według raportu kasy [${bad.ref}] późniejszy numer ${pad4(bad.no)} wydano już o ${fmt(bad.time)}; numeracja jest kolejna`
+                  : `paragon nr ${pad4(cl.rno)} ma godzinę ${fmt(cl.time)}, a według raportu kasy [${bad.ref}] ten numer wydano o ${fmt(bad.time)}`,
+            });
+          } else checked.push({ ref: rows[0].ref, note: `numer paragonu pasuje do raportu kasy [${rows[0].ref}]` });
+        }
+        (cl.cards || []).forEach((no, i) => {
+          const row = bankCards.get(no);
+          if (!row) return;
+          const expect = i === 0 ? cl.who : cl.with?.[i - 1];
+          if (row.who !== expect) {
+            problems.push({
+              codes: ['receipt-card'], ref: row.ref,
+              text: `paragon opłacono kartą …${no}, a według odpowiedzi banku [${row.ref}] ${row.f ? 'jej właścicielką' : 'jej właścicielem'} jest ${row.name}, nie ${suspects.get(expect)?.full ?? 'osoba z dowodu'}; paragon dowodzi obecności właściciela karty`,
+            });
+          } else checked.push({ ref: row.ref, note: cl.cards.length > 1 ? `karty z paragonu należą do tych osób [${row.ref}]` : `karta z paragonu należy do tej osoby [${row.ref}]` });
+        });
+        if (problems.length) {
           out.contradicted = true;
-          out.reasonCodes.push(...(h[dt] ? ['closed-early'] : ['closed-day', 'closed-early']));
-          out.reason = h[dt]
-            ? `${placeName(cl.place)} – lokal czynny tego dnia tylko do ${fmt(h[dt][1])} [${h.ref}], a paragon ma godzinę ${fmt(cl.time)}`
-            : `${placeName(cl.place)} – lokal nieczynny w ten dzień tygodnia [${h.ref}], a paragon ma godzinę ${fmt(cl.time)}`;
+          out.reason = problems.map((p) => p.text).join('; ');
+          out.reasonCodes.push(...new Set(problems.flatMap((p) => p.codes)));
+          out.refs.push(...new Set(problems.map((p) => p.ref)));
+          // Paragon z ceną, która zacznie obowiązywać dopiero później (do przyznania się w epilogu).
+          if (problems.some((p) => p.early)) out.variant = 'price-early';
           break;
         }
-        out.okNote = `${placeName(cl.place)} był wtedy otwarty [${h.ref}]`;
+        if (!checked.length) { out.unknown = true; break; }
+        out.refs.push(...new Set(checked.map((x) => x.ref)));
+        out.okNote = [...new Set(checked.map((x) => x.note))].join(', ');
         break;
       }
       case 'photo': {
         out.sightings.push({ place: cl.place, from: cl.time, to: cl.time });
         const problems = [];
+        const okBits = [];
         if (sunset) {
           if (cl.sky === 'day' && cl.time > sunset.time + 20) problems.push({ code: 'photo-daylight', text: `zdjęcie pokazuje jasne niebo o ${fmt(cl.time)}, a słońce zaszło o ${fmt(sunset.time)} [${sunset.ref}]`, ref: sunset.ref });
           if (cl.sky === 'night' && cl.time < sunset.time - 20) problems.push({ code: 'photo-dark', text: `zdjęcie pokazuje ciemne niebo o ${fmt(cl.time)}, a słońce zaszło dopiero o ${fmt(sunset.time)} [${sunset.ref}]`, ref: sunset.ref });
@@ -153,6 +229,37 @@ export function solveCase(c) {
           if (cl.ground === 'dry' && raining(cl.time)) problems.push({ code: 'photo-dry', text: `zdjęcie z ${fmt(cl.time)} pokazuje suchy chodnik, a według stacji meteo [${weatherCard}] wtedy padało`, ref: weatherCard });
           if (cl.ground === 'wet' && !raining(cl.time) && !rainedRecently(cl.time, 60)) problems.push({ code: 'photo-wet', text: `zdjęcie z ${fmt(cl.time)} pokazuje kałuże, a według stacji meteo [${weatherCard}] od dawna nie padało`, ref: weatherCard });
         }
+        if (typeof cl.show === 'boolean' && shows) {
+          const on = shows.starts.some((a) => a <= cl.time && cl.time < a + shows.dur);
+          const what = shows.kind === 'fountain' ? 'pokaz fontanny' : 'pokaz świateł na pomniku';
+          if (on !== cl.show) {
+            const cur = shows.starts.find((a) => a <= cl.time && cl.time < a + shows.dur);
+            problems.push({
+              code: 'photo-show', ref: shows.ref,
+              text: cl.show
+                ? `na zdjęciu z ${fmt(cl.time)} trwa ${what}, a według komunikatu ZGK [${shows.ref}] o tej porze pokazu nie było`
+                : `na zdjęciu z ${fmt(cl.time)} nie ma pokazu, a według komunikatu ZGK [${shows.ref}] od ${fmt(cur)} do ${fmt(cur + shows.dur)} trwał ${what}`,
+            });
+          } else okBits.push({ ref: shows.ref, note: `pokaz na placu zgadza się z komunikatem ZGK [${shows.ref}]` });
+        }
+        if (cl.clock && clockLight) {
+          const sc = scaffold && scaffold.from <= crimeIso && crimeIso <= scaffold.to;
+          const expect = sc ? 'scaffold' : clockLight.from <= cl.time && cl.time < clockLight.to ? 'lit' : 'dark';
+          const ref = sc || (cl.clock === 'scaffold' && scaffold) ? scaffold.ref : clockLight.ref;
+          if (expect !== cl.clock) {
+            const desc = { lit: 'podświetloną tarczę zegara na ratuszu', dark: 'ciemną tarczę zegara na ratuszu', scaffold: 'wieżę ratusza w rusztowaniu' }[cl.clock];
+            problems.push({
+              code: 'photo-clock', ref,
+              text: sc
+                ? `zdjęcie pokazuje ${desc}, a według komunikatu ZGK [${ref}] od ${dayMonth(scaffold.from)} do ${dayMonth(scaffold.to)} tarczę zasłaniało rusztowanie`
+                : cl.clock === 'scaffold'
+                  ? `zdjęcie pokazuje ${desc}, a według komunikatu ZGK [${scaffold?.ref ?? ref}] ${scaffold ? `remont wieży trwał od ${dayMonth(scaffold.from)} do ${dayMonth(scaffold.to)}, a nie ${dayMonth(crimeIso)}` : 'wieża nie była w remoncie'}`
+                  : expect === 'dark'
+                  ? `zdjęcie z ${fmt(cl.time)} pokazuje ${desc}, a według komunikatu ZGK [${ref}] tarcza jest podświetlona tylko od ${fmt(clockLight.from)} do ${fmt(clockLight.to)}`
+                  : `zdjęcie z ${fmt(cl.time)} pokazuje ${desc}, a według komunikatu ZGK [${ref}] o tej porze tarcza była podświetlona i bez rusztowania`,
+            });
+          } else okBits.push({ ref, note: `zegar na ratuszu zgadza się z komunikatem ZGK [${ref}]` });
+        }
         if (problems.length) {
           out.contradicted = true;
           out.reason = problems.map((p) => p.text).join('; ');
@@ -160,8 +267,8 @@ export function solveCase(c) {
           out.refs.push(...new Set(problems.map((p) => p.ref)));
           break;
         }
-        out.refs.push(...[weatherCard, sunset?.ref].filter(Boolean));
-        out.okNote = `niebo i chodnik na zdjęciu zgadzają się z pogodą${weatherCard ? ` [${weatherCard}]` : ''}${sunset ? ` i zachodem słońca [${sunset.ref}]` : ''}`;
+        out.refs.push(...new Set([weatherCard, sunset?.ref, ...okBits.map((x) => x.ref)].filter(Boolean)));
+        out.okNote = [`niebo i chodnik na zdjęciu zgadzają się z pogodą${weatherCard ? ` [${weatherCard}]` : ''}${sunset ? ` i zachodem słońca [${sunset.ref}]` : ''}`, ...okBits.map((x) => x.note)].join(', ');
         break;
       }
       case 'cinema': {
@@ -221,21 +328,43 @@ export function solveCase(c) {
       }
       case 'bus': {
         out.sightings.push({ place: cl.stop, from: cl.time, to: cl.time });
+        const problems = [];
+        const okBits = [];
         const bus = buses.find((b) => b.stop === cl.stop && b.line === cl.line);
-        if (!bus) { out.unknown = true; break; }
-        out.refs.push(bus.ref);
-        const deps = bus.deps[dt] || [];
-        const match = deps.find((d) => cl.time >= d && cl.time - d <= 2);
-        if (match === undefined) {
-          const last = deps[deps.length - 1];
+        if (bus) {
+          const deps = bus.deps[dt] || [];
+          const match = deps.find((d) => cl.time >= d && cl.time - d <= 2);
+          if (match === undefined) {
+            const last = deps[deps.length - 1];
+            const after = last !== undefined && cl.time > last + 2;
+            problems.push({
+              codes: after ? ['bus-after-last', 'bus-no-departure'] : ['bus-no-departure'], ref: bus.ref,
+              text: after
+                ? `bilet skasowano o ${fmt(cl.time)}, a ostatni autobus linii ${cl.line} odjechał z tego przystanku o ${fmt(last)} [${bus.ref}]`
+                : `bilet skasowano o ${fmt(cl.time)}, a o tej porze żaden autobus linii ${cl.line} nie odjeżdżał z tego przystanku [${bus.ref}]`,
+            });
+          } else okBits.push({ ref: bus.ref, note: `autobus linii ${cl.line} odjechał z przystanku o ${fmt(match)} [${bus.ref}]` });
+        }
+        const v = cl.car !== undefined ? vehicles.get(cl.car) : null;
+        if (v) {
+          if (!v.runs.some((r) => r.line === cl.line && r.from <= cl.time && cl.time <= r.to)) {
+            const at = v.runs.find((r) => r.from <= cl.time && cl.time <= r.to);
+            problems.push({
+              codes: ['bus-vehicle'], ref: v.ref,
+              text: `bilet z wozu ${cl.car} skasowano o ${fmt(cl.time)} na linii ${cl.line}, a według dyspozycji MZK [${v.ref}] ten wóz ${at ? `jeździł wtedy na linii ${at.line}` : 'nie kursował wtedy na żadnej linii (postój w zajezdni)'}`,
+            });
+          } else okBits.push({ ref: v.ref, note: `wóz ${cl.car} jeździł wtedy na linii ${cl.line} [${v.ref}]` });
+        }
+        if (problems.length) {
           out.contradicted = true;
-          out.reasonCodes.push(...(last !== undefined && cl.time > last + 2 ? ['bus-after-last', 'bus-no-departure'] : ['bus-no-departure']));
-          out.reason = last !== undefined && cl.time > last + 2
-            ? `bilet skasowano o ${fmt(cl.time)}, a ostatni autobus linii ${cl.line} odjechał z tego przystanku o ${fmt(last)} [${bus.ref}]`
-            : `bilet skasowano o ${fmt(cl.time)}, a o tej porze żaden autobus linii ${cl.line} nie odjeżdżał z tego przystanku [${bus.ref}]`;
+          out.reason = problems.map((p) => p.text).join('; ');
+          out.reasonCodes.push(...new Set(problems.flatMap((p) => p.codes)));
+          out.refs.push(...new Set(problems.map((p) => p.ref)));
           break;
         }
-        out.okNote = `autobus linii ${cl.line} odjechał z przystanku o ${fmt(match)} [${bus.ref}]`;
+        if (!okBits.length) { out.unknown = true; break; }
+        out.refs.push(...okBits.map((x) => x.ref));
+        out.okNote = okBits.map((x) => x.note).join(', ');
         break;
       }
       default:
@@ -365,7 +494,7 @@ export function solveCase(c) {
   const explain = { suspects: {}, forged: null, lies: [] };
   if (unique) {
     const f = byCard.get(unique.forged);
-    explain.forged = { card: f.card, kind: f.kind, reason: f.reason, reasonCodes: f.reasonCodes, refs: [f.card, ...f.refs], proofRefs: [...f.refs], physical: false };
+    explain.forged = { card: f.card, kind: f.kind, reason: f.reason, reasonCodes: f.reasonCodes, refs: [f.card, ...f.refs], proofRefs: [...f.refs], physical: false, ...(f.variant ? { variant: f.variant } : {}) };
     explain.lies = evaluated.filter((e) => e !== f && e.contradicted).map((e) => {
       const s0 = e.sightings[0];
       const tr = travel.get(s0.place);
