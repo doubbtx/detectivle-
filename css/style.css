@@ -672,3 +672,22 @@ button.chip { cursor: pointer; }
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation: none !important; transition: none !important; scroll-behavior: auto !important; }
 }
+
+/* Gra na żywo */
+.live-status { font-size: var(--step--1); color: var(--ink-soft); }
+.live-status.ok { color: var(--ok); }
+.name-row { display: grid; gap: 0.3rem; font-weight: 600; max-width: 20rem; }
+.name-row input, .log-form input {
+  min-height: 2.75rem; padding: 0.4rem 0.6rem; border: 1.5px solid var(--rule); border-radius: var(--radius);
+  background: var(--sheet); color: var(--ink); font: inherit; font-weight: 400;
+}
+.players { list-style: none; margin: 0; padding: 0; display: grid; gap: 0.35rem; }
+.players li { display: flex; align-items: center; gap: 0.5rem; }
+.players .dot { width: 0.6rem; height: 0.6rem; border-radius: 50%; background: var(--rule); flex: 0 0 auto; }
+.players .online .dot { background: var(--ok); }
+.players .offline { color: var(--ink-soft); }
+.log-form { display: flex; gap: 0.5rem; }
+.log-form input { flex: 1; min-width: 0; }
+.log { margin: 0; padding-left: 1.4rem; display: grid; gap: 0.25rem; font-size: var(--step--1); max-height: 12rem; overflow-y: auto; }
+.table-item { display: grid; gap: 0.3rem; }
+.on-table { color: var(--ok); cursor: default; }

@@ -8,6 +8,7 @@ import { buildEpilogue } from './epilogue.js';
 import { fmt, localTodayIso, addDays } from './time.js';
 import { store } from './storage.js';
 import { CONFIG } from './config.js';
+import { connectLive, randomClientId, liveServerUrl } from './live.js';
 
 const app = document.getElementById('app');
 
@@ -25,6 +26,8 @@ const state = {
   confirm: null,
   showAll: false,
   toast: '',
+  live: null, // { room, conn, rs, you, status, error, draft }
+  liveAvailable: false,
 };
 let progress = null;
 let timerHandle = null;
@@ -38,7 +41,8 @@ const deskName = (id) => DESK_DEFS.find((d) => d.id === id)?.name ?? id;
 const suspectById = (id) => state.c.suspects.find((s) => s.id === id);
 const cardById = (id) => state.c.cards.find((k) => k.id === id);
 const caseKey = (ref) => (ref.type === 'daily' ? ref.date : `T-${ref.code}`);
-const isCaptain = () => state.mode === 'solo' || state.seat === 1;
+const isCaptain = () => state.mode === 'solo' || state.mode === 'live' || state.seat === 1;
+const isTeamLike = () => state.mode === 'team' || state.mode === 'live';
 
 let loadToken = 0;
 
@@ -109,7 +113,8 @@ function usedMin() {
 }
 
 function budgetMin() {
-  return investigationBudget(state.c, myDesks());
+  // Na żywo budżet jest wspólny dla całej ekipy (wszystkie biurka).
+  return investigationBudget(state.c, state.mode === 'live' ? ['D', 'S', 'M', 'Z', 'R'] : myDesks());
 }
 
 /** Kara za nadgodziny. W ekipie godziny są orientacyjne (każdy ma swój budżet, a wynikiem jest czas kapitana). */
@@ -130,7 +135,12 @@ const isSealedNow = (k) => Boolean(k.action) && !progress?.unlocked?.[k.id];
 const isSealed = (k) => isSealedNow(k) && state.screen === 'game';
 
 function saveProgress() {
-  if (progress) store.set(progressKey(), progress);
+  if (!progress) return;
+  if (state.mode === 'live') {
+    if (state.live?.room) store.set(`live:${state.live.room}`, { marks: progress.marks, sus: progress.sus, notes: progress.notes });
+    return;
+  }
+  store.set(progressKey(), progress);
 }
 
 function elapsedSec() {
@@ -207,11 +217,12 @@ function shownStreak(st) {
 function recordResult(solved) {
   // Do serii liczą się tylko sprawy dnia (dzisiejsza albo wczorajsza, jeśli gra przeszła przez północ).
   if (state.ref.type !== 'daily') return;
+  const statsMode = state.mode === 'live' ? 'team' : state.mode;
   const today = localTodayIso();
   const startedDay = progress.startedAt ? localTodayIso(new Date(progress.startedAt)) : today;
   // Liczy się dzisiejsza sprawa albo wczorajsza rozpoczęta przed północą.
   if (!(state.ref.date === today || (state.ref.date === addDays(today, -1) && startedDay === state.ref.date))) return;
-  const mode = state.mode;
+  const mode = statsMode;
   const st = getStats(mode);
   if (st.lastPlayed && st.lastPlayed >= state.ref.date) return;
   st.played += 1;
@@ -415,7 +426,8 @@ function renderHome() {
     <section class="case-file">
       ${caseHeading()}
       <div class="actions">
-        <button class="btn btn-primary" data-act="mode" data-mode="team">Graj z ekipą <small>2–5 osób</small></button>
+        ${state.liveAvailable ? '<button class="btn btn-primary" data-act="live-create">Graj z ekipą na żywo <small>wspólny pokój</small></button>' : ''}
+        <button class="btn${state.liveAvailable ? '' : ' btn-primary'}" data-act="mode" data-mode="team">${state.liveAvailable ? 'Z ekipą bez serwera' : 'Graj z ekipą'} <small>2–5 osób</small></button>
         <button class="btn" data-act="mode" data-mode="solo">Graj solo</button>
       </div>
       ${lines ? `<ul class="played">${lines}</ul>` : ''}
@@ -449,7 +461,8 @@ function renderIntro() {
     <section class="case-file">
       ${caseHeading()}
       <div class="actions">
-        <button class="btn btn-primary" data-act="mode" data-mode="team">Graj z ekipą <small>2–5 osób</small></button>
+        ${state.liveAvailable ? '<button class="btn btn-primary" data-act="live-create">Graj z ekipą na żywo <small>wspólny pokój</small></button>' : ''}
+        <button class="btn${state.liveAvailable ? '' : ' btn-primary'}" data-act="mode" data-mode="team">${state.liveAvailable ? 'Z ekipą bez serwera' : 'Graj z ekipą'} <small>2–5 osób</small></button>
         <button class="btn" data-act="mode" data-mode="solo">Graj solo</button>
       </div>
       ${[playedLine('solo'), playedLine('team')].join('') ? `<ul class="played">${playedLine('solo')}${playedLine('team')}</ul>` : ''}
@@ -548,7 +561,7 @@ function renderSuspects() {
 
 function renderAkta() {
   const c = state.c;
-  const team = state.mode === 'team';
+  const team = isTeamLike();
   return `
   <section class="akta" aria-label="Akta sprawy">
     <div class="akta-head">
@@ -560,7 +573,7 @@ function renderAkta() {
         <div><span class="w-label">zamknięcie</span><span class="w-time">${fmt(c.window.to)}</span></div>
       </div>
       <p class="w-note">Sprawca był w środku przez cały ten czas (${c.window.to - c.window.from} min).</p>
-      <p class="seal-note">Część kart urzędowych jest zapieczętowana. Zlecasz czynności śledcze, np. pobranie rozkładu albo zabezpieczenie nagrania. Masz <span class="nw">${fmtHM(budgetMin())} h</span> śledztwa. ${state.mode === 'team' ? 'W ekipie każdy ma własny budżet, a nadgodziny są tylko informacją.' : `Każde rozpoczęte pół godziny nadgodzin to +${fmtPenalty(OVERTIME_PENALTY)} do czasu rozwiązania.`}</p>
+      <p class="seal-note">Część kart urzędowych jest zapieczętowana. Zlecasz czynności śledcze, np. pobranie rozkładu albo zabezpieczenie nagrania. Masz <span class="nw">${fmtHM(budgetMin())} h</span> śledztwa. ${state.mode === 'team' ? 'W ekipie każdy ma własny budżet, a nadgodziny są tylko informacją.' : `${state.mode === 'live' ? 'Budżet jest wspólny dla całej ekipy. ' : ''}Każde rozpoczęte pół godziny nadgodzin to +${fmtPenalty(OVERTIME_PENALTY)} do czasu rozwiązania.`}</p>
       ${c.innocentLie ? '<p class="lie-badge"><b>Uwaga: w tej sprawie kłamią dwie osoby.</b> Tylko jedno kłamstwo daje alibi na czas kradzieży. Drugie skrywa coś innego.</p>' : ''}
     </div>
     <h3 class="sec-label">Podejrzani i ich alibi</h3>
@@ -613,6 +626,7 @@ function renderCard(k, opts = {}) {
     <footer class="card-foot">
       <button class="link-btn" data-act="mark-card" data-id="${k.id}" aria-pressed="${Boolean(marked)}">${marked ? '★ Zaznaczona' : '☆ Zaznacz'}</button>
       <button class="link-btn" data-act="copy-card" data-id="${k.id}">Kopiuj</button>
+      ${state.mode === 'live' ? (onTable(k.id) ? `<span class="link-btn on-table">Na stole ✓</span>` : `<button class="link-btn" data-act="table" data-id="${k.id}">Połóż na stół</button>`) : ''}
     </footer>`}
   </article>`;
 }
@@ -650,7 +664,9 @@ function renderNotes() {
 function renderTopbar() {
   const c = state.c;
   const label = c.kind === 'daily' ? `Sprawa nr ${c.number} · ${c.fingerprint}` : `Trening ${c.code}`;
-  const who = state.mode === 'solo' ? 'solo' : `gracz ${state.seat} z ${state.teamSize}`;
+  const who = state.mode === 'solo' ? 'solo' : state.mode === 'live'
+    ? `na żywo · gracz ${state.seat} z ${state.teamSize} · ${state.live?.rs?.players.filter((p) => p.online).length ?? 0} online${state.live?.status === 'open' ? '' : ' · łączenie…'}`
+    : `gracz ${state.seat} z ${state.teamSize}`;
   const left = CONFIG.maxAttempts - progress.attempts.length;
   return `
   <div class="topbar">
@@ -669,11 +685,11 @@ function renderTopbar() {
 }
 
 function renderTabs() {
-  const tabs = [{ id: 'akta', label: 'Akta' }, ...myDesks().map((d) => ({ id: d, label: deskName(d) })), { id: 'notes', label: 'Notatki' }];
+  const tabs = [{ id: 'akta', label: 'Akta' }, ...myDesks().map((d) => ({ id: d, label: deskName(d) })), ...(state.mode === 'live' ? [{ id: 'table', label: `Stół ${state.live?.rs?.table.length ?? 0}` }] : []), { id: 'notes', label: 'Notatki' }];
   return `
   <nav class="tabs" aria-label="Biurka">
     <div class="tabs-inner">
-      ${tabs.map((t) => `<button class="tab${state.tab === t.id ? ' on' : ''}${t.id === 'akta' ? ' tab-akta' : ''}" data-act="tab" data-tab="${t.id}" aria-current="${state.tab === t.id ? 'page' : 'false'}">${esc(t.label)}${['akta', 'notes'].includes(t.id) ? '' : ` <span class="tab-n">${state.c.cards.filter((k) => k.desk === t.id).length}</span>`}</button>`).join('')}
+      ${tabs.map((t) => `<button class="tab${state.tab === t.id ? ' on' : ''}${t.id === 'akta' ? ' tab-akta' : ''}" data-act="tab" data-tab="${t.id}" aria-current="${state.tab === t.id ? 'page' : 'false'}">${esc(t.label)}${['akta', 'notes', 'table'].includes(t.id) ? '' : ` <span class="tab-n">${state.c.cards.filter((k) => k.desk === t.id).length}</span>`}</button>`).join('')}
     </div>
   </nav>`;
 }
@@ -697,7 +713,7 @@ function renderGame() {
   const mine = myDesks();
   let right = state.tab;
   if (right === 'akta') right = mine[0];
-  const rightHtml = right === 'notes' ? renderNotes() : renderDesk(right);
+  const rightHtml = right === 'notes' ? renderNotes() : right === 'table' ? renderTable() : renderDesk(right);
   return `
   <div class="sticky-head">${renderTopbar()}${renderTabs()}</div>
   <div class="game view-${state.tab === 'akta' ? 'akta' : 'other'}">
@@ -719,13 +735,13 @@ function hintTexts() {
     const it = items.find((i) => i.type === 'neutral');
     out.push(`${suspectById(id).full} ma alibi potwierdzone przez niezależne źródło. Zobacz karty ${it.refs.slice(0, -1).join(', ')} i ${it.refs[it.refs.length - 1]}.`);
   } else {
-    out.push(`${state.mode === 'team' ? 'Zacznijcie' : 'Zacznij'} od czasów dotarcia na biurku „Mapa i rozkłady”.`);
+    out.push(`${isTeamLike() ? 'Zacznijcie' : 'Zacznij'} od czasów dotarcia na biurku „Mapa i rozkłady”.`);
   }
   const forged = sol.explain.forged;
   const refDesk = cardById(forged.refs.find((r) => r !== forged.card))?.desk;
-  out.push(`Fałszywkę obala karta z biurka „${deskName(refDesk)}”.${state.mode === 'team' ? ` Ma je gracz ${seatOfDesk(refDesk)}.` : ''}`);
+  out.push(`Fałszywkę obala karta z biurka „${deskName(refDesk)}”.${isTeamLike() ? ` Ma je gracz ${seatOfDesk(refDesk)}.` : ''}`);
   const keyRef = forged.refs.find((r) => r !== forged.card);
-  out.push(`${state.mode === 'team' ? 'Porównajcie' : 'Porównaj'} dokładnie kartę ${keyRef} z dowodami dostarczonymi przez podejrzanych.`);
+  out.push(`${isTeamLike() ? 'Porównajcie' : 'Porównaj'} dokładnie kartę ${keyRef} z dowodami dostarczonymi przez podejrzanych.`);
   return out;
 }
 
@@ -770,7 +786,7 @@ function renderModal() {
       </fieldset>
       <fieldset class="pick">
         <legend>2. Karta, która go obala</legend>
-        ${state.mode === 'team' ? '<p class="muted small">Kody kart z innych biurek podają ci pozostali gracze.</p>' : ''}
+        ${isTeamLike() ? '<p class="muted small">Kody kart z innych biurek podają ci pozostali gracze (albo kładą je na stół).</p>' : ''}
         <div class="proof-grid">
           ${DESK_DEFS.map((d) => {
             const ids = state.c.cards.filter((k) => k.desk === d.id && k.kind !== 'supplied');
@@ -837,7 +853,7 @@ function reportQuality(a) {
   const innocents = state.c.suspects.filter((x) => x.id !== state.c.solution.culprit);
   const alibiCorrect = innocents.filter((x) => a.alibis[x.id] && alibiCards(x.id).has(a.alibis[x.id])).length;
   const reasonOk = f.reasonCodes.includes(a.reason);
-  const firstTry = progress.attempts.length === 1;
+  const firstTry = state.mode === 'live' ? progress.attempts.length === 0 : progress.attempts.length === 1;
   const stars = Number(reasonOk) + Number(alibiCorrect === innocents.length) + Number(firstTry);
   return { reasonOk, alibiCorrect, alibiTotal: innocents.length, firstTry, stars };
 }
@@ -850,6 +866,17 @@ function submitAccusation() {
   const sol = state.c.solution;
   const forgedOk = a.forged === sol.forged;
   const ok = [forgedOk, forgedOk ? proofSet().has(a.proof) : null];
+  if (state.mode === 'live') {
+    const report = ok[0] && ok[1] ? reportQuality(a) : null;
+    if (!state.live.conn.send({ t: 'accuse', forged: a.forged, proof: a.proof, reason: a.reason, alibis: a.alibis, ok, report })) {
+      showToast('Brak połączenia z serwerem. Spróbuj za chwilę.');
+      return;
+    }
+    a.last = ok;
+    if (!(ok[0] && ok[1])) a.proof = null;
+    render();
+    return;
+  }
   progress.attempts.push({ forged: a.forged, proof: a.proof, reason: a.reason, alibis: { ...a.alibis }, ok });
   a.last = ok;
   if (ok[0] && ok[1]) {
@@ -871,7 +898,7 @@ const starsText = (n) => `${'★'.repeat(n)}${'☆'.repeat(3 - n)}`;
 function shareText() {
   const c = state.c;
   const head = c.kind === 'daily' ? `Fałszywe Alibi nr ${c.number}` : `Fałszywe Alibi · trening ${c.code}`;
-  const mode = state.mode === 'solo' ? 'solo' : `ekipa · ${state.teamSize} ${state.teamSize === 5 ? 'osób' : 'osoby'}`;
+  const mode = state.mode === 'solo' ? 'solo' : `ekipa${state.mode === 'live' ? ' na żywo' : ''} · ${state.teamSize} ${state.teamSize === 5 ? 'osób' : 'osoby'}`;
   const rows = progress.attempts.map((a) => a.ok.map((x) => (x === null ? '⬜' : x ? '🟩' : '🟥')).join('')).join('\n');
   const tail = progress.status === 'solved'
     ? `⏱ ${fmtClock(elapsedSec())} · 💡 ${progress.hints} · 🔎 ${fmtHM(usedMin())}/${fmtHM(budgetMin())} h${progress.report ? ` · raport ${starsText(progress.report.stars)}` : ''}`
@@ -980,6 +1007,224 @@ function renderResult() {
 }
 
 // ---------------------------------------------------------------------------
+// Gra na żywo (pokój na serwerze)
+
+const onTable = (id) => Boolean(state.live?.rs?.table.some((t) => t.card === id));
+const playerName = (id) => state.live?.rs?.players.find((p) => p.id === id)?.name ?? 'ktoś';
+
+function roomLink() {
+  return `${window.location.origin}${window.location.pathname}#pokoj-${state.live.room}`;
+}
+
+function clientId() {
+  let id = store.get('clientId');
+  if (!id) {
+    id = randomClientId();
+    store.set('clientId', id);
+  }
+  return id;
+}
+
+function closeLive() {
+  state.live?.conn?.close();
+  state.live = null;
+}
+
+function createRoom() {
+  const alphabet = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+  let code = '';
+  for (let i = 0; i < 5; i++) code += alphabet[Math.floor(Math.random() * alphabet.length)];
+  openRoom(code, true);
+  try {
+    window.history.replaceState(null, '', `${window.location.pathname}${window.location.search}#pokoj-${code}`);
+  } catch {
+    window.location.hash = `pokoj-${code}`;
+  }
+}
+
+function openRoom(code, create) {
+  if (state.live?.room === code) return;
+  const createRef = create && state.ref ? state.ref : null;
+  const createFp = create && state.c ? state.c.fingerprint : null;
+  closeLive();
+  state.mode = 'live';
+  state.live = { room: code, conn: null, rs: null, you: null, status: 'connecting', error: '', draft: '' };
+  const live = state.live;
+  live.conn = connectLive({
+    room: code,
+    hello: () => ({ t: 'hello', clientId: clientId(), name: store.get('name') || '', caseRef: createRef, fingerprint: createFp }),
+    onState: (msg) => onLiveState(live, msg),
+    onError: (m) => {
+      if (state.live !== live) return;
+      live.error = m;
+      showToast(m);
+      render();
+    },
+    onStatus: (st) => {
+      if (state.live !== live) return;
+      live.status = st;
+      if (state.screen === 'live-lobby' || state.screen === 'game') render();
+    },
+  });
+  go('live-lobby');
+}
+
+function leaveRoom() {
+  closeLive();
+  state.mode = 'solo';
+  openDaily();
+}
+
+async function onLiveState(live, msg) {
+  if (state.live !== live) return;
+  const prev = live.rs;
+  live.rs = msg.state;
+  live.you = msg.you;
+  live.error = '';
+  const rs = live.rs;
+  if (rs.caseRef && (!state.ref || caseKey(state.ref) !== caseKey(rs.caseRef))) {
+    if (!(await loadCase(rs.caseRef)) || state.live !== live) return;
+  }
+  notifyOthers(prev, rs, live.you);
+  syncLiveProgress();
+  const me = rs.players.find((p) => p.id === live.you);
+  if ((rs.status === 'solved' || rs.status === 'failed') && state.screen !== 'result') {
+    if (prev && prev.status === 'playing') recordResult(rs.status === 'solved');
+    state.focusResult = true;
+    go('result');
+    return;
+  }
+  if (rs.status === 'playing' && me?.seat && state.screen !== 'game' && state.screen !== 'result') {
+    go('game');
+    return;
+  }
+  render();
+}
+
+function notifyOthers(prev, rs, you) {
+  if (!prev) return;
+  const fresh = rs.table.filter((t) => t.by !== you && !prev.table.some((x) => x.card === t.card));
+  if (fresh.length) { showToast(`${playerName(fresh[0].by)} kładzie na stół kartę ${fresh[0].card}.`); return; }
+  const logs = rs.log.slice(prev.log.length).filter((l) => l.by && l.by !== you);
+  if (logs.length) { showToast(`${playerName(logs[0].by)}: ${logs[0].text}`); return; }
+  const unl = Object.entries(rs.unlocked).filter(([k, by]) => by !== you && !prev.unlocked[k]);
+  if (unl.length) { showToast(`${playerName(unl[0][1])} zleca czynność: karta ${unl[0][0]}.`); return; }
+  if (rs.hints > prev.hints) { showToast('Ekipa wzięła podpowiedź (+2:00).'); return; }
+  if (rs.attempts.length > prev.attempts.length && rs.status === 'playing') showToast(`${playerName(rs.attempts.at(-1).by)} składa raport: pudło (+5:00).`);
+}
+
+/** Przepisuje stan pokoju do lokalnego obiektu `progress`, z którego korzysta reszta interfejsu. */
+function syncLiveProgress() {
+  const live = state.live;
+  const rs = live.rs;
+  const me = rs.players.find((p) => p.id === live.you);
+  if (rs.teamSize) state.teamSize = rs.teamSize;
+  state.seat = me?.seat || 1;
+  const local = store.get(`live:${rs.code}`, { marks: {}, sus: {}, notes: '' });
+  const off = live.conn?.offset || 0;
+  progress = {
+    marks: local.marks || {},
+    sus: local.sus || {},
+    notes: local.notes || '',
+    startedAt: rs.startedAt != null ? rs.startedAt - off : null,
+    endedAt: rs.endedAt != null ? rs.endedAt - off : null,
+    penalty: rs.penalty,
+    hints: rs.hints,
+    attempts: rs.attempts,
+    status: rs.status === 'lobby' ? 'playing' : rs.status,
+    unlocked: Object.fromEntries(Object.keys(rs.unlocked).map((k) => [k, true])),
+    report: rs.report,
+    teamSize: state.teamSize,
+    seat: state.seat,
+  };
+}
+
+function renderLobby() {
+  const live = state.live;
+  const rs = live?.rs;
+  const c = state.c;
+  const online = rs ? rs.players.filter((p) => p.online) : [];
+  const statusText = { connecting: 'Łączenie z serwerem…', open: 'Połączono', closed: 'Rozłączono. Próbuję połączyć ponownie…' }[live?.status || 'connecting'];
+  const fpMismatch = rs?.fingerprint && c && c.fingerprint !== rs.fingerprint;
+  const me = rs?.players.find((p) => p.id === live.you);
+  return `
+  <div class="page">
+    <header class="masthead masthead-row">
+      <button class="btn btn-ghost" data-act="live-leave">← Wyjdź z pokoju</button>
+      ${renderBrand(true)}
+    </header>
+    <section class="setup">
+      <h1 class="setup-title">Pokój <span class="code">${esc(live?.room || '')}</span></h1>
+      <p class="live-status ${live?.status === 'open' ? 'ok' : ''}" role="status">${esc(statusText)}</p>
+      ${live?.error ? `<p class="warn">${esc(live.error)}</p>` : ''}
+      ${rs && c ? `<p class="fingerprint">Sprawa: <b>${esc(c.kind === 'daily' ? `nr ${c.number}` : `trening ${c.code}`)}</b> · ${esc(c.title)} · odcisk <b class="code">${esc(c.fingerprint)}</b></p>` : ''}
+      ${fpMismatch ? '<p class="warn">Masz inną wersję tej sprawy niż gospodarz pokoju. Odśwież stronę, a jeśli to nie pomoże, utwórzcie nowy pokój.</p>' : ''}
+      <label class="name-row" for="live-name">Twoje imię
+        <input id="live-name" data-act="live-name" maxlength="24" value="${esc(store.get('name') || me?.name || '')}" placeholder="np. Ania" autocomplete="nickname">
+      </label>
+      <div class="invite">
+        <label for="room-link">Link do pokoju dla ekipy</label>
+        <textarea id="room-link" readonly rows="2">${esc(live ? roomLink() : '')}</textarea>
+        <button class="btn" data-act="copy-room">Kopiuj link</button>
+      </div>
+      <h2 class="sec-label">W pokoju (${online.length}/5)</h2>
+      <ul class="players">
+        ${rs ? rs.players.map((p) => `<li class="${p.online ? 'online' : 'offline'}"><span class="dot" aria-hidden="true"></span>${esc(p.name)}${p.id === live.you ? ' <span class="muted">(ty)</span>' : ''}${p.id === rs.hostId ? ' <span class="muted">· gospodarz</span>' : ''}</li>`).join('') : '<li class="muted">Czekam na serwer…</li>'}
+      </ul>
+      <ul class="setup-notes">
+        <li>Każdy dostaje inne biurka (w kolejności wejścia do pokoju). Zegar, podpowiedzi, próby i godziny śledztwa są wspólne.</li>
+        <li>Karty możecie kłaść na wspólny stół, a ustalenia zapisywać na tablicy. Raport może złożyć każdy.</li>
+      </ul>
+      <button class="btn btn-primary btn-wide" data-act="live-start" ${online.length >= 2 && rs?.status === 'lobby' ? '' : 'disabled'}>Zaczynamy${online.length < 2 ? ' (potrzeba 2 osób)' : ''}</button>
+    </section>
+  </div>`;
+}
+
+function renderTable() {
+  const rs = state.live?.rs;
+  if (!rs) return '';
+  const cards = rs.table.map((t) => cardById(t.card)).filter(Boolean);
+  return `
+  <section class="desk" aria-label="Wspólny stół">
+    <header class="desk-head">
+      <h2>Wspólny stół</h2>
+      <p class="muted small">Karty położone przez ekipę widzą wszyscy.</p>
+    </header>
+    <form class="log-form" data-act="live-log">
+      <label class="sr-only" for="live-draft">Ustalenie dla ekipy</label>
+      <input id="live-draft" data-act="live-draft" maxlength="280" value="${esc(state.live.draft || '')}" placeholder="Ustalenie, np. Halina czysta: S6 + M7" autocomplete="off">
+      <button class="btn btn-small" type="submit">Zapisz</button>
+    </form>
+    <ol class="log" reversed>
+      ${rs.log.slice().reverse().map((l) => `<li><b>${l.by ? esc(playerName(l.by)) : 'System'}:</b> ${esc(l.text)}</li>`).join('')}
+    </ol>
+    <div class="cards">
+      ${cards.length ? cards.map((k) => {
+        const t = rs.table.find((x) => x.card === k.id);
+        const sealed = isSealedNow(k);
+        return `<div class="table-item"><p class="small muted">${esc(playerName(t.by))}${t.by === state.live.you ? ' (ty)' : ''} kładzie · <button class="link-btn" data-act="untable" data-id="${k.id}">Zdejmij</button></p>${sealed ? `<article class="card card-sealed"><header class="card-head"><span class="card-id">${k.id}</span><div class="card-titles"><h4>${esc(k.title)}</h4></div><span class="card-kind">zapieczętowane</span></header><p class="seal-action">Najpierw ktoś musi zlecić: ${esc(k.action.label)}</p></article>` : renderCard(k, { noActions: true })}</div>`;
+      }).join('') : '<p class="muted small">Na stole nic jeszcze nie leży. Użyj „Połóż na stół” pod kartą.</p>'}
+    </div>
+  </section>`;
+}
+
+/** Czy da się grać na żywo: adres w config.js albo serwer `npm run live` pod tym samym adresem. */
+async function detectLive() {
+  if (CONFIG.liveServer) {
+    state.liveAvailable = true;
+    return;
+  }
+  if (!liveServerUrl()) return;
+  try {
+    const r = await fetch('health', { cache: 'no-store' });
+    state.liveAvailable = r.ok && (await r.text()).trim() === 'ok';
+  } catch {
+    state.liveAvailable = false;
+  }
+  if (state.liveAvailable && state.c && state.mode !== 'live' && (state.screen === 'home' || state.screen === 'intro')) render();
+}
+
+// ---------------------------------------------------------------------------
 // Render i zdarzenia
 
 let lastModal = null;
@@ -1009,6 +1254,7 @@ function render() {
     case 'intro': html = renderIntro(); break;
     case 'setup': html = renderSetup(); break;
     case 'game': html = renderGame(); break;
+    case 'live-lobby': html = renderLobby(); break;
     case 'result': html = renderResult(); break;
     default: html = renderHome();
   }
@@ -1080,6 +1326,7 @@ app.addEventListener('click', (e) => {
       render();
       break;
     case 'leave':
+      if (state.mode === 'live') { leaveRoom(); break; }
       saveProgress();
       if (state.ref.type === 'daily') goHome();
       else openDaily();
@@ -1115,10 +1362,28 @@ app.addEventListener('click', (e) => {
       }
       state.confirm = null;
       progress.unlocked = { ...(progress.unlocked || {}), [k.id]: true };
-      saveProgress();
+      if (state.mode === 'live') {
+        if (!state.live.conn.send({ t: 'unlock', card: k.id })) showToast('Brak połączenia z serwerem.');
+      } else saveProgress();
       render();
       break;
     }
+    case 'table':
+      if (state.live?.conn.send({ t: 'table', card: target.dataset.id })) showToast(`Karta ${target.dataset.id} leży na stole.`);
+      break;
+    case 'untable':
+      state.live?.conn.send({ t: 'untable', card: target.dataset.id });
+      break;
+    case 'live-create': createRoom(); break;
+    case 'live-start':
+      if (!state.live?.conn.send({ t: 'start' })) showToast('Brak połączenia z serwerem.');
+      break;
+    case 'copy-room':
+      copyText(roomLink(), 'Skopiowano link do pokoju');
+      break;
+    case 'live-leave':
+      leaveRoom();
+      break;
     case 'copy-card': copyText(cardPlainText(cardById(target.dataset.id)), `Skopiowano kartę ${target.dataset.id}`); break;
     case 'open-hints': state.modal = 'hints'; state.confirm = null; render(); break;
     case 'open-accuse': state.modal = 'accuse'; render(); break;
@@ -1131,6 +1396,11 @@ app.addEventListener('click', (e) => {
         break;
       }
       state.confirm = null;
+      if (state.mode === 'live') {
+        if (!state.live.conn.send({ t: 'hint' })) showToast('Brak połączenia z serwerem.');
+        render();
+        break;
+      }
       progress.hints += 1;
       progress.penalty += CONFIG.hintPenalty;
       saveProgress();
@@ -1167,6 +1437,14 @@ app.addEventListener('click', (e) => {
 });
 
 app.addEventListener('submit', (e) => {
+  const logForm = e.target.closest('[data-act="live-log"]');
+  if (logForm) {
+    e.preventDefault();
+    const text = (state.live?.draft || '').trim();
+    if (text && state.live.conn.send({ t: 'log', text })) state.live.draft = '';
+    render();
+    return;
+  }
   const form = e.target.closest('[data-act="practice-code"]');
   if (!form) return;
   e.preventDefault();
@@ -1181,6 +1459,12 @@ app.addEventListener('submit', (e) => {
 
 app.addEventListener('change', (e) => {
   const el = e.target;
+  if (el.dataset?.act === 'live-name') {
+    const name = el.value.trim().slice(0, 24);
+    store.set('name', name);
+    state.live?.conn.send({ t: 'name', name });
+    return;
+  }
   if (el.dataset?.act === 'alibi') {
     state.accuse.alibis[el.dataset.id] = el.value;
     render();
@@ -1188,6 +1472,7 @@ app.addEventListener('change', (e) => {
 });
 
 app.addEventListener('input', (e) => {
+  if (e.target.dataset.act === 'live-draft' && state.live) state.live.draft = e.target.value;
   if (e.target.dataset.act === 'notes' && progress) {
     progress.notes = e.target.value;
     saveProgress();
@@ -1232,6 +1517,11 @@ function routeFromHash(resume = false) {
     openPractice(m[1].toUpperCase(), { resume });
     return true;
   }
+  const r = window.location.hash.match(/^#pokoj-([A-Za-z2-9]{4,8})$/);
+  if (r) {
+    openRoom(r[1].toUpperCase(), false);
+    return true;
+  }
   // Link z datą (np. z zaproszenia wysłanego tuż przed północą) daje wszystkim tę samą sprawę dnia.
   const d = window.location.hash.match(/^#dzien-(\d{4}-\d{2}-\d{2})$/);
   if (d) {
@@ -1253,6 +1543,7 @@ window.addEventListener('hashchange', () => {
   if (!routeFromHash() && !window.location.hash && (state.ref?.type === 'practice' || isArchive())) openDaily();
 });
 
+detectLive();
 if (!routeFromHash(true)) openDaily({ resume: true });
 
 // Do testów w konsoli przeglądarki.
