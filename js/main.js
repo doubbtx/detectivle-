@@ -724,19 +724,18 @@ function renderCard(k, opts = {}) {
     const extra = overtimeSec(after) - overtimeSec();
     const overBudget = after > budgetMin();
     const confirming = state.confirm === `unlock:${k.id}`;
+    // Koperta jako mały kafelek: tytuł, co trzeba zlecić i koszt. Kafelki stoją w siatce pod jawnymi kartami.
+    const label = /^(Przejrzyj dokument|Zażądaj kopii dokumentu) „/.test(k.action.label) ? '' : k.action.label;
     return `
-  <article class="card card-sealed" id="card-${k.id}" data-card="${k.id}">
-    <header class="card-head">
+  <article class="card card-sealed env-tile${confirming ? ' confirming' : ''}" id="card-${k.id}" data-card="${k.id}">
+    <header class="env-head">
       <span class="card-id">${k.id}</span>
-      <div class="card-titles">
-        <h4><span class="card-ico">${icon(cardIcon(k))}</span>${esc(k.title)}</h4>
-        ${k.sub ? `<p class="card-sub">${esc(k.sub)}</p>` : ''}
-      </div>
       <span class="env-cost" aria-label="koszt ${k.action.cost} min">−${fmtHM(k.action.cost)}</span>
     </header>
-    <span class="env-seal" aria-hidden="true">${icon('lock')}</span>
-    ${/^(Przejrzyj dokument|Zażądaj kopii dokumentu) „/.test(k.action.label) ? '' : `<p class="seal-action">${esc(k.action.label)}</p>`}
-    <button class="btn btn-small${confirming ? ' btn-primary' : ''}" data-act="unlock" data-id="${k.id}">${confirming ? `Nadgodziny: +${fmtPenalty(extra)} do czasu rozwiązania. Zlecić?` : `Otwórz kopertę${overBudget ? ' (ponad budżet)' : ''}`}</button>
+    <h4 class="env-title"><span class="card-ico">${icon(cardIcon(k))}</span>${esc(k.title)}</h4>
+    ${k.sub ? `<p class="card-sub">${esc(k.sub)}</p>` : ''}
+    ${label ? `<p class="seal-action" title="${esc(label)}">${esc(label)}</p>` : ''}
+    <button class="btn btn-small env-open${confirming ? ' btn-primary' : ''}" data-act="unlock" data-id="${k.id}">${confirming ? `Nadgodziny +${fmtPenalty(extra)}. Zlecić?` : `${icon('lock')} Otwórz${overBudget ? ' (ponad budżet)' : ''}`}</button>
   </article>`;
   }
   const look = cardLook(k);
@@ -746,13 +745,13 @@ function renderCard(k, opts = {}) {
     <header class="card-head">
       <span class="card-id">${k.id}</span>
       <div class="card-titles">
-        <h4>${look === 'witness' ? '' : `<span class="card-ico">${icon(cardIcon(k))}</span>`}${esc(k.title)}</h4>
+        <h4>${look === 'witness' ? `${visual}<span class="sr-only">Zeznanie: </span>${esc(k.title.replace(/^Zeznanie:\s*/, ''))}` : `<span class="card-ico">${icon(cardIcon(k))}</span>${esc(k.title)}`}</h4>
         ${k.sub ? `<p class="card-sub">${esc(k.sub)}</p>` : ''}
       </div>
       ${marked ? '<span class="card-star" aria-label="zaznaczona">★</span>' : ''}
     </header>
     ${by ? `<p class="stamp" title="${by.f ? 'Dostarczyła' : 'Dostarczył'}: ${esc(by.full)}">${portrait(by.full, 'portrait portrait-stamp')}<span class="sr-only">${by.f ? 'Dostarczyła' : 'Dostarczył'}: </span>${esc(by.full)}</p>` : ''}
-    ${look === 'witness' ? `<div class="wit-row">${visual}<div class="card-lines wit-bubble">${k.lines.map((l) => `<p>${esc(l)}</p>`).join('')}</div></div>` : visual}
+    ${look === 'witness' ? `<div class="card-lines wit-bubble">${k.lines.map((l) => `<p>${esc(l)}</p>`).join('')}</div>` : visual}
     ${look === 'witness' ? '' : (() => {
       const linesHtml = `<div class="card-lines">${k.lines.map((l) => `<p>${esc(l).replace(/(\d)–(\d)/g, '$1\u2060–\u2060$2')}</p>`).join('')}</div>`;
       // Bilet: same linie karty na kartoniku z perforacją (bez powtarzania danych w osobnym obrazku).
@@ -765,7 +764,7 @@ function renderCard(k, opts = {}) {
       ${isPinnable(k) && k.kind !== 'supplied' && state.c.difficulty > 2 ? `<button class="link-btn${(progress.pins || []).includes(k.id) ? ' on-board' : ''}" data-act="pin-card" data-id="${k.id}" aria-pressed="${(progress.pins || []).includes(k.id)}">${(progress.pins || []).includes(k.id) ? 'Na tablicy ✓' : 'Na tablicę'}</button>` : ''}
       <button class="link-btn${(state.compare || []).includes(k.id) ? ' on-board' : ''}" data-act="compare-card" data-id="${k.id}" aria-pressed="${(state.compare || []).includes(k.id)}">${(state.compare || []).includes(k.id) ? 'Porównuję ✓' : 'Porównaj'}</button>
       <button class="link-btn" data-act="aside-card" data-id="${k.id}">Odłóż</button>
-      <button class="link-btn" data-act="copy-card" data-id="${k.id}">Kopiuj</button>
+      ${state.mode === 'solo' ? '' : `<button class="link-btn" data-act="copy-card" data-id="${k.id}">Kopiuj</button>`}
       ${state.mode === 'live' ? (onTable(k.id) ? `<span class="link-btn on-table">Na stole ✓</span>` : `<button class="link-btn" data-act="table" data-id="${k.id}">Połóż na stół</button>`) : ''}
     </footer>`}
   </article>`;
@@ -847,7 +846,7 @@ function renderPlan() {
 
 function renderBoardTab() {
   const view = state.boardView === 'plan' && hasMapTab() ? 'plan' : state.boardView === 'notes' ? 'notes' : 'time';
-  const seg = `<div class="seg" role="tablist" aria-label="Widok tablicy">
+  const seg = `<div class="seg seg-tabs" role="tablist" aria-label="Widok tablicy">
     <button class="seg-btn${view === 'time' ? ' on' : ''}" data-act="board-view" data-id="time" role="tab" aria-selected="${view === 'time'}">${icon('clock')} Oś czasu</button>
     ${hasMapTab() ? `<button class="seg-btn${view === 'plan' ? ' on' : ''}" data-act="board-view" data-id="plan" role="tab" aria-selected="${view === 'plan'}">${icon('map')} Plan miasta</button>` : ''}
     <button class="seg-btn${view === 'notes' ? ' on' : ''}" data-act="board-view" data-id="notes" role="tab" aria-selected="${view === 'notes'}">${icon('file-text')} Notatki</button>
@@ -878,7 +877,7 @@ function renderNotes() {
 
 function renderTopbar() {
   const c = state.c;
-  const label = c.kind === 'daily' ? `Sprawa nr ${c.number} · ${c.fingerprint}` : `Trening ${c.code}`;
+  const label = c.kind === 'daily' ? `Sprawa nr ${c.number}<span class="tb-fp"> · ${esc(c.fingerprint)}</span>` : `Trening ${esc(c.code)}`;
   const who = state.mode === 'solo' ? 'solo' : state.mode === 'live'
     ? `na żywo · gracz ${state.seat} z ${state.teamSize} · ${state.live?.rs?.players.filter((p) => p.online).length ?? 0} online${state.live?.status === 'open' ? '' : state.live?.status === 'stopped' ? ' · rozłączono' : ' · łączenie…'}`
     : `gracz ${state.seat} z ${state.teamSize}`;
@@ -887,7 +886,7 @@ function renderTopbar() {
   <div class="topbar">
     <div class="topbar-inner">
       <button class="btn btn-ghost btn-icon" data-act="leave" aria-label="Wyjdź do strony głównej">←</button>
-      <div class="tb-title"><b>${esc(label)}</b><span><span class="tb-mode">${esc(who)} · </span>${state.mode === 'live' && state.live?.status !== 'open' ? `<span class="tb-live">${state.live?.status === 'stopped' ? 'rozłączono' : 'łączenie…'} · </span>` : ''}<span class="tb-budget">śledztwo <span class="nw${usedMin() > budgetMin() ? ' over' : ''}">${fmtHM(usedMin())}/${fmtHM(budgetMin())} h</span></span></span></div>
+      <div class="tb-title"><b>${label}</b><span><span class="tb-mode">${esc(who)} · </span>${state.mode === 'live' && state.live?.status !== 'open' ? `<span class="tb-live">${state.live?.status === 'stopped' ? 'rozłączono' : 'łączenie…'} · </span>` : ''}<span class="tb-budget">śledztwo <span class="nw${usedMin() > budgetMin() ? ' over' : ''}">${fmtHM(usedMin())}/${fmtHM(budgetMin())} h</span></span></span></div>
       <div class="tb-clock" aria-live="off"><span id="clock">${fmtClock(elapsedSec())}</span>${totalPenalty() ? `<small>w tym +${fmtPenalty(totalPenalty())}</small>` : ''}</div>
       <div class="tb-actions">
         ${state.mode === 'team' && !isCaptain() ? '' : `<button class="btn btn-small" data-act="open-hints" aria-label="Podpowiedź, użyto ${progress.hints} z 3"><span class="tb-long">Podpowiedź</span><span class="tb-short" aria-hidden="true">?</span> <span class="pill">${progress.hints}/3</span></button>`}
@@ -953,9 +952,13 @@ function renderEvidence() {
   const marked = own.filter((k) => progress.marks?.[k.id]);
   const chip = (id, label, n) => `<button class="fchip-btn${f === id ? ' on' : ''}" data-act="desk-filter" data-id="${id}" aria-pressed="${f === id}">${label}${n !== undefined ? ` <span class="tab-n">${n}</span>` : ''}</button>`;
   const deskBlock = (d) => {
-    // Najpierw jawne karty, potem koperty (mniej przewijania przez zamknięte dokumenty).
-    const cards = own.filter((k) => k.desk === d).sort((a, b) => Number(isSealed(a)) - Number(isSealed(b)));
-    return `<h3 class="sec-label desk-label">${icon(cardIcon(cards[0] || {}))} ${esc(deskName(d))} <span class="muted small">${cards.length}</span></h3><div class="cards">${cards.map((k) => renderCard(k)).join('')}</div>`;
+    // Najpierw jawne karty, pod nimi koperty jako małe kafelki (mniej przewijania przez zamknięte dokumenty).
+    const cards = own.filter((k) => k.desk === d);
+    const open = cards.filter((k) => !isSealed(k));
+    const sealed = cards.filter((k) => isSealed(k));
+    return `<h3 class="sec-label desk-label">${icon(cardIcon(cards[0] || {}))} ${esc(deskName(d))} <span class="muted small">${cards.length}</span></h3>
+      ${open.length ? `<div class="cards">${open.map((k) => renderCard(k)).join('')}</div>` : ''}
+      ${sealed.length ? `<p class="env-label">${icon('lock')} Koperty do zlecenia · ${sealed.length}</p><div class="env-grid">${sealed.map((k) => renderCard(k)).join('')}</div>` : ''}`;
   };
   const body = f === 'all' ? mine.map(deskBlock).join('') : f === 'marked'
     ? `<div class="cards">${marked.map((k) => renderCard(k)).join('') || '<p class="muted">Nic jeszcze nie oznaczono. Użyj „☆ Ważna” na karcie.</p>'}</div>`
