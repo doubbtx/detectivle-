@@ -364,7 +364,8 @@ describe('serwer gry na żywo (Node, bez zależności)', { timeout: 30_000 }, ()
     for (const cl of [a, b2, c2]) {
       s = await cl.state((st) => st.status === 'solved', 'sprawa rozwiązana');
       assert.equal(s.attempts.length, 2);
-      assert.equal(s.report.stars, 2);
+      // Gwiazdki liczy serwer: trafny powód (1) + brak alibi (0) + nie za pierwszym razem (0).
+      assert.equal(s.report.stars, 1);
     }
     a.send({ t: 'hint' });
     assert.match((await a.error('błąd po zamknięciu sprawy')).msg, /nie trwa/);

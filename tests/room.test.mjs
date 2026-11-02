@@ -64,7 +64,7 @@ test('raport: pomyłka dodaje karę, trzecia pomyłka kończy sprawę, trafienie
   assert.ok(reduce(s, ids[1], { t: 'accuse', forged: 'D1', proof: 'M1', ok: [false, null] }, 7).error, 'ta sama para drugi raz');
   const solved = reduce(s, ids[1], { t: 'accuse', forged: 'D2', proof: 'M3', ok: [true, true], report: { stars: 2, reasonOk: true } }, 8).state;
   assert.equal(solved.status, 'solved');
-  assert.equal(solved.report.stars, 2);
+  assert.equal(solved.report.stars, 1, 'gwiazdki liczy serwer: powód tak, alibi brak, nie za pierwszym razem');
   s = reduce(s, ids[0], { t: 'accuse', forged: 'D2', proof: 'M4', ok: [true, false] }, 9).state;
   s = reduce(s, ids[0], { t: 'accuse', forged: 'D3', proof: 'M4', ok: [false, null] }, 10).state;
   assert.equal(s.status, 'failed');
@@ -75,4 +75,23 @@ test('kody pokojów', () => {
   for (let i = 0; i < 50; i++) assert.ok(isRoomCode(randomRoomCode()));
   assert.ok(!isRoomCode('ab'));
   assert.ok(!isRoomCode('ABCD0'));
+});
+
+test('podpowiedź jest odporna na dwa kliknięcia naraz, a „pierwsza próba” liczy serwer', () => {
+  let s = reduce(lobby(2), ids[0], { t: 'start' }, 5).state;
+  s = reduce(s, ids[0], { t: 'hint', n: 0 }, 6).state;
+  assert.ok(reduce(s, ids[1], { t: 'hint', n: 0 }, 7).error, 'druga osoba z nieaktualnym licznikiem');
+  assert.equal(s.hints, 1);
+  s = reduce(s, ids[0], { t: 'accuse', forged: 'D1', proof: 'M1', ok: [false, null] }, 8).state;
+  const solved = reduce(s, ids[1], { t: 'accuse', forged: 'D2', proof: 'M2', ok: [true, true], report: { reasonOk: true, alibiCorrect: 4, alibiTotal: 4, firstTry: true, stars: 3 } }, 9).state;
+  assert.equal(solved.report.firstTry, false);
+  assert.equal(solved.report.stars, 2);
+});
+
+test('domyślne imiona są numerowane, a znaki < > zostają (wyświetlane jako tekst)', () => {
+  let s = newRoom('ABCDE', 0);
+  s = connect(s, ids[0], { name: '' }, 1).state;
+  s = connect(s, ids[1], { name: 'Ania <3' }, 2).state;
+  assert.equal(s.players[0].name, 'Detektyw 1');
+  assert.equal(s.players[1].name, 'Ania <3');
 });

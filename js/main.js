@@ -261,7 +261,21 @@ function clearPracticeHash() {
 }
 
 /** Otwiera sprawę dnia (domyślnie dzisiejszą). Przy pierwszym wejściu wraca od razu do rozpoczętej gry. */
+function exitLiveIfAny() {
+  if (!state.live) return;
+  closeLive();
+  if (state.mode === 'live') state.mode = 'solo';
+  if (/^#pokoj-/.test(window.location.hash)) {
+    try {
+      window.history.replaceState(null, '', window.location.pathname + window.location.search);
+    } catch {
+      window.location.hash = '';
+    }
+  }
+}
+
 async function openDaily({ resume = false, date = null } = {}) {
+  exitLiveIfAny();
   const today = localTodayIso();
   // Dopuszczamy jutro: zaproszenie wysłane tuż po północy przez kogoś z „szybszym” zegarem.
   const iso = date && date <= addDays(today, 1) ? date : today;
@@ -272,6 +286,7 @@ async function openDaily({ resume = false, date = null } = {}) {
 }
 
 async function openPractice(code, { resume = false } = {}) {
+  exitLiveIfAny();
   if (!(await loadCase({ type: 'practice', code }))) return;
   if (resume && tryResume()) return;
   go('intro');
@@ -287,6 +302,7 @@ function tryResume() {
 }
 
 function startMode(mode) {
+  exitLiveIfAny();
   state.mode = mode;
   resetCaseUi();
   if (mode === 'team') {
@@ -665,7 +681,7 @@ function renderTopbar() {
   const c = state.c;
   const label = c.kind === 'daily' ? `Sprawa nr ${c.number} · ${c.fingerprint}` : `Trening ${c.code}`;
   const who = state.mode === 'solo' ? 'solo' : state.mode === 'live'
-    ? `na żywo · gracz ${state.seat} z ${state.teamSize} · ${state.live?.rs?.players.filter((p) => p.online).length ?? 0} online${state.live?.status === 'open' ? '' : ' · łączenie…'}`
+    ? `na żywo · gracz ${state.seat} z ${state.teamSize} · ${state.live?.rs?.players.filter((p) => p.online).length ?? 0} online${state.live?.status === 'open' ? '' : state.live?.status === 'stopped' ? ' · rozłączono' : ' · łączenie…'}`
     : `gracz ${state.seat} z ${state.teamSize}`;
   const left = CONFIG.maxAttempts - progress.attempts.length;
   return `
@@ -685,7 +701,7 @@ function renderTopbar() {
 }
 
 function renderTabs() {
-  const tabs = [{ id: 'akta', label: 'Akta' }, ...myDesks().map((d) => ({ id: d, label: deskName(d) })), ...(state.mode === 'live' ? [{ id: 'table', label: `Stół ${state.live?.rs?.table.length ?? 0}` }] : []), { id: 'notes', label: 'Notatki' }];
+  const tabs = [{ id: 'akta', label: 'Akta' }, ...(state.mode === 'live' ? [{ id: 'table', label: `Stół ${state.live?.rs?.table.length ?? 0}` }] : []), ...myDesks().map((d) => ({ id: d, label: deskName(d) })), { id: 'notes', label: 'Notatki' }];
   return `
   <nav class="tabs" aria-label="Biurka">
     <div class="tabs-inner">
@@ -711,6 +727,7 @@ function renderGate() {
 function renderGame() {
   if (!progress.startedAt) return renderGate();
   const mine = myDesks();
+  if (!['akta', 'notes', 'table', ...mine].includes(state.tab) || (state.tab === 'table' && state.mode !== 'live')) state.tab = 'akta';
   let right = state.tab;
   if (right === 'akta') right = mine[0];
   const rightHtml = right === 'notes' ? renderNotes() : right === 'table' ? renderTable() : renderDesk(right);
@@ -867,6 +884,10 @@ function submitAccusation() {
   const forgedOk = a.forged === sol.forged;
   const ok = [forgedOk, forgedOk ? proofSet().has(a.proof) : null];
   if (state.mode === 'live') {
+    if (state.live.rs?.fingerprint && state.live.rs.fingerprint !== state.c.fingerprint) {
+      showToast('Masz inną wersję sprawy niż gospodarz pokoju. Odśwież stronę, zanim złożysz raport.');
+      return;
+    }
     const report = ok[0] && ok[1] ? reportQuality(a) : null;
     if (!state.live.conn.send({ t: 'accuse', forged: a.forged, proof: a.proof, reason: a.reason, alibis: a.alibis, ok, report })) {
       showToast('Brak połączenia z serwerem. Spróbuj za chwilę.');
@@ -1048,6 +1069,7 @@ function openRoom(code, create) {
   const createFp = create && state.c ? state.c.fingerprint : null;
   closeLive();
   state.mode = 'live';
+  resetCaseUi();
   state.live = { room: code, conn: null, rs: null, you: null, status: 'connecting', error: '', draft: '' };
   const live = state.live;
   live.conn = connectLive({
@@ -1070,13 +1092,13 @@ function openRoom(code, create) {
 }
 
 function leaveRoom() {
-  closeLive();
+  exitLiveIfAny();
   state.mode = 'solo';
   openDaily();
 }
 
 async function onLiveState(live, msg) {
-  if (state.live !== live) return;
+  if (state.live !== live || state.mode !== 'live') return;
   const prev = live.rs;
   live.rs = msg.state;
   live.you = msg.you;
@@ -1095,7 +1117,13 @@ async function onLiveState(live, msg) {
     return;
   }
   if (rs.status === 'playing' && me?.seat && state.screen !== 'game' && state.screen !== 'result') {
+    resetCaseUi();
     go('game');
+    return;
+  }
+  if (rs.status === 'lobby' && state.screen === 'game') {
+    showToast('Serwer uruchomił pokój od nowa. Zacznijcie jeszcze raz.');
+    go('live-lobby');
     return;
   }
   render();
@@ -1105,7 +1133,8 @@ function notifyOthers(prev, rs, you) {
   if (!prev) return;
   const fresh = rs.table.filter((t) => t.by !== you && !prev.table.some((x) => x.card === t.card));
   if (fresh.length) { showToast(`${playerName(fresh[0].by)} kładzie na stół kartę ${fresh[0].card}.`); return; }
-  const logs = rs.log.slice(prev.log.length).filter((l) => l.by && l.by !== you);
+  const lastAt = prev.log.length ? prev.log[prev.log.length - 1].at : -1;
+  const logs = rs.log.filter((l) => l.at > lastAt && l.by && l.by !== you);
   if (logs.length) { showToast(`${playerName(logs[0].by)}: ${logs[0].text}`); return; }
   const unl = Object.entries(rs.unlocked).filter(([k, by]) => by !== you && !prev.unlocked[k]);
   if (unl.length) { showToast(`${playerName(unl[0][1])} zleca czynność: karta ${unl[0][0]}.`); return; }
@@ -1144,7 +1173,7 @@ function renderLobby() {
   const rs = live?.rs;
   const c = state.c;
   const online = rs ? rs.players.filter((p) => p.online) : [];
-  const statusText = { connecting: 'Łączenie z serwerem…', open: 'Połączono', closed: 'Rozłączono. Próbuję połączyć ponownie…' }[live?.status || 'connecting'];
+  const statusText = { connecting: 'Łączenie z serwerem…', open: 'Połączono', closed: 'Rozłączono. Próbuję połączyć ponownie…', stopped: 'Połączenie wstrzymane.' }[live?.status || 'connecting'];
   const fpMismatch = rs?.fingerprint && c && c.fingerprint !== rs.fingerprint;
   const me = rs?.players.find((p) => p.id === live.you);
   return `
@@ -1157,6 +1186,7 @@ function renderLobby() {
       <h1 class="setup-title">Pokój <span class="code">${esc(live?.room || '')}</span></h1>
       <p class="live-status ${live?.status === 'open' ? 'ok' : ''}" role="status">${esc(statusText)}</p>
       ${live?.error ? `<p class="warn">${esc(live.error)}</p>` : ''}
+      ${live?.status === 'stopped' ? '<button class="btn" data-act="live-reconnect">Połącz ponownie</button>' : ''}
       ${rs && c ? `<p class="fingerprint">Sprawa: <b>${esc(c.kind === 'daily' ? `nr ${c.number}` : `trening ${c.code}`)}</b> · ${esc(c.title)} · odcisk <b class="code">${esc(c.fingerprint)}</b></p>` : ''}
       ${fpMismatch ? '<p class="warn">Masz inną wersję tej sprawy niż gospodarz pokoju. Odśwież stronę, a jeśli to nie pomoże, utwórzcie nowy pokój.</p>' : ''}
       <label class="name-row" for="live-name">Twoje imię
@@ -1175,7 +1205,7 @@ function renderLobby() {
         <li>Każdy dostaje inne biurka (w kolejności wejścia do pokoju). Zegar, podpowiedzi, próby i godziny śledztwa są wspólne.</li>
         <li>Karty możecie kłaść na wspólny stół, a ustalenia zapisywać na tablicy. Raport może złożyć każdy.</li>
       </ul>
-      <button class="btn btn-primary btn-wide" data-act="live-start" ${online.length >= 2 && rs?.status === 'lobby' ? '' : 'disabled'}>Zaczynamy${online.length < 2 ? ' (potrzeba 2 osób)' : ''}</button>
+      <button class="btn btn-primary btn-wide" data-act="live-start" ${online.length >= 2 && rs?.status === 'lobby' && !fpMismatch ? '' : 'disabled'}>Zaczynamy${online.length < 2 ? ' (potrzeba 2 osób)' : ''}</button>
     </section>
   </div>`;
 }
@@ -1247,6 +1277,7 @@ function render() {
   const active = document.activeElement;
   const focusKey = app.contains(active) ? focusKeyOf(active) : null;
   const modalScroll = app.querySelector('.modal')?.scrollTop ?? 0;
+  const caret = active && app.contains(active) && typeof active.selectionStart === 'number' ? [active.selectionStart, active.selectionEnd] : null;
   if (state.modal && !lastModal) modalOpener = focusKey;
   let html = '';
   switch (state.screen) {
@@ -1268,7 +1299,16 @@ function render() {
   } else {
     if (modal && state.modal === lastModal) modal.scrollTop = modalScroll;
     const target = findByKey(!state.modal && lastModal ? modalOpener : focusKey);
-    if (target) target.focus({ preventScroll: true });
+    if (target) {
+      target.focus({ preventScroll: true });
+      if (caret && typeof target.setSelectionRange === 'function' && target === document.activeElement) {
+        try {
+          target.setSelectionRange(caret[0], caret[1]);
+        } catch {
+          /* pole bez zaznaczenia */
+        }
+      }
+    }
   }
   lastModal = state.modal;
   if (state.focusResult && state.screen === 'result') {
@@ -1361,10 +1401,14 @@ app.addEventListener('click', (e) => {
         break;
       }
       state.confirm = null;
-      progress.unlocked = { ...(progress.unlocked || {}), [k.id]: true };
       if (state.mode === 'live') {
-        if (!state.live.conn.send({ t: 'unlock', card: k.id })) showToast('Brak połączenia z serwerem.');
-      } else saveProgress();
+        // Na żywo karta odpieczętowuje się dopiero, gdy serwer potwierdzi czynność.
+        if (!state.live.conn.send({ t: 'unlock', card: k.id })) showToast('Brak połączenia z serwerem. Czynność nie została zlecona.');
+        render();
+        break;
+      }
+      progress.unlocked = { ...(progress.unlocked || {}), [k.id]: true };
+      saveProgress();
       render();
       break;
     }
@@ -1384,6 +1428,12 @@ app.addEventListener('click', (e) => {
     case 'live-leave':
       leaveRoom();
       break;
+    case 'live-reconnect':
+      if (state.live) {
+        state.live.error = '';
+        state.live.conn.reconnect();
+      }
+      break;
     case 'copy-card': copyText(cardPlainText(cardById(target.dataset.id)), `Skopiowano kartę ${target.dataset.id}`); break;
     case 'open-hints': state.modal = 'hints'; state.confirm = null; render(); break;
     case 'open-accuse': state.modal = 'accuse'; render(); break;
@@ -1397,7 +1447,7 @@ app.addEventListener('click', (e) => {
       }
       state.confirm = null;
       if (state.mode === 'live') {
-        if (!state.live.conn.send({ t: 'hint' })) showToast('Brak połączenia z serwerem.');
+        if (!state.live.conn.send({ t: 'hint', n: progress.hints })) showToast('Brak połączenia z serwerem.');
         render();
         break;
       }
@@ -1473,6 +1523,7 @@ app.addEventListener('change', (e) => {
 
 app.addEventListener('input', (e) => {
   if (e.target.dataset.act === 'live-draft' && state.live) state.live.draft = e.target.value;
+  if (e.target.dataset.act === 'live-name') store.set('name', e.target.value.slice(0, 24));
   if (e.target.dataset.act === 'notes' && progress) {
     progress.notes = e.target.value;
     saveProgress();
@@ -1540,6 +1591,10 @@ window.addEventListener('resize', () => {
 });
 
 window.addEventListener('hashchange', () => {
+  if (state.live && window.location.hash !== `#pokoj-${state.live.room}` && !/^#pokoj-/.test(window.location.hash) && !window.location.hash) {
+    leaveRoom();
+    return;
+  }
   if (!routeFromHash() && !window.location.hash && (state.ref?.type === 'practice' || isArchive())) openDaily();
 });
 

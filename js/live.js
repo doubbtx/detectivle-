@@ -33,7 +33,11 @@ export function connectLive({ room, hello, onState, onError, onStatus }) {
   let pingTimer = null;
   let retryTimer = null;
   let everOpened = false;
-  const live = { offset: 0, send, close, get open() { return ws?.readyState === 1; } };
+  let gotState = false;
+  let refused = false;
+  let lastMsgAt = 0;
+  let watchdog = null;
+  const live = { offset: 0, send, close, reconnect, get open() { return ws?.readyState === 1; } };
 
   function open() {
     if (!base) {
@@ -49,10 +53,17 @@ export function connectLive({ room, hello, onState, onError, onStatus }) {
       scheduleRetry();
       return;
     }
+    gotState = false;
+    refused = false;
     ws.addEventListener('open', () => {
       everOpened = true;
-      retry = 0;
+      lastMsgAt = Date.now();
       onStatus('open');
+      // Połączenie „pół-otwarte” (uśpiony telefon, zmiana sieci): bez wiadomości przez 50 s zamykamy i łączymy od nowa.
+      clearInterval(watchdog);
+      watchdog = setInterval(() => {
+        if (ws?.readyState === 1 && Date.now() - lastMsgAt > 50000) ws.close();
+      }, 10000);
       ws.send(JSON.stringify(hello()));
       clearInterval(pingTimer);
       pingTimer = setInterval(() => send({ t: 'ping' }), 20000);
@@ -64,12 +75,27 @@ export function connectLive({ room, hello, onState, onError, onStatus }) {
       } catch {
         return;
       }
+      lastMsgAt = Date.now();
       if (typeof msg.now === 'number') live.offset = msg.now - Date.now();
-      if (msg.t === 'state') onState(msg);
-      else if (msg.t === 'error') onError(msg.msg);
+      if (msg.t === 'state') {
+        gotState = true;
+        retry = 0;
+        onState(msg);
+      } else if (msg.t === 'error') {
+        if (!gotState) refused = true;
+        onError(msg.msg);
+      }
     });
-    ws.addEventListener('close', () => {
+    ws.addEventListener('close', (ev) => {
       clearInterval(pingTimer);
+      clearInterval(watchdog);
+      // 4000 = ten sam gracz otworzył pokój w innym oknie, 1008 = serwer odmówił wejścia.
+      // Wtedy nie łączymy się sami ponownie (inaczej dwie karty wyrzucałyby się nawzajem w kółko).
+      if (ev.code === 4000 || ev.code === 1008 || refused) {
+        onStatus('stopped');
+        if (ev.code === 4000) onError('Ten pokój jest otwarty w innym oknie albo karcie. Tutaj połączenie zostało wstrzymane.');
+        return;
+      }
       onStatus('closed');
       if (!closedByUser) scheduleRetry();
     });
@@ -94,9 +120,22 @@ export function connectLive({ room, hello, onState, onError, onStatus }) {
     return false;
   }
 
+  function reconnect() {
+    closedByUser = false;
+    retry = 0;
+    clearTimeout(retryTimer);
+    try {
+      ws?.close();
+    } catch {
+      /* już zamknięte */
+    }
+    open();
+  }
+
   function close() {
     closedByUser = true;
     clearInterval(pingTimer);
+    clearInterval(watchdog);
     clearTimeout(retryTimer);
     try {
       ws?.close();

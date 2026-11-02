@@ -35,9 +35,10 @@ const CLIENT_RE = /^[A-Za-z0-9_-]{6,40}$/;
 
 export const isRoomCode = (code) => ROOM_RE.test(String(code || ''));
 
-function cleanName(name) {
-  const n = String(name || '').replace(/[\u0000-\u001f<>]/g, '').trim().slice(0, 24);
-  return n || 'Detektyw';
+function cleanName(name, fallback = 'Detektyw') {
+  // Tekst jest zawsze wyświetlany jako tekst (escape po stronie klienta), więc usuwamy tylko znaki sterujące.
+  const n = String(name || '').replace(/[\u0000-\u001f]/g, '').trim().slice(0, 24);
+  return n || fallback;
 }
 
 function cleanCaseRef(ref) {
@@ -82,7 +83,7 @@ export function connect(state, clientId, msg, now) {
   if (!p) {
     if (s.status !== 'lobby') return { state, error: 'Śledztwo już trwa. Do pokoju nie można dołączyć w trakcie.' };
     if (s.players.length >= MAX_PLAYERS) return { state, error: 'Pokój jest pełny (najwyżej 5 osób).' };
-    p = { id: clientId, name: cleanName(msg.name), seat: null, online: true, joinedAt: now };
+    p = { id: clientId, name: cleanName(msg.name, `Detektyw ${s.players.length + 1}`), seat: null, online: true, joinedAt: now };
     s.players.push(p);
   } else {
     p.online = true;
@@ -166,6 +167,8 @@ export function reduce(state, clientId, msg, now) {
     case 'hint':
       if (!playing) return fail('Śledztwo nie trwa.');
       if (s.hints >= MAX_HINTS) return fail('To już wszystkie podpowiedzi.');
+      // Dwie osoby klikające „podpowiedź 2” naraz nie zużyją dwóch podpowiedzi.
+      if (typeof msg.n === 'number' && msg.n !== s.hints) return fail('Ktoś z ekipy właśnie wziął tę podpowiedź.');
       s.hints += 1;
       s.penalty += HINT_PENALTY;
       break;
@@ -180,13 +183,14 @@ export function reduce(state, clientId, msg, now) {
       if (ok[0] && ok[1]) {
         s.status = 'solved';
         s.endedAt = now;
-        s.report = msg.report && typeof msg.report === 'object' ? {
-          reasonOk: Boolean(msg.report.reasonOk),
-          alibiCorrect: Number(msg.report.alibiCorrect) || 0,
-          alibiTotal: Number(msg.report.alibiTotal) || 0,
-          firstTry: Boolean(msg.report.firstTry),
-          stars: Math.max(0, Math.min(3, Number(msg.report.stars) || 0)),
-        } : null;
+        if (msg.report && typeof msg.report === 'object') {
+          // „Za pierwszym razem” liczy serwer: liczy się kolejność raportów całej ekipy.
+          const reasonOk = Boolean(msg.report.reasonOk);
+          const alibiCorrect = Number(msg.report.alibiCorrect) || 0;
+          const alibiTotal = Number(msg.report.alibiTotal) || 0;
+          const firstTry = s.attempts.length === 1;
+          s.report = { reasonOk, alibiCorrect, alibiTotal, firstTry, stars: Number(reasonOk) + Number(alibiTotal > 0 && alibiCorrect === alibiTotal) + Number(firstTry) };
+        } else s.report = null;
       } else {
         s.penalty += WRONG_PENALTY;
         if (s.attempts.length >= MAX_ATTEMPTS) {
