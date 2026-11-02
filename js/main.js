@@ -8,7 +8,7 @@ import { renderTownSvg } from './map.js';
 import { icon } from './icons.js';
 import { portrait } from './portraits.js';
 import { cardLook, cardIcon, cardVisual } from './visuals.js';
-import { renderBoard, isPinnable } from './board.js';
+import { renderBoard, isPinnable, factsOfCard } from './board.js';
 import { PLACE_CELLS, SCENE_CELLS, OFFICE_CELL, cellsApart, blocksText, MIN_PER_CELL } from './town.js';
 import { buildEpilogue } from './epilogue.js';
 import { fmt, localTodayIso, addDays } from './time.js';
@@ -74,6 +74,9 @@ function resetCaseUi() {
   state.tab = 'akta';
   state.mapSel = [];
   state.boardSel = [];
+  state.compare = [];
+  state.deskFilter = 'all';
+  state.boardView = 'time';
   if (state.mapScrolls) delete state.mapScrolls.plan;
   state.modal = null;
   state.confirm = null;
@@ -755,11 +758,12 @@ function renderCard(k, opts = {}) {
       // Bilet: same linie karty na kartoniku z perforacją (bez powtarzania danych w osobnym obrazku).
       return look === 'ticket' ? `<div class="tk-wrap"><span class="tk-ico">${(k.facts || []).some((f) => f.kind === 'parking') ? '<b>P</b>' : icon(cardIcon(k))}</span>${linesHtml}</div>` : linesHtml;
     })()}
-    ${k.map && !opts.noActions && hasMapTab() ? `<p><button class="btn btn-small" data-act="tab" data-tab="plan">${icon('map')} Otwórz plan miasta</button></p>` : ''}
+    ${k.map && !opts.noActions && hasMapTab() ? `<p><button class="btn btn-small" data-act="board-view" data-id="plan">${icon('map')} Otwórz plan miasta</button></p>` : ''}
     ${opts.noActions ? '' : `
     <footer class="card-foot">
       <button class="link-btn" data-act="mark-card" data-id="${k.id}" aria-pressed="${Boolean(marked)}">${marked ? '★ Ważna' : '☆ Ważna'}</button>
       ${isPinnable(k) && k.kind !== 'supplied' && state.c.difficulty > 2 ? `<button class="link-btn${(progress.pins || []).includes(k.id) ? ' on-board' : ''}" data-act="pin-card" data-id="${k.id}" aria-pressed="${(progress.pins || []).includes(k.id)}">${(progress.pins || []).includes(k.id) ? 'Na tablicy ✓' : 'Na tablicę'}</button>` : ''}
+      <button class="link-btn${(state.compare || []).includes(k.id) ? ' on-board' : ''}" data-act="compare-card" data-id="${k.id}" aria-pressed="${(state.compare || []).includes(k.id)}">${(state.compare || []).includes(k.id) ? 'Porównuję ✓' : 'Porównaj'}</button>
       <button class="link-btn" data-act="aside-card" data-id="${k.id}">Odłóż</button>
       <button class="link-btn" data-act="copy-card" data-id="${k.id}">Kopiuj</button>
       ${state.mode === 'live' ? (onTable(k.id) ? `<span class="link-btn on-table">Na stole ✓</span>` : `<button class="link-btn" data-act="table" data-id="${k.id}">Połóż na stół</button>`) : ''}
@@ -842,6 +846,18 @@ function renderPlan() {
 }
 
 function renderBoardTab() {
+  const view = state.boardView === 'plan' && hasMapTab() ? 'plan' : state.boardView === 'notes' ? 'notes' : 'time';
+  const seg = `<div class="seg" role="tablist" aria-label="Widok tablicy">
+    <button class="seg-btn${view === 'time' ? ' on' : ''}" data-act="board-view" data-id="time" role="tab" aria-selected="${view === 'time'}">${icon('clock')} Oś czasu</button>
+    ${hasMapTab() ? `<button class="seg-btn${view === 'plan' ? ' on' : ''}" data-act="board-view" data-id="plan" role="tab" aria-selected="${view === 'plan'}">${icon('map')} Plan miasta</button>` : ''}
+    <button class="seg-btn${view === 'notes' ? ' on' : ''}" data-act="board-view" data-id="notes" role="tab" aria-selected="${view === 'notes'}">${icon('file-text')} Notatki</button>
+  </div>`;
+  if (view === 'plan') return seg + renderPlan();
+  if (view === 'notes') return seg + renderNotes();
+  return seg + renderBoardTimeline();
+}
+
+function renderBoardTimeline() {
   const c = state.c;
   const canSee = (k) => myDesks().includes(k.desk) && !isSealed(k);
   const noMapText = !hasTownMap(c) ? 'czasy dotarcia są na biurku „Mapa i rozkłady”' : 'zapytaj osobę z planem miasta';
@@ -884,11 +900,13 @@ function renderTopbar() {
 }
 
 function renderTabs() {
-  const tabs = [{ id: 'akta', label: 'Akta' }, ...(state.mode === 'live' ? [{ id: 'table', label: `Stół ${state.live?.rs?.table.length ?? 0}` }] : []), ...myDesks().map((d) => ({ id: d, label: deskName(d) })), { id: 'board', label: 'Tablica' }, ...(hasMapTab() ? [{ id: 'plan', label: 'Plan miasta' }] : []), { id: 'notes', label: 'Notatki' }];
+  // Trzy miejsca zamiast dziewięciu: sprawa, wszystkie dowody (z filtrami biurek) i tablica (oś czasu, plan, notatki).
+  const ownCards = state.c.cards.filter((k) => myDesks().includes(k.desk)).length;
+  const tabs = [{ id: 'akta', label: 'Sprawa' }, { id: 'evidence', label: `Dowody ${ownCards}` }, { id: 'board', label: 'Tablica' }, ...(state.mode === 'live' ? [{ id: 'table', label: `Stół ${state.live?.rs?.table.length ?? 0}` }] : [])];
   return `
   <nav class="tabs" aria-label="Biurka">
     <div class="tabs-inner">
-      ${tabs.map((t) => `<button class="tab${state.tab === t.id ? ' on' : ''}${t.id === 'akta' ? ' tab-akta' : ''}" data-act="tab" data-tab="${t.id}" aria-current="${state.tab === t.id ? 'page' : 'false'}">${esc(t.label)}${['akta', 'notes', 'table', 'plan', 'board'].includes(t.id) ? '' : ` <span class="tab-n">${state.c.cards.filter((k) => k.desk === t.id).length}</span>`}</button>`).join('')}
+      ${tabs.map((t) => `<button class="tab${state.tab === t.id ? ' on' : ''}${t.id === 'akta' ? ' tab-akta' : ''}" data-act="tab" data-tab="${t.id}" aria-current="${state.tab === t.id ? 'page' : 'false'}">${esc(t.label)}</button>`).join('')}
     </div>
   </nav>`;
 }
@@ -910,17 +928,103 @@ function renderGate() {
 function renderGame() {
   if (!progress.startedAt) return renderGate();
   const mine = myDesks();
-  if (!['akta', 'notes', 'table', 'plan', 'board', ...mine].includes(state.tab) || (state.tab === 'table' && state.mode !== 'live') || (state.tab === 'plan' && !hasMapTab())) state.tab = 'akta';
-  let right = state.tab;
-  if (right === 'akta') right = mine[0];
-  const rightHtml = right === 'notes' ? renderNotes() : right === 'table' ? renderTable() : right === 'plan' ? renderPlan() : right === 'board' ? renderBoardTab() : renderDesk(right);
+  // Stare nazwy zakładek (biurka, plan, notatki) prowadzą do nowych miejsc.
+  if (mine.includes(state.tab)) { state.deskFilter = state.tab; state.tab = 'evidence'; }
+  if (state.tab === 'plan') { state.boardView = 'plan'; state.tab = 'board'; }
+  if (state.tab === 'notes') { state.boardView = 'notes'; state.tab = 'board'; }
+  if (!['akta', 'evidence', 'board', 'table'].includes(state.tab) || (state.tab === 'table' && state.mode !== 'live')) state.tab = 'akta';
+  const right = state.tab === 'akta' ? 'evidence' : state.tab;
+  const rightHtml = right === 'table' ? renderTable() : right === 'board' ? renderBoardTab() : renderEvidence();
   return `
   <div class="sticky-head">${renderTopbar()}${renderTabs()}</div>
   <div class="game view-${state.tab === 'akta' ? 'akta' : 'other'}${state.tab === 'plan' || state.tab === 'board' ? ' view-plan' : ''}">
     <div class="col-left">${renderAkta()}</div>
     <div class="col-right">${rightHtml}</div>
   </div>
+  ${renderCompareTray()}
   ${renderModal()}`;
+}
+
+/** Wszystkie dowody gracza w jednym miejscu, z filtrami biurek. */
+function renderEvidence() {
+  const mine = myDesks();
+  const f = state.deskFilter && (mine.includes(state.deskFilter) || state.deskFilter === 'marked') ? state.deskFilter : 'all';
+  const own = state.c.cards.filter((k) => mine.includes(k.desk));
+  const marked = own.filter((k) => progress.marks?.[k.id]);
+  const chip = (id, label, n) => `<button class="fchip-btn${f === id ? ' on' : ''}" data-act="desk-filter" data-id="${id}" aria-pressed="${f === id}">${label}${n !== undefined ? ` <span class="tab-n">${n}</span>` : ''}</button>`;
+  const deskBlock = (d) => {
+    // Najpierw jawne karty, potem koperty (mniej przewijania przez zamknięte dokumenty).
+    const cards = own.filter((k) => k.desk === d).sort((a, b) => Number(isSealed(a)) - Number(isSealed(b)));
+    return `<h3 class="sec-label desk-label">${icon(cardIcon(cards[0] || {}))} ${esc(deskName(d))} <span class="muted small">${cards.length}</span></h3><div class="cards">${cards.map((k) => renderCard(k)).join('')}</div>`;
+  };
+  const body = f === 'all' ? mine.map(deskBlock).join('') : f === 'marked'
+    ? `<div class="cards">${marked.map((k) => renderCard(k)).join('') || '<p class="muted">Nic jeszcze nie oznaczono. Użyj „☆ Ważna” na karcie.</p>'}</div>`
+    : deskBlock(f);
+  return `
+  <section class="evidence" aria-label="Dowody">
+    <div class="filter-row" role="group" aria-label="Pokaż">
+      ${chip('all', 'Wszystkie', own.length)}
+      ${mine.map((d) => chip(d, esc(deskName(d)), own.filter((k) => k.desk === d).length)).join('')}
+      ${chip('marked', '★ Ważne', marked.length)}
+    </div>
+    ${body}
+  </section>`;
+}
+
+/** Pasek porównania (karty wybrane przyciskiem „Porównaj”). */
+function renderCompareTray() {
+  const list = (state.compare || []).filter((id) => cardById(id));
+  if (!list.length || state.modal || state.tab === 'board') return '';
+  return `<div class="cmp-tray" role="region" aria-label="Porównanie">
+    <span class="cmp-chips">${list.map((id) => `<span class="chip">${id}</span>`).join(' ')}</span>
+    <button class="btn btn-small btn-primary" data-act="open-compare"${list.length < 2 ? ' disabled' : ''}>${list.length < 2 ? 'Wybierz drugą kartę' : `Porównaj (${list.length})`}</button>
+    <button class="btn btn-small btn-ghost" data-act="compare-clear" aria-label="Wyczyść porównanie">✕</button>
+  </div>`;
+}
+
+/** Okno porównania: karty obok siebie, zestawienie godzin i dróg, mini-plan z trasą. */
+function renderCompareBody() {
+  const list = (state.compare || []).map(cardById).filter(Boolean);
+  const canSee = (k) => myDesks().includes(k.desk) && !isSealed(k);
+  // Fakty z kart bez powtórzeń (wspólny dowód daje ten sam pobyt dwóm osobom).
+  const facts = list.map((k) => {
+    if (!canSee(k)) return [];
+    const seen = new Set();
+    return factsOfCard(k, { cards: state.c.cards, canSee, c: state.c }).filter((x) => {
+      const key = `${x.place}|${x.from}|${x.to}`;
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
+  });
+  const map = hasMapTab();
+  const cellOf = (pl) => PLACE_CELLS[pl];
+  const sceneC = SCENE_CELLS[sceneIdOf(state.c)];
+  const nm = (pl) => PLACES[pl]?.name || pl;
+  const when = (x) => (x.to === null || x.to === x.from ? fmt(x.from) : `${fmt(x.from)}–${fmt(x.to)}`);
+  const rows = [];
+  for (let i = 0; i < list.length; i++) {
+    for (let j = i + 1; j < list.length; j++) {
+      for (const a of facts[i]) {
+        for (const b of facts[j]) {
+          const [x, y] = a.from <= b.from ? [a, b] : [b, a];
+          const gap = y.from - (x.to ?? x.from);
+          const n = map && cellOf(x.place) && cellOf(y.place) ? cellsApart(cellOf(x.place), cellOf(y.place)) : null;
+          rows.push(`<li><span class="chip">${x.card}</span> ${esc(nm(x.place))} <b>${when(x)}</b> → <span class="chip">${y.card}</span> ${esc(nm(y.place))} <b>${when(y)}</b><br><span class="small">odstęp <b>${gap} min</b>${n !== null ? ` · droga ${blocksText(n)} = <b>${n * MIN_PER_CELL} min</b>` : map ? '' : ' · drogę zna osoba z planem miasta'}</span></li>`);
+        }
+      }
+    }
+  }
+  const single = facts.flat().filter(() => map && sceneC).slice(0, 6).map((x) => `<li><span class="chip">${x.card}</span> ${esc(nm(x.place))} <b>${when(x)}</b> · do miejsca kradzieży ${blocksText(cellsApart(cellOf(x.place), sceneC))} = <b>${cellsApart(cellOf(x.place), sceneC) * MIN_PER_CELL} min</b></li>`);
+  const places = [...new Set(facts.flat().map((x) => x.place).filter((pl) => PLACE_CELLS[pl]))];
+  const mini = map && places.length ? `<div class="town-wrap cmp-map" data-scroll-key="cmp">${renderTownSvg({ places: PLACES, scene: sceneIdOf(state.c), sceneLabel: state.c.scene.name, active: new Set(places), selected: places.slice(0, 2) })}</div>` : '';
+  return `
+    <h2 tabindex="-1">Porównanie</h2>
+    <div class="cmp-grid cmp-${Math.min(list.length, 3)}">${list.map((k) => (canSee(k) ? renderCard(k, { noActions: true }) : `<article class="card card-sealed"><header class="card-head"><span class="card-id">${k.id}</span><div class="card-titles"><h4>${esc(k.title)}</h4></div></header><p class="seal-action">${isSealed(k) ? 'Koperta jeszcze zamknięta.' : 'Ta karta leży u innego gracza.'}</p></article>`)).join('')}</div>
+    ${rows.length ? `<h3 class="sec-label">Godziny i drogi</h3><ul class="cmp-rows">${rows.slice(0, 8).join('')}</ul>` : ''}
+    ${single.length ? `<h3 class="sec-label">Do miejsca kradzieży (drzwi otwarte ${fmt(state.c.window.from)}–${fmt(state.c.window.to)})</h3><ul class="cmp-rows">${single.join('')}</ul>` : ''}
+    ${mini}
+    <p class="muted small">Gra tylko zestawia liczby z kart. Wnioski wyciągasz sam.</p>`;
 }
 
 // ---------------------------------------------------------------------------
@@ -1028,6 +1132,7 @@ function renderModal() {
       ${tried ? '<p class="small muted">Ta para kart była już sprawdzona. Wybierz inną.</p>' : ''}
       <button class="btn btn-primary btn-wide" data-act="accuse" ${a.forged && a.proof && a.reason && !tried ? '' : 'disabled'}>Podpisz i złóż raport</button>`;
   }
+  if (state.modal === 'compare') body = renderCompareBody();
   if (state.modal === 'end') {
     const confirming = state.confirm === 'reveal';
     body = `
@@ -1037,7 +1142,7 @@ function renderModal() {
   }
   return `
   <div class="overlay" data-act="close-modal">
-    <div class="modal" role="dialog" aria-modal="true" aria-label="${({ hints: 'Podpowiedzi', accuse: 'Raport z dochodzenia', end: 'Koniec śledztwa' })[state.modal]}" data-stop>
+    <div class="modal" role="dialog" aria-modal="true" aria-label="${({ hints: 'Podpowiedzi', accuse: 'Raport z dochodzenia', end: 'Koniec śledztwa', compare: 'Porównanie' })[state.modal]}" data-stop>
       <button class="btn btn-ghost btn-icon modal-close" data-act="close-modal" aria-label="Zamknij">✕</button>
       ${body}
     </div>
@@ -1580,7 +1685,9 @@ function gotoCard(id) {
     showToast(`Karta ${id} leży na biurku „${deskName(k.desk)}”. Ma ją gracz ${seatOfDesk(k.desk)}.`);
     return;
   }
-  state.tab = k.desk;
+  state.tab = 'evidence';
+  if (state.deskFilter && state.deskFilter !== 'all' && state.deskFilter !== k.desk) state.deskFilter = k.desk;
+  if (state.modal === 'compare') state.modal = null;
   render();
   const el = document.getElementById(`card-${id}`);
   if (el) {
@@ -1664,6 +1771,17 @@ app.addEventListener('click', (e) => {
       break;
     }
     case 'board-clear': state.boardSel = []; render(); break;
+    case 'board-view': state.tab = 'board'; state.boardView = target.dataset.id; render(); window.scrollTo(0, 0); break;
+    case 'desk-filter': state.deskFilter = target.dataset.id; render(); window.scrollTo(0, 0); break;
+    case 'compare-card': {
+      const id = target.dataset.id;
+      const list = state.compare || [];
+      state.compare = list.includes(id) ? list.filter((x) => x !== id) : [...list, id].slice(-3);
+      render();
+      break;
+    }
+    case 'open-compare': state.modal = 'compare'; render(); break;
+    case 'compare-clear': state.compare = []; render(); break;
     case 'aside-card': {
       const id = target.dataset.id;
       progress.aside = progress.aside || {};

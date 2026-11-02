@@ -45,6 +45,10 @@ Ta sama sprawa dnia, ale widzisz wszystkie biurka.
 
 Sprawy treningowe nie liczą się do serii. Każda ma 4-znakowy kod, np. `K7Q2`. Ten sam kod daje tę samą sprawę, więc ekipa może zagrać razem dowolną liczbę spraw dziennie. Link do sprawy treningowej: `adres-gry/#sprawa-K7Q2`.
 
+### Nawigacja i porównywanie
+
+W grze są trzy miejsca: **Sprawa** (akta, podejrzani, zasady), **Dowody** (wszystkie karty z twoich biurek, z filtrami biurek i „★ Ważne”) i **Tablica** (oś czasu z teczkami osób, plan miasta i notatki). Przycisk **„Porównaj”** na karcie dodaje ją do porównania (do 3 kart): okno pokazuje karty obok siebie, odstępy między godzinami, drogę po planie i odległość do miejsca kradzieży. Gra tylko zestawia liczby z kart, nie ocenia, co jest sprzeczne.
+
 ### Plan miasta
 
 Wszystkie sprawy dzieją się w tym samym miasteczku, Borowicach. Na biurku „Mapa i rozkłady” leży plan miasta z polami miejsc (jak w skorowidzu papierowego planu: kolumny A–T, wiersze 1–14), a w grze zakładka **Plan miasta** pokazuje go jako ilustrowaną mapę. Ulice tworzą siatkę, więc czas między dwoma miejscami to liczba przecznic w poziomie plus w pionie razy 2 minuty. Dotknięcie dwóch miejsc rysuje trasę po ulicach i podaje czas. W grze z ekipą plan ma osoba z biurkiem „Mapa i rozkłady”, więc reszta pyta ją o odległości.
