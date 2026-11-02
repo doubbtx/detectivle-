@@ -22,15 +22,16 @@ export function factsOfCard(k, { cards, canSee, c = null }) {
   for (const f of k.facts || []) {
     if (f.t === 'seen') add([f.who], f.place, f.from, f.to, f.from === f.to ? '' : 'cały czas');
     if (f.t === 'claim') {
-      const who = [f.who, ...(f.with || [])];
-      // Wspólny dowód: przy drugiej osobie widać, kto go dostarczył.
-      const owner = f.with?.length ? (c?.suspects?.find((x) => x.id === f.who)?.first || '') : '';
-      const byNote = f.with?.length ? ` (wspólny, wg dowodu: ${owner})` : '';
-      if (f.kind === 'delivery') for (const st of f.stops) add(who, st.place, st.time, st.time, 'doręczenie');
-      else if (f.kind === 'cinema') add(who, 'kino', f.start, null, `seans „${f.film}”${byNote}`);
-      else if (f.kind === 'train') add(who, 'dworzec', f.time, null, 'odjazd pociągu');
-      else if (f.kind === 'bus') add(who, f.stop, f.time, f.time, `autobus ${f.line}`);
-      else add(who, f.place, f.time, f.time, ({ receipt: 'paragon', photo: 'zdjęcie', parking: 'bilet parkingowy' }[f.kind] || '') + byNote);
+      // Wspólny dowód: osobny wpis dla każdej osoby; przy partnerze dopisek, czyj to dowód.
+      const owner = c?.suspects?.find((x) => x.id === f.who)?.first || '';
+      for (const who of [f.who, ...(f.with || [])]) {
+        const byNote = who !== f.who ? ` (wspólny, wg dowodu: ${owner})` : f.with?.length ? ' (wspólny)' : '';
+        if (f.kind === 'delivery') for (const st of f.stops) add([who], st.place, st.time, st.time, 'doręczenie');
+        else if (f.kind === 'cinema') add([who], 'kino', f.start, null, `seans „${f.film}”${byNote}`);
+        else if (f.kind === 'train') add([who], 'dworzec', f.time, null, 'odjazd pociągu');
+        else if (f.kind === 'bus') add([who], f.stop, f.time, f.time, `autobus ${f.line}`);
+        else add([who], f.place, f.time, f.time, ({ receipt: 'paragon', photo: 'zdjęcie', parking: 'bilet parkingowy' }[f.kind] || '') + byNote);
+      }
     }
     if (f.t === 'cardlog') {
       // Właściciela karty wejściowej podaje osobna karta (wykaz kart); bez niej fakt jest „nieprzypisany”.
