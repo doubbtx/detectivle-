@@ -15,6 +15,7 @@ import { fmt, localTodayIso, addDays } from './time.js';
 import { store } from './storage.js';
 import { CONFIG } from './config.js';
 import { connectLive, randomClientId, liveServerUrl } from './live.js';
+import { placeCards, homeOf, mentionsOf, DESK_ORDER, SCENE_FACTS } from './layout.js';
 
 const app = document.getElementById('app');
 
@@ -26,7 +27,7 @@ const state = {
   mode: 'solo', // solo | team
   teamSize: 3,
   seat: 1,
-  tab: 'akta',
+  tab: 'inv', // inv (Śledztwo) | board (Tablica) | table (Stół, na żywo)
   modal: null, // null | 'accuse' | 'hints' | 'end'
   accuse: { forged: null, proof: null, reason: null, alibis: {}, last: null },
   confirm: null,
@@ -49,8 +50,6 @@ const cardById = (id) => state.c.cards.find((k) => k.id === id);
 const caseKey = (ref) => (ref.type === 'daily' ? ref.date : `T-${ref.code}`);
 const isCaptain = () => state.mode === 'solo' || state.mode === 'live' || state.seat === 1;
 const isTeamLike = () => state.mode === 'team' || state.mode === 'live';
-/** Układ dwukolumnowy (komputer); ten sam próg co w CSS. */
-const isWide = () => window.matchMedia('(min-width: 60rem)').matches;
 /** „zostały 3 próby”, „została 1 próba”, „zostało 5 prób”. */
 const attemptsLeftText = (n) => (n === 1 ? 'została 1 próba' : n % 10 >= 2 && n % 10 <= 4 && (n % 100 < 10 || n % 100 >= 20) ? `zostały ${n} próby` : `zostało ${n} prób`);
 /** Rozwinięte sekcje (<details data-keep>) przeżywają przerysowanie widoku. */
@@ -77,11 +76,12 @@ const isArchive = () => state.ref?.type === 'daily' && state.ref.date < addDays(
 function resetCaseUi() {
   state.accuse = { forged: null, proof: null, reason: null, alibis: {}, last: null };
   state.showAll = false;
-  state.tab = 'akta';
+  state.tab = 'inv';
+  state.ui = null;
+  state.uiFor = null;
   state.mapSel = [];
   state.boardSel = [];
   state.compare = [];
-  state.deskFilter = 'all';
   state.boardView = 'time';
   if (state.mapScrolls) delete state.mapScrolls.plan;
   state.modal = null;
@@ -644,43 +644,178 @@ function renderSetup() {
   </div>`;
 }
 
-function renderSuspects() {
-  const mine = myDesks();
-  return state.c.suspects.map((s) => {
-    const mark = progress.sus[s.id] || '';
-    const chipFor = (id) => {
-      const k = cardById(id);
-      const own = mine.includes(k.desk);
-      return `<button class="chip${own ? '' : ' chip-away'}" data-act="goto-card" data-id="${id}" title="${esc(k.title)}">${id}</button>`;
-    };
-    const inText = new Set();
-    // Kod karty w nawiasie zostaje w jednej linii z poprzedzającym słowem: „(bilet: D5).” nie łamie się w środku.
-    const alibiHtml = esc(s.alibi).replace(/(\S*\s)?\b([DSMZR]\d+)\)(\.?)/g, (m0, lead, id, dot) => {
-      inText.add(id);
-      return `<span class="alibi-ref">${lead || ''}${chipFor(id)})${dot}</span>`;
-    });
-    // Pozostałe dokumenty od tej osoby: osobna, podpisana linia (sam znaczek po alibi wyglądał jak błąd).
-    const extra = s.items.filter((id) => !inText.has(id)).sort((a, b) => a.localeCompare(b, 'pl', { numeric: true }));
-    const shortTitle = (t) => (/^\p{Lu}\p{Ll}/u.test(t) ? t[0].toLowerCase() + t.slice(1) : t);
-    const extraHtml = extra.length ? `<p class="sus-extra"><span class="sus-extra-label">${s.f ? 'Dostarczyła' : 'Dostarczył'} też:</span> ${extra.map((id) => {
-      const k = cardById(id);
-      return `<span class="sus-extra-item">${chipFor(id)} ${mine.includes(k.desk) ? esc(shortTitle(k.title)) : '<span class="muted">(u innego gracza)</span>'}</span>`;
-    }).join(' ')}</p>` : '';
-    return `
-    <li class="suspect mark-${mark || 'none'}">
-      <span class="avatar avatar-pic" aria-hidden="true">${portrait(s.full) || esc(initials(s.full))}</span>
-      <div class="suspect-body">
-        <div class="suspect-head">
-          <b>${esc(s.full)}</b> <span class="role">${esc(s.role)}</span>
-        </div>
-        <p class="alibi">${alibiHtml}</p>${extraHtml}
-      </div>
-      <div class="mark-toggle" role="group" aria-label="Twoja ocena: ${esc(s.full)}">
-        <button class="mk${mark === 'ok' ? ' on' : ''}" data-act="mark-sus" data-id="${s.id}" data-v="ok" aria-pressed="${mark === 'ok'}">alibi potwierdzone</button>
-        <button class="mk mk-x${mark === 'x' ? ' on' : ''}" data-act="mark-sus" data-id="${s.id}" data-v="x" aria-pressed="${mark === 'x'}">${s.f ? 'podejrzana' : 'podejrzany'}</button>
+// ---------------------------------------------------------------------------
+// Porządek śledztwa: krok 1 „Co się stało”, krok 2 „Teczki podejrzanych”, krok 3 „Akta i koperty”.
+// Każda karta ma jedno miejsce macierzyste (js/layout.js); teczki pokazują jeszcze odnośniki do kart,
+// które już widać i które wymieniają tę osobę.
+
+/** Stan widoku śledztwa (otwarty krok, teczka, rozwinięte karty). Zapisywany osobno dla każdej gry. */
+const freshUi = () => ({ reached: 1, s1Open: true, folder: null, exp: {}, closed: {}, seen: {}, onlyMarked: false });
+function uiKey() {
+  return state.mode === 'live' ? `ui:live:${state.live?.room || ''}` : `ui:${progressKey()}`;
+}
+function ui() {
+  const key = uiKey();
+  if (!state.ui || state.uiFor !== key) {
+    const saved = store.get(key);
+    const ok = saved && typeof saved === 'object' && saved.fp === state.c?.fingerprint;
+    state.ui = { ...freshUi(), ...(ok ? saved : {}) };
+    for (const f of ['exp', 'closed', 'seen']) state.ui[f] = { ...(state.ui[f] || {}) };
+    if (state.ui.folder && !state.c.suspects.some((x) => x.id === state.ui.folder)) state.ui.folder = null;
+    // Po wczytaniu strony wracamy tam, gdzie gracz skończył (zapis przy opuszczaniu strony).
+    state.pendingScroll = ok && Number.isFinite(saved.y) ? saved.y : null;
+    state.uiFor = key;
+  }
+  return state.ui;
+}
+function saveUi() {
+  if (!state.ui || !state.c) return;
+  store.set(uiKey(), { ...state.ui, fp: state.c.fingerprint });
+}
+
+/** Podział kart sprawy na miejsca (liczony raz na sprawę). */
+function places() {
+  if (state.placesFor !== state.c) {
+    state.places = placeCards(state.c);
+    state.placesFor = state.c;
+  }
+  return state.places;
+}
+const isMine = (k) => myDesks().includes(k.desk);
+/** Karta, którą gracz widzi: z jego biurek i nie w zamkniętej kopercie. */
+const canSeeCard = (k) => isMine(k) && !isSealed(k);
+const homeStep = (h) => (h.place === 'scene' ? 1 : h.place === 'folder' ? 2 : 3);
+const cardsWord = (n) => (n === 1 ? 'karta' : n % 10 >= 2 && n % 10 <= 4 && (n % 100 < 10 || n % 100 >= 20) ? 'karty' : 'kart');
+/** „Dostarczył 1 kartę / 3 karty / 5 kart” (biernik). */
+const cardsAcc = (n) => (n === 1 ? 'kartę' : cardsWord(n));
+const envWord = (n) => (n === 1 ? 'koperta' : n % 10 >= 2 && n % 10 <= 4 && (n % 100 < 10 || n % 100 >= 20) ? 'koperty' : 'kopert');
+
+/** Gdzie leży karta, krótko: „krok 1”, „teczka: Igor Malinowski”, „akta: Świadkowie”. */
+function homeLabel(k) {
+  const h = homeOf(k, state.c);
+  if (h.place === 'scene') return 'Krok 1 · z miejsca zdarzenia';
+  if (h.place === 'folder') return `Teczka ${state.c.suspects.findIndex((x) => x.id === h.sid) + 1} · ${suspectById(h.sid).full}`;
+  return `Akta · ${deskName(h.desk)}`;
+}
+
+/** Alibi z kodami kart jako znaczkami (kod w nawiasie zostaje w jednej linii z poprzedzającym słowem). */
+function alibiHtml(s) {
+  return esc(s.alibi).replace(/(\S*\s)?\b([DSMZR]\d+)\)(\.?)/g, (m0, lead, id, dot) => {
+    const k = cardById(id);
+    const own = k && isMine(k);
+    return `<span class="alibi-ref">${lead || ''}<button class="chip${own ? '' : ' chip-away'}" data-act="goto-card" data-id="${id}">${id}</button>)${dot}</span>`;
+  });
+}
+
+function markInfo(s) {
+  const m = progress.sus[s.id] || '';
+  if (m === 'ok') return { cls: 'ok', text: s.f ? 'wykluczona' : 'wykluczony', short: '✓' };
+  if (m === 'x') return { cls: 'x', text: s.f ? 'podejrzana' : 'podejrzany', short: '✗' };
+  return { cls: 'none', text: 'do oceny', short: '' };
+}
+
+function markToggle(s) {
+  const mark = progress.sus[s.id] || '';
+  return `<div class="mark-toggle" role="group" aria-label="Twoja ocena: ${esc(s.full)}">
+        <button class="mk${mark === 'ok' ? ' on' : ''}" data-act="mark-sus" data-id="${s.id}" data-v="ok" aria-pressed="${mark === 'ok'}">✓ ${s.f ? 'wykluczona' : 'wykluczony'}</button>
+        <button class="mk mk-x${mark === 'x' ? ' on' : ''}" data-act="mark-sus" data-id="${s.id}" data-v="x" aria-pressed="${mark === 'x'}">✗ ${s.f ? 'podejrzana' : 'podejrzany'}</button>
+      </div>`;
+}
+
+/** Etykieta koperty w wierszu: co trzeba zlecić. „Przejrzyj dokument „<tytuł>”” powtarza tylko tytuł, więc nic. */
+function sealLabel(k) {
+  return /^(Przejrzyj dokument|Zażądaj kopii dokumentu) „/.test(k.action.label) ? '' : k.action.label;
+}
+
+/**
+ * Podtytuł wiersza. Przy kopercie szczegóły czynności bez czasownika („Zabezpiecz nagranie: kamera nr 10 · Bulwar,
+ * 18:25–19:10” → „kamera nr 10 · Bulwar, 18:25–19:10”; pełna etykieta jest w rozwiniętym wierszu). Otwarta koperta bez
+ * podtytułu zachowuje ten sam opis, więc kamery da się odróżnić także po otwarciu.
+ */
+function rowSub(k, sealed) {
+  if (!sealed && k.sub) return k.sub;
+  return k.action ? sealLabel(k).replace(/^[^:„]{3,40}:\s*/, '') : '';
+}
+
+/** Numer przy wierszach, których tytułu i podtytułu nie da się odróżnić („Zdjęcie z oględzin · 1”, „· 2”). */
+function dupNums(cards) {
+  const t = (k) => (isMine(k) ? `${k.title}|${rowSub(k, isSealed(k))}` : '');
+  const count = {};
+  for (const k of cards) if (t(k)) count[t(k)] = (count[t(k)] || 0) + 1;
+  const seen = {};
+  const out = {};
+  for (const k of cards) if (count[t(k)] > 1) out[k.id] = (seen[t(k)] = (seen[t(k)] || 0) + 1);
+  return out;
+}
+
+/** Wiersz karty z miejscem na pełną kartę pod spodem. `o.key` odróżnia ten sam wiersz w różnych miejscach. */
+function cardRow(k, o) {
+  if (!isMine(k)) return awayRow(k);
+  const sealed = isSealed(k);
+  const aside = Boolean(progress.aside?.[k.id]);
+  const marked = Boolean(progress.marks?.[k.id]);
+  const by = k.by ? suspectById(k.by) : null;
+  const domKey = o.ref ? `ref-${o.key.replace(/[^\w-]/g, '-')}` : k.id;
+  const title = k.kind === 'witness' ? k.title.replace(/^Zeznanie:\s*/, '') : k.title;
+  const sub = rowSub(k, sealed);
+  const seen = !sealed && (ui().seen[k.id] || Boolean(k.action));
+  const body = o.exp
+    ? `<div class="ix-open-card">${sealed ? envPanel(k, o.ref ? `refcard-${domKey}` : `card-${k.id}`) : renderCard(k, { domId: o.ref ? `refcard-${domKey}` : `card-${k.id}`, keepAside: true })}${o.ref ? `<p class="ix-home"><button class="link-btn" data-act="goto-card" data-id="${k.id}">${icon('arrow-right')} ${esc(homeLabel(k))}</button></p>` : ''}</div>`
+    : '';
+  return `
+    <li class="ix-item${sealed ? ' is-sealed' : ''}${seen ? ' is-seen' : ''}${aside ? ' is-aside' : ''}${o.exp ? ' sel' : ''}${marked ? ' is-marked' : ''}" id="row-${domKey}">
+      <button class="ix-row" data-act="row" data-id="${k.id}" data-n="${o.step}" data-v="${esc(o.key)}" aria-expanded="${Boolean(o.exp)}">
+        <span class="card-id ix-id">${k.id}</span>
+        <span class="ix-ico">${icon(cardIcon(k))}</span>
+        <span class="ix-main"><span class="ix-title">${esc(title)}${o.dup ? ` · ${o.dup}` : ''}</span>${sub ? `<span class="ix-sub">${esc(sub)}</span>` : ''}</span>
+        <span class="ix-who">${by ? `<span class="ix-pt" aria-hidden="true">${portrait(by.full) || ''}</span><span class="ix-who-name">${esc(by.full)}</span>` : ''}</span>
+        <span class="ix-right">${sealed ? `<span class="ix-cost" aria-label="koperta, koszt ${fmtHM(k.action.cost)} h">${icon('lock')}${fmtHM(k.action.cost)}</span>` : `${aside ? '<span class="ix-tag">odłożona</span>' : ''}${marked ? '<span class="ix-star" aria-label="ważna">★</span>' : ''}`}</span>
+      </button>${body}
+    </li>`;
+}
+
+/** Karta z biurka innego gracza: szary wiersz bez treści. */
+function awayRow(k) {
+  return `
+    <li class="ix-item is-away" id="row-${k.id}">
+      <div class="ix-row" aria-disabled="true">
+        <span class="card-id ix-id">${k.id}</span>
+        <span class="ix-ico"></span>
+        <span class="ix-main"><span class="ix-title">u gracza ${seatOfDesk(k.desk)}</span><span class="ix-sub">${esc(deskName(k.desk))}</span></span>
+        <span class="ix-who"></span><span class="ix-right"></span>
       </div>
     </li>`;
-  }).join('');
+}
+
+/** Rozwinięta koperta: co trzeba zlecić, ile to kosztuje i przycisk „Otwórz” (z potwierdzeniem nadgodzin). */
+function envPanel(k, domId) {
+  const used = usedMin();
+  const bud = budgetMin();
+  const after = used + k.action.cost;
+  const extra = overtimeSec(after) - overtimeSec();
+  const overBudget = after > bud;
+  const confirming = state.confirm === `unlock:${k.id}`;
+  return `
+      <div class="env-panel${confirming ? ' confirming' : ''}" id="${domId}" data-card="${k.id}">
+        <p class="seal-action">${esc(k.action.label)}</p>
+        <p class="small muted">Koperta kosztuje <b>${fmtHM(k.action.cost)} h</b> śledztwa. Zostało ${fmtHM(Math.max(0, bud - used))} h${overBudget && state.mode !== 'team' ? `, potem nadgodziny: +${fmtPenalty(OVERTIME_PENALTY)} za każde 30 min` : ''}.</p>
+        <button class="btn btn-small env-open${confirming ? ' btn-primary' : ''}" data-act="unlock" data-id="${k.id}">${confirming ? `Nadgodziny +${fmtPenalty(extra)}. Zlecić?` : `${icon('lock')} Otwórz${overBudget ? ' (ponad budżet)' : ''}`}</button>
+      </div>`;
+}
+
+/** Postęp: krok 1 (przeczytany), teczki (ocenione), akta (przejrzane karty kroku 3). */
+function investigationProgress() {
+  const u = ui();
+  const p = places();
+  const akta = DESK_ORDER.flatMap((d) => p.akta[d] || []).map(cardById).filter(isMine);
+  const seen = akta.filter((k) => u.seen[k.id] || (k.action && !isSealedNow(k))).length;
+  return {
+    s1: u.reached >= 2,
+    rated: state.c.suspects.filter((x) => progress.sus[x.id]).length,
+    seen,
+    akta: akta.length,
+    sealed: akta.filter((k) => isSealedNow(k)).length,
+  };
 }
 
 /** Znacznik miejsca zdarzenia na planie: lupa przy kradzieży, płomień przy podpaleniu. */
@@ -732,12 +867,31 @@ function renderWindowBox(c) {
       <p class="w-note">${left}sprawca w środku przez całe ${c.window.to - c.window.from} min</p>`;
 }
 
-function renderAkta() {
+function budgetHtml() {
+  const used = usedMin();
+  const bud = budgetMin();
+  const pct = Math.min(100, Math.round((used / Math.max(1, bud)) * 100));
+  return `<div class="budget${used > bud ? ' over' : used >= bud * 0.8 ? ' warn' : ''}" title="${state.mode === 'team' ? 'W ekipie każdy ma własny budżet, a nadgodziny są tylko informacją.' : `Każde rozpoczęte pół godziny ponad budżet to +${fmtPenalty(OVERTIME_PENALTY)} do czasu.`}"><span class="budget-label">${icon('clock')} Śledztwo <b>${fmtHM(used)} / ${fmtHM(bud)} h</b></span><span class="budget-bar"><span style="width:${pct}%"></span></span><span class="budget-note">${state.mode === 'team' ? 'koperty kosztują czas' : `ponad budżet: +${fmtPenalty(OVERTIME_PENALTY)} za każde 30 min`}</span></div>`;
+}
+
+function rulesHtml() {
   const c = state.c;
-  const team = isTeamLike();
   return `
-  <section class="akta" aria-label="Akta sprawy">
-    <div class="akta-head">
+    <details class="rules-short" data-keep="rules"${keepOpen.rules ? ' open' : ''}>
+      <summary><h3 class="sec-label">Zasady w skrócie</h3></summary>
+      <ul>${rulesShortFor(c).map(([ic, r]) => `<li><span class="rs-ico">${icon(ic)}</span><span>${esc(r)}</span></li>`).join('')}</ul>
+      <details class="rules" data-keep="rules-full"${keepOpen['rules-full'] ? ' open' : ''}>
+        <summary>Pełne zasady</summary>
+        <ol>${rulesFor(c).map((r) => `<li>${esc(r)}</li>`).join('')}</ol>
+      </details>
+    </details>`;
+}
+
+/** Karta sprawy: tytuł, znaczniki, okno zdarzenia, meldunek, ślad i budżet śledztwa. */
+function caseHeadHtml() {
+  const c = state.c;
+  const tv = hasTraits(c) ? TRAIT_VARIANTS[c.traits.variant] : null;
+  return `
       <h2 class="akta-title">${esc(c.title)}</h2>
       <div class="facts-row">
         <span class="fchip">${icon('clock')}${esc(c.crimeDate.label.replace(/ \d{4}$/, ''))}</span>
@@ -748,23 +902,244 @@ function renderAkta() {
         ${c.damage ? `<span class="fchip">${icon('flame')}spłonęły ${esc(c.damage)}</span>` : ''}
       </div>
       ${renderWindowBox(c)}
-      <details class="intro-more" data-keep="intro"${keepOpen.intro ? ' open' : ''}><summary>Czytaj meldunek</summary><p class="intro">${esc(c.intro)}</p></details>
-      ${(() => { const used = usedMin(); const bud = budgetMin(); const pct = Math.min(100, Math.round((used / Math.max(1, bud)) * 100)); return `<div class="budget${used > bud ? ' over' : used >= bud * 0.8 ? ' warn' : ''}" title="${state.mode === 'team' ? 'W ekipie każdy ma własny budżet, a nadgodziny są tylko informacją.' : `Każde rozpoczęte pół godziny ponad budżet to +${fmtPenalty(OVERTIME_PENALTY)} do czasu.`}"><span class="budget-label">${icon('clock')} Śledztwo <b>${fmtHM(used)} / ${fmtHM(bud)} h</b></span><span class="budget-bar"><span style="width:${pct}%"></span></span><span class="budget-note">${state.mode === 'team' ? 'koperty kosztują czas' : `ponad budżet: +${fmtPenalty(OVERTIME_PENALTY)} za każde 30 min`}</span></div>`; })()}
-      ${c.innocentLie ? `<details class="lie-stamp"><summary>Kłamią 2 osoby</summary><p>Jeden fałszywy dowód podrzucił sprawca. Drugi to kłamstwo niewinnej osoby, która ukrywała coś niezwiązanego z ${crimeOf(c).ins}. ${hasTraits(c) ? 'Kłamca może nie mieć innego alibi, ale nie ma cechy sprawcy ze śladu z miejsca zdarzenia (wykaz jest pełny).' : 'Kłamca ma poza nim inne, potwierdzone alibi.'}</p></details>` : ''}
-      ${hasTraits(c) ? `<p class="trait-stamp">${icon(TRAIT_VARIANTS[c.traits.variant]?.icon || 'footprints')}<span><b>Ślad z miejsca:</b> ${esc(TRAIT_VARIANTS[c.traits.variant]?.label || 'cecha sprawcy')}. Kto nie ma cechy sprawcy, nie jest sprawcą.</span></p>` : ''}
-    </div>
-    <h3 class="sec-label">Podejrzani i ich alibi</h3>
-    <ul class="suspects">${renderSuspects()}</ul>
-    ${team ? `<p class="muted small">Szare kody to karty z biurek innych graczy. Kliknij kod, żeby sprawdzić, kto ma tę kartę.</p>` : ''}
-    <details class="rules-short" data-keep="rules"${keepOpen.rules || !isWide() ? ' open' : ''}>
-      <summary${isWide() ? '' : ' tabindex="-1" aria-disabled="true"'}><h3 class="sec-label">Zasady w skrócie</h3></summary>
-      <ul>${rulesShortFor(c).map(([ic, r]) => `<li><span class="rs-ico">${icon(ic)}</span><span>${esc(r)}</span></li>`).join('')}</ul>
-      <details class="rules" data-keep="rules-full"${keepOpen['rules-full'] ? ' open' : ''}>
-        <summary>Pełne zasady</summary>
-        <ol>${rulesFor(c).map((r) => `<li>${esc(r)}</li>`).join('')}</ol>
-      </details>
-    </details>
+      <details class="intro-more" data-keep="intro"${keepOpen.intro ? ' open' : ''}><summary>Czytaj cały meldunek</summary><p class="intro">${esc(c.intro)}</p></details>
+      ${tv ? `<p class="trait-stamp">${icon(tv.icon || 'footprints')}<span><b>Ślad z miejsca:</b> ${esc(tv.label)}. Kto nie ma cechy sprawcy, nie jest sprawcą.</span></p>` : ''}
+      ${c.innocentLie ? `<details class="lie-line" data-keep="lie"${keepOpen.lie ? ' open' : ''}><summary>${icon('drama')}<span><b>Kłamią 2 osoby:</b> sprawca i ktoś niewinny. <u>Co to znaczy?</u></span></summary><p>Jeden fałszywy dowód podrzucił sprawca. Drugi to kłamstwo niewinnej osoby, która ukrywała coś niezwiązanego z ${crimeOf(c).ins}. ${hasTraits(c) ? 'Kłamca może nie mieć innego alibi, ale nie ma cechy sprawcy ze śladu z miejsca zdarzenia (wykaz jest pełny).' : 'Kłamca ma poza nim inne, potwierdzone alibi.'}</p></details>` : ''}
+      ${budgetHtml()}`;
+}
+
+/** Jedna linia podsumowania kroku 1: okno · miejsce · ślad. */
+function caseSummary() {
+  const c = state.c;
+  const cr = crimeOf(c);
+  const win = cr.windowFrom === 'moment' && c.carafe ? `karafka ${fmt(c.carafe.set)}`
+    : cr.windowFrom === 'openings' ? `zapłon ${fmt(c.ignition)}`
+      : `${fmt(c.window.from)}–${fmt(c.window.to)}`;
+  const tv = hasTraits(c) ? TRAIT_VARIANTS[c.traits.variant] : null;
+  return { win, place: c.scene.name, trait: tv ? `ślad: ${tv.label}` : '', lie: c.innocentLie ? 'kłamią 2 osoby' : '' };
+}
+
+function stepHead(n, title, status, extra = '') {
+  return `<header class="st-head"><span class="st-num" aria-hidden="true">${n}</span><h2 class="st-title" id="st${n}-h"><span class="sr-only">Krok ${n}: </span>${title}</h2>${status ? `<span class="st-status">${status}</span>` : ''}${extra}</header>`;
+}
+
+function renderStep1() {
+  const u = ui();
+  const first = u.reached < 2;
+  if (!u.s1Open) {
+    const sm = caseSummary();
+    return `
+  <section class="step step-1 step-mini" id="step-1" aria-label="Krok 1: Co się stało">
+    <button class="st-mini" data-act="s1-toggle" aria-expanded="false">
+      <span class="st-num st-num-ok" aria-hidden="true">${icon('check')}</span>
+      <span class="st-title">Co się stało</span>
+      <span class="st-mini-line"><b class="mini-time">${esc(sm.win)}</b><span>${esc(sm.place)}</span>${sm.trait ? `<span>${esc(sm.trait)}</span>` : ''}${sm.lie ? `<span>${esc(sm.lie)}</span>` : ''}</span>
+      <span class="st-more"><span class="st-more-t">Rozwiń</span>${icon('chevron-right')}</span>
+    </button>
   </section>`;
+  }
+  const scene = places().scene.map(cardById);
+  const dup = dupNums(scene);
+  // Koperty ze śladem i wykazem (fakty śladu) stoją z jawnymi kartami; pozostałe koperty z oględzin to dodatki.
+  const extra = (k) => Boolean(k.action) && !(k.facts || []).some((f) => SCENE_FACTS.has(f.t));
+  const shown = scene.filter((k) => !extra(k));
+  const envs = scene.filter(extra);
+  const row = (k) => cardRow(k, { step: 1, key: k.id, exp: u.exp[1] === k.id, dup: dup[k.id] });
+  // Dodatkowe koperty z oględzin: zwinięty dział pod kartami (kolejność nie zmienia się po otwarciu).
+  const envClosed = u.closed.scene ?? true;
+  const left = envs.filter((k) => isSealed(k));
+  const envCount = [`${envs.length} ${envWord(envs.length)}`, left.length ? `razem ${fmtHM(left.reduce((a, k) => a + k.action.cost, 0))} h` : 'otwarte'].join(' · ');
+  return `
+  <section class="step step-1${first ? ' step-now' : ''}" id="step-1" aria-labelledby="st1-h">
+    ${stepHead(1, 'Co się stało', '', first ? '<span class="st-start">Zacznij tutaj</span>' : '<button class="link-btn st-fold" data-act="s1-toggle" aria-expanded="true">Zwiń</button>')}
+    <div class="akta-head st1-case">${caseHeadHtml()}</div>
+    ${shown.length ? `
+    <h3 class="st-sub">${hasTraits(state.c) ? 'Ślad, wykazy i oględziny' : 'Z miejsca zdarzenia'} <span class="st-sub-n">${shown.length} ${cardsWord(shown.length)}</span></h3>
+    <ul class="ix-list ix-boxed">${shown.map(row).join('')}</ul>` : ''}
+    ${envs.length ? `
+    <div class="ix-sec ix-sec-scene${envClosed ? '' : ' open'}" id="sec-scene">
+      <button class="ix-sec-head" data-act="sec" data-id="scene" aria-expanded="${!envClosed}">
+        <span class="ix-chev" aria-hidden="true">${icon('chevron-right')}</span>
+        <span class="ix-sec-ico" aria-hidden="true">${icon('lock')}</span>
+        <span class="ix-sec-name"><b>Koperty z oględzin</b><span class="ix-hint">dodatkowe zdjęcia i dokumenty, kosztują czas</span></span>
+        <span class="ix-count">${esc(envCount)}</span>
+      </button>
+      ${envClosed ? '' : `<ul class="ix-list">${envs.map(row).join('')}</ul>`}
+    </div>` : ''}
+    ${rulesHtml()}
+    ${first ? '<div class="st-next"><button class="btn btn-primary" data-act="s1-next">Dalej: teczki podejrzanych →</button></div>' : ''}
+  </section>`;
+}
+
+function renderFolder(s, i) {
+  const u = ui();
+  const open = u.folder === s.id;
+  const mk = markInfo(s);
+  const head = `
+      <button class="fd-head" data-act="folder" data-id="${s.id}" aria-expanded="${open}">
+        <span class="fd-num" aria-hidden="true">${i + 1}</span>
+        <span class="avatar avatar-pic fd-av" aria-hidden="true">${portrait(s.full) || esc(initials(s.full))}</span>
+        <span class="fd-main"><span class="fd-name"><b>${esc(s.full)}</b> <span class="role">${esc(s.role)}</span></span>${open ? '' : `<span class="fd-alibi">${esc(s.alibi)}</span>`}</span>
+        <span class="fd-mark fd-mark-${mk.cls}">${mk.short ? `${mk.short} ` : ''}${mk.text}</span>
+        <span class="fd-chev" aria-hidden="true">${icon('chevron-right')}</span>
+      </button>`;
+  if (!open) return `<li class="folder fd-${mk.cls}" id="folder-${s.id}">${head}</li>`;
+  const own = places().folders[s.id].map(cardById);
+  const ownMine = own.filter(isMine);
+  const ownAway = own.filter((k) => !isMine(k));
+  const ment = mentionsOf(state.c, s.id, canSeeCard);
+  const mentDup = dupNums(ment.map(cardById));
+  const n = state.c.suspects.length;
+  const g = s.f ? 'Dostarczyła' : 'Dostarczył';
+  return `
+    <li class="folder fd-open fd-${mk.cls}" id="folder-${s.id}">
+      ${head}
+      <div class="fd-body">
+        <p class="alibi fd-alibi-full">${alibiHtml(s)}</p>
+        <h3 class="fd-label">${g} <span class="st-sub-n">${own.length ? `${own.length} ${cardsAcc(own.length)}` : 'nic'}</span></h3>
+        ${ownMine.length ? `<div class="cards fd-cards">${ownMine.map((k) => renderCard(k)).join('')}</div>` : ''}
+        ${ownAway.length ? `<ul class="ix-list ix-boxed">${ownAway.map(awayRow).join('')}</ul>` : ''}
+        <h3 class="fd-label">Wspominają tę osobę <span class="st-sub-n">${ment.length ? `${ment.length} ${cardsWord(ment.length)}` : ''}</span></h3>
+        ${ment.length ? `<ul class="ix-list ix-boxed">${ment.map((id) => cardRow(cardById(id), { step: 2, key: `${s.id}:${id}`, ref: true, exp: u.exp[2] === `${s.id}:${id}`, dup: mentDup[id] })).join('')}</ul>`
+          : `<p class="muted small">Żadna widoczna karta nie wymienia jeszcze tej osoby.${state.c.cards.some((k) => isMine(k) && isSealed(k)) ? ' Mogą to zmienić otwarte koperty.' : ''}</p>`}
+        <div class="fd-foot">
+          ${markToggle(s)}
+          <button class="btn btn-small fd-next" data-act="folder-next" data-id="${s.id}">${i + 1 < n ? 'Następna teczka →' : 'Dalej: akta i koperty →'}</button>
+        </div>
+      </div>
+    </li>`;
+}
+
+function renderStep2() {
+  const u = ui();
+  const pr = investigationProgress();
+  const dim = u.reached < 2;
+  const sus = state.c.suspects;
+  if (dim) {
+    return `
+  <section class="step step-2 step-dim" id="step-2" aria-labelledby="st2-h">
+    ${stepHead(2, 'Teczki podejrzanych', `${sus.length} osób`)}
+    <p class="st-lead">Pięć alibi i dowody, które podejrzani sami przynieśli. Jedna teczka naraz.</p>
+    <p><button class="btn btn-small" data-act="step-open" data-n="2">Otwórz teczki</button></p>
+  </section>`;
+  }
+  return `
+  <section class="step step-2" id="step-2" aria-labelledby="st2-h">
+    ${stepHead(2, 'Teczki podejrzanych', `<b>${pr.rated}/${sus.length}</b> ocenionych`)}
+    <div class="fd-strip" role="group" aria-label="Teczki">
+      ${sus.map((s, i) => { const mk = markInfo(s); return `<button class="fd-tab fd-${mk.cls}${u.folder === s.id ? ' on' : ''}" data-act="folder-open" data-id="${s.id}" aria-pressed="${u.folder === s.id}" aria-label="Teczka ${i + 1}: ${esc(s.full)}, ${mk.text}"><span class="fd-tab-av">${portrait(s.full) || esc(initials(s.full))}${mk.short ? `<i class="fd-badge">${mk.short}</i>` : ''}</span><span class="fd-tab-n">${esc(s.first || s.full.split(' ')[0])}</span></button>`; }).join('')}
+    </div>
+    <ol class="folders">${sus.map(renderFolder).join('')}</ol>
+  </section>`;
+}
+
+function renderStep3() {
+  const u = ui();
+  const pr = investigationProgress();
+  if (u.reached < 2) {
+    return `
+  <section class="step step-3 step-dim" id="step-3" aria-labelledby="st3-h">
+    ${stepHead(3, 'Akta i koperty', `${pr.akta} ${cardsWord(pr.akta)}`)}
+    <p class="st-lead">Pozostałe dokumenty: rozkłady, rejestry, zdjęcia, zeznania. Koperty otwierasz za czas śledztwa.</p>
+    <p><button class="btn btn-small" data-act="step-open" data-n="3">Otwórz akta</button></p>
+  </section>`;
+  }
+  const p = places();
+  const mine = myDesks();
+  const marked = state.c.cards.filter((k) => isMine(k) && progress.marks?.[k.id]);
+  let body;
+  if (u.onlyMarked) {
+    body = marked.length
+      ? `<ul class="ix-list ix-boxed">${marked.map((k) => { const h = homeOf(k, state.c); const ref = h.place !== 'akta'; return cardRow(k, { step: 3, key: ref ? `m:${k.id}` : k.id, ref, exp: u.exp[3] === (ref ? `m:${k.id}` : k.id) }); }).join('')}</ul>`
+      : '<p class="muted small">Nic jeszcze nie oznaczono. Użyj „☆ Ważna” na karcie.</p>';
+  } else {
+    body = DESK_ORDER.map((d) => {
+      const ids = p.akta[d] || [];
+      if (!ids.length) return '';
+      const cards = ids.map(cardById);
+      const dup = dupNums(cards);
+      const own = mine.includes(d);
+      const closed = u.closed[d] ?? !own;
+      const def = DESK_DEFS.find((x) => x.id === d);
+      const open = cards.filter((k) => !isSealed(k)).length;
+      const sealed = cards.filter((k) => isSealed(k));
+      const cost = sealed.reduce((a, k) => a + k.action.cost, 0);
+      const count = own
+        ? [open ? `${open} ${open === 1 ? 'jawna' : 'jawnych'}` : '', sealed.length ? `${sealed.length} ${envWord(sealed.length)}` : '', sealed.length ? `razem ${fmtHM(cost)} h` : ''].filter(Boolean).join(' · ')
+        : `${cards.length} ${cardsWord(cards.length)} · u gracza ${seatOfDesk(d)}`;
+      return `
+    <div class="ix-sec${closed ? '' : ' open'}${own ? '' : ' ix-sec-away'}" id="sec-${d}">
+      <button class="ix-sec-head" data-act="sec" data-id="${d}" aria-expanded="${!closed}">
+        <span class="ix-chev" aria-hidden="true">${icon('chevron-right')}</span>
+        <span class="ix-sec-ico" aria-hidden="true">${icon(cardIcon(cards[0]))}</span>
+        <span class="ix-sec-name"><b>${esc(def.name)}</b><span class="ix-hint">${esc(def.hint)}</span></span>
+        <span class="ix-count">${esc(count)}</span>
+      </button>
+      ${closed ? '' : `<ul class="ix-list">${cards.map((k) => cardRow(k, { step: 3, key: k.id, exp: u.exp[3] === k.id, dup: dup[k.id] })).join('')}</ul>`}
+    </div>`;
+    }).join('');
+  }
+  return `
+  <section class="step step-3" id="step-3" aria-labelledby="st3-h">
+    ${stepHead(3, 'Akta i koperty', `<b>${pr.seen}/${pr.akta}</b> przejrzanych`)}
+    <div class="ix-tools">
+      <button class="fchip-btn${u.onlyMarked ? ' on' : ''}" data-act="only-marked" aria-pressed="${u.onlyMarked}">★ Ważne <span class="tab-n">${marked.length}</span></button>
+      ${pr.sealed ? `<span class="muted small">${pr.sealed} ${envWord(pr.sealed)} do otwarcia</span>` : ''}
+    </div>
+    ${body}
+  </section>`;
+}
+
+/** Lewa kolumna na komputerze: kroki, teczki z oceną, licznik akt, ważne karty, budżet, zasady. */
+function renderPlanPanel() {
+  const u = ui();
+  const pr = investigationProgress();
+  const sm = caseSummary();
+  const p = places();
+  const mine = myDesks();
+  const marked = state.c.cards.filter((k) => isMine(k) && progress.marks?.[k.id]);
+  const cls = (n) => (n === 1 ? (pr.s1 ? 'ss-done' : 'ss-now') : u.reached < 2 ? 'ss-lock' : n === 2 && pr.rated === state.c.suspects.length ? 'ss-done' : 'ss-now');
+  return `
+  <aside class="plan-side" aria-label="Plan śledztwa">
+    <p class="side-label">Plan śledztwa</p>
+    <ol class="side-steps">
+      <li class="${cls(1)}">
+        <button class="ss-btn" data-act="step-go" data-n="1"><span class="ss-n" aria-hidden="true">${pr.s1 ? icon('check') : '1'}</span><span><b>Co się stało</b><span class="ss-sub">${esc(sm.win)} · ${esc(sm.place)}</span></span></button>
+      </li>
+      <li class="${cls(2)}">
+        <button class="ss-btn" data-act="step-go" data-n="2"><span class="ss-n" aria-hidden="true">${pr.rated === state.c.suspects.length ? icon('check') : '2'}</span><span><b>Teczki podejrzanych</b><span class="ss-sub">${pr.rated}/${state.c.suspects.length} ocenionych</span></span></button>
+        <ul class="ss-list">
+          ${state.c.suspects.map((s, i) => { const mk = markInfo(s); return `<li><button class="ss-person fd-${mk.cls}${u.folder === s.id && u.reached >= 2 ? ' now' : ''}" data-act="folder-open" data-id="${s.id}"><span class="ss-pt" aria-hidden="true">${portrait(s.full) || ''}</span><span class="ss-pname">${i + 1}. ${esc(s.full)}</span><span class="ss-mk" aria-label="${mk.text}">${mk.short || '·'}</span></button></li>`; }).join('')}
+        </ul>
+      </li>
+      <li class="${cls(3)}">
+        <button class="ss-btn" data-act="step-go" data-n="3"><span class="ss-n" aria-hidden="true">3</span><span><b>Akta i koperty</b><span class="ss-sub">${pr.seen}/${pr.akta} przejrzanych${pr.sealed ? ` · ${pr.sealed} ${envWord(pr.sealed)}` : ''}</span></span></button>
+        <ul class="ss-list ss-secs">
+          ${DESK_ORDER.filter((d) => (p.akta[d] || []).length).map((d) => `<li><button class="ss-sec${mine.includes(d) ? '' : ' away'}" data-act="sec-go" data-id="${d}"><span>${esc(deskName(d))}</span><span class="ss-cnt">${(p.akta[d] || []).length}</span></button></li>`).join('')}
+        </ul>
+      </li>
+    </ol>
+    ${marked.length ? `<div class="ss-marked"><span class="ss-mlabel">★ Ważne</span> ${marked.map((k) => `<button class="chip" data-act="goto-card" data-id="${k.id}" title="${esc(k.title)}">${k.id}</button>`).join(' ')}</div>` : ''}
+    ${budgetHtml()}
+    ${rulesHtml()}
+  </aside>`;
+}
+
+/** Pasek postępu pod zakładkami (telefon): 1 Sprawa ✓ · 2 Teczki 2/5 · 3 Akta 4/18. */
+function renderStrip() {
+  const u = ui();
+  const pr = investigationProgress();
+  const n = state.c.suspects.length;
+  const sp = (i, label, val, done) => `<button class="sp${done ? ' sp-done' : ''}${i > 1 && u.reached < 2 ? ' sp-lock' : ''}" data-act="step-go" data-n="${i}"><span class="sp-n" aria-hidden="true">${done ? icon('check') : i}</span><span class="sp-t">${label}</span><span class="sp-p">${val}</span></button>`;
+  return `<nav class="inv-strip" aria-label="Postęp śledztwa"><div class="inv-strip-inner">
+    ${sp(1, 'Sprawa', pr.s1 ? 'gotowe' : 'zacznij', pr.s1)}
+    ${sp(2, 'Teczki', `${pr.rated}/${n}`, pr.rated === n)}
+    ${sp(3, 'Akta', `${pr.seen}/${pr.akta}`, false)}
+  </div></nav>`;
+}
+
+function renderInvestigation() {
+  return `<div class="inv">${renderStep1()}${renderStep2()}${renderStep3()}</div>`;
 }
 
 /**
@@ -791,9 +1166,11 @@ function lineHtml(l) {
 function renderCard(k, opts = {}) {
   const by = k.by ? suspectById(k.by) : null;
   const marked = progress?.marks?.[k.id];
-  if (!opts.noActions && progress?.aside?.[k.id]) {
+  const aside = Boolean(progress?.aside?.[k.id]);
+  const domId = opts.domId || `card-${k.id}`;
+  if (!opts.noActions && aside && !opts.keepAside) {
     return `
-  <article class="card card-aside" id="card-${k.id}" data-card="${k.id}">
+  <article class="card card-aside" id="${domId}" data-card="${k.id}">
     <button class="aside-row" data-act="aside-card" data-id="${k.id}" aria-label="Pokaż odłożoną kartę ${k.id}">
       <span class="card-id">${k.id}</span><span class="card-ico">${icon(cardIcon(k))}</span><span class="aside-title">${esc(k.title)}</span><span class="aside-tag">odłożona · pokaż</span>
     </button>
@@ -808,7 +1185,7 @@ function renderCard(k, opts = {}) {
     // Koperta jako mały kafelek: tytuł, co trzeba zlecić i koszt. Kafelki stoją w siatce pod jawnymi kartami.
     const label = /^(Przejrzyj dokument|Zażądaj kopii dokumentu) „/.test(k.action.label) ? '' : k.action.label;
     return `
-  <article class="card card-sealed env-tile${confirming ? ' confirming' : ''}" id="card-${k.id}" data-card="${k.id}">
+  <article class="card card-sealed env-tile${confirming ? ' confirming' : ''}" id="${domId}" data-card="${k.id}">
     <header class="env-head">
       <span class="card-id">${k.id}</span>
       <span class="env-cost" aria-label="koszt ${k.action.cost} min">−${fmtHM(k.action.cost)}</span>
@@ -822,7 +1199,7 @@ function renderCard(k, opts = {}) {
   const look = cardLook(k);
   const visual = cardVisual(k, { suspectById });
   return `
-  <article class="card card-${k.kind}${look ? ` look-${look}` : ''}${marked ? ' card-marked' : ''}${opts.highlight ? ' card-hl' : ''}" id="card-${k.id}" data-card="${k.id}">
+  <article class="card card-${k.kind}${look ? ` look-${look}` : ''}${marked ? ' card-marked' : ''}${opts.highlight ? ' card-hl' : ''}${aside && !opts.noActions ? ' card-is-aside' : ''}" id="${domId}" data-card="${k.id}">
     <header class="card-head">
       <span class="card-id">${k.id}</span>
       <div class="card-titles">
@@ -844,7 +1221,7 @@ function renderCard(k, opts = {}) {
       <button class="link-btn" data-act="mark-card" data-id="${k.id}" aria-pressed="${Boolean(marked)}">${marked ? '★ Ważna' : '☆ Ważna'}</button>
       ${isPinnable(k) && k.kind !== 'supplied' && state.c.difficulty > 2 ? `<button class="link-btn${(progress.pins || []).includes(k.id) ? ' on-board' : ''}" data-act="pin-card" data-id="${k.id}" aria-pressed="${(progress.pins || []).includes(k.id)}">${(progress.pins || []).includes(k.id) ? 'Na tablicy ✓' : 'Na tablicę'}</button>` : ''}
       <button class="link-btn${(state.compare || []).includes(k.id) ? ' on-board' : ''}" data-act="compare-card" data-id="${k.id}" aria-pressed="${(state.compare || []).includes(k.id)}">${(state.compare || []).includes(k.id) ? 'Porównuję ✓' : 'Porównaj'}</button>
-      <button class="link-btn" data-act="aside-card" data-id="${k.id}">Odłóż</button>
+      <button class="link-btn" data-act="aside-card" data-id="${k.id}" aria-pressed="${aside}">${aside ? 'Przywróć' : 'Odłóż'}</button>
       ${state.mode === 'solo' ? '' : `<button class="link-btn" data-act="copy-card" data-id="${k.id}">Kopiuj</button>`}
       ${state.mode === 'live' ? (onTable(k.id) ? `<span class="link-btn on-table">Na stole ✓</span>` : `<button class="link-btn" data-act="table" data-id="${k.id}">Połóż na stół</button>`) : ''}
     </footer>`}
@@ -854,19 +1231,6 @@ function renderCard(k, opts = {}) {
 function cardPlainText(k) {
   const by = k.by ? suspectById(k.by) : null;
   return [`[${k.id}] ${k.title}${k.sub ? ` (${k.sub})` : ''}${by ? ` · ${by.f ? 'dostarczyła' : 'dostarczył'}: ${by.full}` : ''}`, ...k.lines].join('\n');
-}
-
-function renderDesk(desk) {
-  const cards = state.c.cards.filter((k) => k.desk === desk);
-  const def = DESK_DEFS.find((d) => d.id === desk);
-  return `
-  <section class="desk" aria-label="Biurko ${esc(def.name)}">
-    <header class="desk-head">
-      <h2>${esc(def.name)}</h2>
-      <p class="muted small">${cards.length} ${cards.length >= 2 && cards.length <= 4 ? 'karty' : 'kart'} · ${esc(def.hint)}</p>
-    </header>
-    <div class="cards">${cards.map((k) => renderCard(k)).join('')}</div>
-  </section>`;
 }
 
 // ---------------------------------------------------------------------------
@@ -940,7 +1304,7 @@ function renderBoardTab() {
 function renderBoardTimeline() {
   const c = state.c;
   const canSee = (k) => myDesks().includes(k.desk) && !isSealed(k);
-  const noMapText = !hasTownMap(c) ? 'czasy dotarcia są na biurku „Mapa i rozkłady”' : 'zapytaj osobę z planem miasta';
+  const noMapText = !hasTownMap(c) ? 'czasy dotarcia są w aktach (krok 3), w dziale „Mapa i rozkłady”' : 'zapytaj osobę z planem miasta';
   return renderBoard({ c, pins: progress.pins || [], sel: state.boardSel || [], canSee, hasMap: hasMapTab(), sceneCell: SCENE_CELLS[sceneIdOf(c)], autoAll: c.difficulty <= 2, noMapText });
 }
 
@@ -958,7 +1322,7 @@ function renderNotes() {
 
 function renderTopbar() {
   const c = state.c;
-  const label = c.kind === 'daily' ? `Sprawa nr ${c.number}<span class="tb-fp"> · ${esc(c.fingerprint)}</span>` : `Trening ${esc(c.code)}`;
+  const label = c.kind === 'daily' ? `<span class="tb-case">Sprawa </span>nr ${c.number}<span class="tb-fp"> · ${esc(c.fingerprint)}</span>` : `Trening ${esc(c.code)}`;
   const who = state.mode === 'solo' ? 'solo' : state.mode === 'live'
     ? `na żywo · gracz ${state.seat} z ${state.teamSize} · ${state.live?.rs?.players.filter((p) => p.online).length ?? 0} online${state.live?.status === 'open' ? '' : state.live?.status === 'stopped' ? ' · rozłączono' : ' · łączenie…'}`
     : `gracz ${state.seat} z ${state.teamSize}`;
@@ -980,13 +1344,12 @@ function renderTopbar() {
 }
 
 function renderTabs() {
-  // Trzy miejsca zamiast dziewięciu: sprawa, wszystkie dowody (z filtrami biurek) i tablica (oś czasu, plan, notatki).
-  const ownCards = state.c.cards.filter((k) => myDesks().includes(k.desk)).length;
-  const tabs = [{ id: 'akta', label: 'Sprawa' }, { id: 'evidence', label: `Dowody ${ownCards}` }, { id: 'board', label: 'Tablica' }, ...(state.mode === 'live' ? [{ id: 'table', label: `Stół ${state.live?.rs?.table.length ?? 0}` }] : [])];
+  // Dwa miejsca: śledztwo (sprawa → teczki → akta) i tablica (oś czasu, plan, notatki); na żywo także stół.
+  const tabs = [{ id: 'inv', label: 'Śledztwo' }, { id: 'board', label: 'Tablica' }, ...(state.mode === 'live' ? [{ id: 'table', label: `Stół ${state.live?.rs?.table.length ?? 0}` }] : [])];
   return `
-  <nav class="tabs" aria-label="Biurka">
+  <nav class="tabs" aria-label="Widok">
     <div class="tabs-inner">
-      ${tabs.map((t) => `<button class="tab${state.tab === t.id ? ' on' : ''}${t.id === 'akta' ? ' tab-akta' : ''}" data-act="tab" data-tab="${t.id}" aria-current="${state.tab === t.id ? 'page' : 'false'}">${esc(t.label)}</button>`).join('')}
+      ${tabs.map((t) => `<button class="tab${state.tab === t.id ? ' on' : ''}" data-act="tab" data-tab="${t.id}" aria-current="${state.tab === t.id ? 'page' : 'false'}">${esc(t.label)}</button>`).join('')}
     </div>
   </nav>`;
 }
@@ -1007,53 +1370,21 @@ function renderGate() {
 
 function renderGame() {
   if (!progress.startedAt) return renderGate();
-  const mine = myDesks();
-  // Stare nazwy zakładek (biurka, plan, notatki) prowadzą do nowych miejsc.
-  if (mine.includes(state.tab)) { state.deskFilter = state.tab; state.tab = 'evidence'; }
+  // Stare nazwy zakładek (sprawa, dowody, biurka, plan, notatki) prowadzą do nowych miejsc.
+  if (['akta', 'evidence', ...DESK_ORDER].includes(state.tab)) state.tab = 'inv';
   if (state.tab === 'plan') { state.boardView = 'plan'; state.tab = 'board'; }
   if (state.tab === 'notes') { state.boardView = 'notes'; state.tab = 'board'; }
-  if (!['akta', 'evidence', 'board', 'table'].includes(state.tab) || (state.tab === 'table' && state.mode !== 'live')) state.tab = 'akta';
-  const right = state.tab === 'akta' ? 'evidence' : state.tab;
-  const rightHtml = right === 'table' ? renderTable() : right === 'board' ? renderBoardTab() : renderEvidence();
+  if (!['inv', 'board', 'table'].includes(state.tab) || (state.tab === 'table' && state.mode !== 'live')) state.tab = 'inv';
+  const rightHtml = state.tab === 'table' ? renderTable() : state.tab === 'board' ? renderBoardTab() : renderInvestigation();
   return `
   <div class="sticky-head">${renderTopbar()}${renderTabs()}</div>
-  <div class="game view-${state.tab === 'akta' ? 'akta' : 'other'}${state.tab === 'plan' || state.tab === 'board' ? ' view-plan' : ''}">
-    <div class="col-left">${renderAkta()}</div>
+  ${state.tab === 'inv' ? renderStrip() : ''}
+  <div class="game game-inv view-${state.tab === 'inv' ? 'inv' : 'other'}${state.tab === 'board' ? ' view-plan' : ''}">
+    <div class="col-left">${renderPlanPanel()}</div>
     <div class="col-right">${rightHtml}</div>
   </div>
   ${renderCompareTray()}
   ${renderModal()}`;
-}
-
-/** Wszystkie dowody gracza w jednym miejscu, z filtrami biurek. */
-function renderEvidence() {
-  const mine = myDesks();
-  const f = state.deskFilter && (mine.includes(state.deskFilter) || state.deskFilter === 'marked') ? state.deskFilter : 'all';
-  const own = state.c.cards.filter((k) => mine.includes(k.desk));
-  const marked = own.filter((k) => progress.marks?.[k.id]);
-  const chip = (id, label, n) => `<button class="fchip-btn${f === id ? ' on' : ''}" data-act="desk-filter" data-id="${id}" aria-pressed="${f === id}">${label}${n !== undefined ? ` <span class="tab-n">${n}</span>` : ''}</button>`;
-  const deskBlock = (d) => {
-    // Najpierw jawne karty, pod nimi koperty jako małe kafelki (mniej przewijania przez zamknięte dokumenty).
-    const cards = own.filter((k) => k.desk === d);
-    const open = cards.filter((k) => !isSealed(k));
-    const sealed = cards.filter((k) => isSealed(k));
-    // Gdy w kategorii są same koperty, drugi nagłówek „Koperty do zlecenia” tylko by dublował pierwszy.
-    return `<h3 class="sec-label desk-label">${icon(cardIcon(cards[0] || {}))} ${esc(deskName(d))} <span class="muted small">${cards.length}${!open.length && sealed.length ? ' · wszystkie w kopertach' : ''}</span></h3>
-      ${open.length ? `<div class="cards">${open.map((k) => renderCard(k)).join('')}</div>` : ''}
-      ${sealed.length ? `${open.length ? `<p class="env-label">${icon('lock')} Koperty do zlecenia · ${sealed.length}</p>` : ''}<div class="env-grid">${sealed.map((k) => renderCard(k)).join('')}</div>` : ''}`;
-  };
-  const body = f === 'all' ? mine.map(deskBlock).join('') : f === 'marked'
-    ? `<div class="cards">${marked.map((k) => renderCard(k)).join('') || '<p class="muted">Nic jeszcze nie oznaczono. Użyj „☆ Ważna” na karcie.</p>'}</div>`
-    : deskBlock(f);
-  return `
-  <section class="evidence" aria-label="Dowody">
-    <div class="filter-row" role="group" aria-label="Pokaż">
-      ${chip('all', 'Wszystkie', own.length)}
-      ${mine.map((d) => chip(d, esc(deskName(d)), own.filter((k) => k.desk === d).length)).join('')}
-      ${chip('marked', '★ Ważne', marked.length)}
-    </div>
-    ${body}
-  </section>`;
 }
 
 /** Pasek porównania (karty wybrane przyciskiem „Porównaj”). */
@@ -1129,13 +1460,18 @@ function hintTexts() {
     const it = items.find(safe);
     out.push(`${suspectById(id).full} ma alibi potwierdzone przez niezależne źródło. Zobacz karty ${it.refs.slice(0, -1).join(', ')} i ${it.refs[it.refs.length - 1]}.`);
   } else {
-    out.push(`${isTeamLike() ? 'Zacznijcie' : 'Zacznij'} od czasów dotarcia na biurku „Mapa i rozkłady”.`);
+    out.push(`${isTeamLike() ? 'Zacznijcie' : 'Zacznij'} od czasów dotarcia: krok 3 „Akta i koperty”, dział „Mapa i rozkłady”.`);
   }
   // Sprawa z cechą: kłamca nie ma cechy ze śladu (karty śladu i wykazu, bez wskazywania osoby).
   if (sol.explain.trait) out[0] += ` Dwie osoby mają obalone dowody: którą z nich jest sprawca, rozstrzyga ślad z miejsca (karty ${sol.explain.trait.refs.join(', ')}).`;
   const forged = sol.explain.forged;
-  const refDesk = cardById((forged.proofRefs || forged.refs).find((r) => r !== forged.card))?.desk;
-  out.push(`Fałszywkę obala karta z biurka „${deskName(refDesk)}”.${isTeamLike() ? ` Ma je gracz ${seatOfDesk(refDesk)}.` : ''}`);
+  // Gdzie szukać karty-obalenia: miejsce w porządku śledztwa (krok, teczki albo dział akt), bez numeru karty.
+  const refCard = cardById((forged.proofRefs || forged.refs).find((r) => r !== forged.card));
+  const refHome = homeOf(refCard, state.c);
+  const where = refHome.place === 'scene' ? 'z kroku 1, spośród kart z miejsca zdarzenia'
+    : refHome.place === 'folder' ? `z teczek podejrzanych (krok 2): to dowód, który ktoś z nich sam przyniósł`
+      : `z kroku 3 „Akta i koperty”, dział „${deskName(refCard.desk)}”`;
+  out.push(`Fałszywkę obala karta ${where}.${isTeamLike() ? ` Leży u gracza ${seatOfDesk(refCard.desk)}.` : ''}`);
   // Podpowiedź 3 wskazuje trop (czyj pobyt albo jaka tabela), ale nie numer karty.
   const keyCard = cardById((forged.proofRefs || forged.refs).find((r) => r !== forged.card));
   if (forged.physical && forged.about) {
@@ -1157,7 +1493,7 @@ function renderModal() {
     const confirming = state.confirm === 'hint';
     body = `
       <h2 tabindex="-1">Podpowiedzi</h2>
-      ${used.length ? `<ol class="hint-list">${used.map((t) => `<li>${esc(t)}</li>`).join('')}</ol>` : '<p class="muted">Nie użyto jeszcze żadnej podpowiedzi.</p>'}
+      ${used.length ? `<ol class="hint-list">${used.map((t) => `<li>${esc(t).replace(/\b([DSMZR]\d+)\b/g, (m, id) => { const k = cardById(id); return k ? `<button class="chip${isMine(k) ? '' : ' chip-away'}" data-act="goto-card" data-id="${id}">${id}</button>` : m; })}</li>`).join('')}</ol>` : '<p class="muted">Nie użyto jeszcze żadnej podpowiedzi.</p>'}
       ${progress.hints < texts.length
         ? `<button class="btn ${confirming ? 'btn-primary' : ''}" data-act="hint">${confirming ? `Na pewno? +${fmtPenalty(CONFIG.hintPenalty)} do czasu` : `Pokaż podpowiedź ${progress.hints + 1} z 3`}</button>`
         : '<p class="muted">To już wszystkie podpowiedzi.</p>'}`;
@@ -1791,6 +2127,13 @@ function render() {
   }
   // Strona zostaje tam, gdzie była (przerysowanie podmienia cały widok i przeglądarka potrafi go podskoczyć).
   if (state.screen === lastScreen && !state.modal) window.scrollTo(0, winY);
+  if (state.pendingScroll != null && state.screen === 'game' && app.querySelector('.inv')) {
+    const y = state.pendingScroll;
+    state.pendingScroll = null;
+    // go() przewija na górę zaraz po render(), więc pozycję ustawiamy też w następnej klatce.
+    window.scrollTo(0, y);
+    requestAnimationFrame(() => window.scrollTo(0, y));
+  }
   // Plan miasta: przy odświeżeniu zostaje przewinięty tam, gdzie był; za pierwszym razem pokazuje miejsce kradzieży.
   const wrap = app.querySelector('.town-wrap');
   const mapScroll = wrap && state.mapScrolls?.[wrap.dataset.scrollKey];
@@ -1836,27 +2179,63 @@ function render() {
   }
 }
 
+const smooth = () => (window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth');
+
+/** Przewija do elementu (po przerysowaniu) z miejscem na przyklejony nagłówek (scroll-margin w CSS). */
+function scrollToId(id, block = 'start') {
+  const el = document.getElementById(id);
+  if (el) el.scrollIntoView({ behavior: smooth(), block });
+  return el;
+}
+
+/** Prowadzi do miejsca macierzystego karty: otwiera krok, teczkę albo dział, rozwija kartę i przewija do niej. */
 function gotoCard(id) {
   const k = cardById(id);
-  if (!myDesks().includes(k.desk)) {
+  if (!k) return;
+  if (!isMine(k)) {
     showToast(`Karta ${id} leży na biurku „${deskName(k.desk)}”. Ma ją gracz ${seatOfDesk(k.desk)}.`);
     return;
   }
-  state.tab = 'evidence';
-  if (state.deskFilter && state.deskFilter !== 'all' && state.deskFilter !== k.desk) state.deskFilter = k.desk;
-  if (state.modal === 'compare') state.modal = null;
+  const u = ui();
+  const h = homeOf(k, state.c);
+  state.tab = 'inv';
+  if (state.modal === 'compare' || state.modal === 'hints') state.modal = null;
+  if (h.place === 'scene') {
+    u.s1Open = true;
+    if (k.action) u.closed.scene = false;
+    u.exp[1] = id;
+  } else if (h.place === 'folder') {
+    u.reached = Math.max(u.reached, 2);
+    u.folder = h.sid;
+  } else {
+    u.reached = Math.max(u.reached, 2);
+    u.onlyMarked = false;
+    u.closed[h.desk] = false;
+    u.exp[3] = id;
+  }
+  u.seen[id] = true;
+  saveUi();
   render();
-  const el = document.getElementById(`card-${id}`);
+  const el = document.getElementById(`card-${id}`) || document.getElementById(`row-${id}`);
   if (el) {
-    el.scrollIntoView({ behavior: window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth', block: 'center' });
+    el.scrollIntoView({ behavior: smooth(), block: el.offsetHeight > window.innerHeight * 0.6 ? 'start' : 'center' });
     el.classList.add('card-flash');
     setTimeout(() => el.classList.remove('card-flash'), 1600);
   }
 }
 
+/** Otwiera teczkę (jedna naraz) i przewija do jej nagłówka. */
+function openFolder(sid, toggle = false) {
+  const u = ui();
+  u.reached = Math.max(u.reached, 2);
+  u.folder = toggle && u.folder === sid ? null : sid;
+  saveUi();
+  state.tab = 'inv';
+  render();
+  if (u.folder) scrollToId(`folder-${sid}`);
+}
+
 app.addEventListener('click', (e) => {
-  // Na telefonie „Zasady w skrócie” są zawsze rozwinięte: Enter ani klik nie zwijają ich (dotyk nie mógłby ich rozwinąć).
-  if (!isWide() && e.target.closest('.rules-short > summary')) { e.preventDefault(); return; }
   const target = e.target.closest('[data-act]');
   if (!target) return;
   const act = target.dataset.act;
@@ -1895,6 +2274,103 @@ app.addEventListener('click', (e) => {
       window.scrollTo(0, 0);
       break;
     case 'goto-card': gotoCard(target.dataset.id); break;
+    case 's1-next': {
+      const u = ui();
+      u.reached = Math.max(u.reached, 2);
+      u.s1Open = false;
+      if (!u.folder) u.folder = state.c.suspects[0].id;
+      saveUi();
+      render();
+      scrollToId('step-2');
+      break;
+    }
+    case 's1-toggle': {
+      const u = ui();
+      u.s1Open = !u.s1Open;
+      saveUi();
+      render();
+      if (u.s1Open) scrollToId('step-1');
+      break;
+    }
+    case 'step-open': {
+      const u = ui();
+      u.reached = Math.max(u.reached, 2);
+      if (target.dataset.n === '2' && !u.folder) u.folder = state.c.suspects[0].id;
+      saveUi();
+      render();
+      scrollToId(`step-${target.dataset.n}`);
+      break;
+    }
+    case 'step-go': {
+      const u = ui();
+      const n = Number(target.dataset.n);
+      state.tab = 'inv';
+      if (n === 1) u.s1Open = true;
+      else u.reached = Math.max(u.reached, 2);
+      if (n === 2 && !u.folder) u.folder = state.c.suspects[0].id;
+      saveUi();
+      render();
+      scrollToId(`step-${n}`);
+      break;
+    }
+    case 'folder': openFolder(target.dataset.id, true); break;
+    case 'folder-open': openFolder(target.dataset.id); break;
+    case 'folder-next': {
+      const sus = state.c.suspects;
+      const i = sus.findIndex((x) => x.id === target.dataset.id);
+      if (i + 1 < sus.length) { openFolder(sus[i + 1].id); break; }
+      const u = ui();
+      u.folder = null;
+      saveUi();
+      render();
+      scrollToId('step-3');
+      break;
+    }
+    case 'row': {
+      const u = ui();
+      const n = target.dataset.n;
+      const key = target.dataset.v;
+      const was = u.exp[n] === key;
+      u.exp[n] = was ? null : key;
+      if (!was) u.seen[target.dataset.id] = true;
+      state.confirm = null;
+      saveUi();
+      render();
+      if (!was) {
+        const row = target.closest('.ix-item')?.id;
+        const el = row && document.getElementById(row);
+        // Rozwinięta karta ma być widoczna: jeśli wychodzi poza dół ekranu, podsuwamy wiersz do góry.
+        if (el && el.getBoundingClientRect().bottom > window.innerHeight) el.scrollIntoView({ behavior: smooth(), block: 'start' });
+      }
+      break;
+    }
+    case 'sec': {
+      const u = ui();
+      const d = target.dataset.id;
+      const closed = u.closed[d] ?? (d === 'scene' || !myDesks().includes(d));
+      u.closed[d] = !closed;
+      saveUi();
+      render();
+      break;
+    }
+    case 'sec-go': {
+      const u = ui();
+      u.reached = Math.max(u.reached, 2);
+      u.onlyMarked = false;
+      u.closed[target.dataset.id] = false;
+      saveUi();
+      state.tab = 'inv';
+      render();
+      scrollToId(`sec-${target.dataset.id}`);
+      break;
+    }
+    case 'only-marked': {
+      const u = ui();
+      u.onlyMarked = !u.onlyMarked;
+      saveUi();
+      render();
+      break;
+    }
     case 'map-pick': {
       const key = target.dataset.place;
       const sel = state.mapSel || [];
@@ -1931,7 +2407,6 @@ app.addEventListener('click', (e) => {
     }
     case 'board-clear': state.boardSel = []; render(); break;
     case 'board-view': state.tab = 'board'; state.boardView = target.dataset.id; render(); window.scrollTo(0, 0); break;
-    case 'desk-filter': state.deskFilter = target.dataset.id; render(); window.scrollTo(0, 0); break;
     case 'compare-card': {
       const id = target.dataset.id;
       const list = state.compare || [];
@@ -2128,6 +2603,13 @@ document.addEventListener('keydown', (e) => {
   }
 });
 
+// Pozycja przewinięcia śledztwa przeżywa odświeżenie strony.
+window.addEventListener('pagehide', () => {
+  if (state.screen !== 'game' || state.tab !== 'inv' || !state.ui) return;
+  state.ui.y = Math.round(window.scrollY);
+  saveUi();
+});
+
 // Po powrocie do karty (np. następnego dnia) pokaż aktualną sprawę dnia.
 document.addEventListener('visibilitychange', () => {
   if (document.visibilityState !== 'visible' || !state.ref || state.ref.type !== 'daily') return;
@@ -2159,7 +2641,6 @@ function routeFromHash(resume = false) {
 
 // Zdarzenie toggle nie bąbelkuje, więc słuchamy w fazie przechwytywania.
 app.addEventListener('toggle', (e) => {
-  if (!isWide() && e.target?.classList?.contains('rules-short') && !e.target.open) { e.target.open = true; return; }
   const key = e.target?.dataset?.keep;
   if (key) keepOpen[key] = e.target.open;
 }, true);

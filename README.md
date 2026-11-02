@@ -55,7 +55,7 @@ Sprawy treningowe nie liczą się do serii. Każda ma 4-znakowy kod, np. `K7Q2`.
 
 ### Nawigacja i porównywanie
 
-W grze są trzy miejsca: **Sprawa** (akta, podejrzani, zasady), **Dowody** (wszystkie karty z twoich biurek, z filtrami biurek i „★ Ważne”) i **Tablica** (oś czasu z teczkami osób, plan miasta i notatki). Przycisk **„Porównaj”** na karcie dodaje ją do porównania (do 3 kart): okno pokazuje karty obok siebie, odstępy między godzinami, drogę po planie i odległość do miejsca zdarzenia. Gra tylko zestawia liczby z kart, nie ocenia, co jest sprzeczne.
+W grze są dwie zakładki: **Śledztwo** i **Tablica** (oś czasu z teczkami osób, plan miasta i notatki). Śledztwo idzie krok po kroku: **1. Co się stało** (sprawa, okno zdarzenia, ślad i karty z miejsca zdarzenia), **2. Teczki podejrzanych** (jedna teczka naraz: alibi, dowody, które osoba sama przyniosła, odnośniki do widocznych kart, które ją wymieniają, i ocena alibi) oraz **3. Akta i koperty** (pozostałe karty jako zwarty spis w działach biurek; kliknięcie wiersza rozwija pełną kartę, koperty otwiera się za godziny śledztwa). Każda karta ma jedno miejsce (reguły w `js/layout.js`), a kody kart w alibi, na tablicy i w podpowiedziach prowadzą właśnie tam. Na komputerze po lewej stoi „Plan śledztwa” z postępem, na telefonie pasek postępu pod zakładkami. Przycisk **„Porównaj”** na karcie dodaje ją do porównania (do 3 kart): okno pokazuje karty obok siebie, odstępy między godzinami, drogę po planie i odległość do miejsca zdarzenia. Gra tylko zestawia liczby z kart, nie ocenia, co jest sprzeczne.
 
 ### Plan miasta
 
