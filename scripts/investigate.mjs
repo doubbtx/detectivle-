@@ -53,7 +53,7 @@ console.log(c.openings
   : `Okno: ${fmt(c.window.from)}–${fmt(c.window.to)}\n`);
 console.log('## Zasady');
 rulesFor(c).forEach((r, i) => console.log(`${i + 1}. ${r}`));
-if (c.innocentLie) console.log(`UWAGA: w tej sprawie kłamią dwie osoby. Jeden fałszywy dowód podrzucił sprawca. Drugi to kłamstwo niewinnej osoby, która ukrywała coś niezwiązanego z ${crimeOf(c).ins}. Kłamca ma poza nim inne, potwierdzone alibi.`);
+if (c.innocentLie) console.log(`UWAGA: w tej sprawie kłamią dwie osoby. Jeden fałszywy dowód podrzucił sprawca. Drugi to kłamstwo niewinnej osoby, która ukrywała coś niezwiązanego z ${crimeOf(c).ins}. ${c.traits ? 'Kłamca może nie mieć innego alibi, ale nie ma cechy sprawcy ze śladu z miejsca zdarzenia (wykaz jest pełny).' : 'Kłamca ma poza nim inne, potwierdzone alibi.'}`);
 console.log('\n## Podejrzani');
 for (const s of c.suspects) console.log(`- ${s.full} (${s.role}): ${s.alibi}`);
 for (const d of DESK_DEFS) {

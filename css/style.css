@@ -1122,3 +1122,14 @@ button.chip { cursor: pointer; }
 @media (min-width: 150rem) {
   .topbar-inner, .tabs-inner, .game { max-width: 120rem; }
 }
+/* Cechy osób (ślad z miejsca i pełny wykaz) */
+.trait-stamp, .trait-explain { display: flex; align-items: flex-start; gap: 0.5rem; margin: 0.55rem 0 0; font-size: var(--step--1); line-height: 1.35; }
+.trait-stamp .ico, .trait-explain .ico { width: 1.3rem; height: 1.3rem; flex: none; color: var(--stamp); margin-top: 0.05rem; }
+.trait-box .ico { color: #e2b33c; }
+.bd-traits { display: flex; flex-wrap: wrap; justify-content: center; gap: 0.2rem; margin-top: 0.15rem; max-width: 100%; min-width: 0; width: 100%; }
+.bd-who { min-width: 0; overflow: hidden; }
+.bd-trait { display: inline-flex; align-items: center; gap: 0.15rem; padding: 0.05rem 0.35rem; border-radius: 999px; border: 1px solid var(--ink-soft); color: var(--ink-soft); font-size: 0.66rem; line-height: 1.3; white-space: nowrap; max-width: 100%; overflow: hidden; text-overflow: ellipsis; }
+.bd-trait .ico { width: 0.8rem; height: 0.8rem; flex: none; }
+.bd-sw { width: 0.7rem; height: 0.7rem; border-radius: 50%; border: 1px solid var(--ink-soft); flex: none; }
+.bd-trait.match { border-color: var(--stamp); color: var(--stamp); background: var(--stamp-soft); font-weight: 700; }
+.bd-legend .bd-trait { margin-right: 0.3rem; }

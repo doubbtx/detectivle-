@@ -7,6 +7,7 @@ import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
   buildDailyCase, buildPracticeCase, buildCase, dailyCrimeType, practiceCrimeType, ARSON_FROM, POISON_FROM, GENERATOR_VERSION,
+  dailyTraitVariant,
 } from '../js/generator.js';
 import { solveCase, qualityIssues, proofDepth, windowStepNeeded } from '../js/solver.js';
 import { crimeOf, rulesFor, rulesShortFor, reasonsFor, RULES } from '../js/data.js';
@@ -27,7 +28,7 @@ const arsonCases = () => [...arsonDays.slice(0, 40), ...arsonCodes].map(caseOf);
 const factsOf = (c, t) => c.cards.flatMap((k) => (k.facts || []).filter((f) => f.t === t));
 
 test('rodzaj zbrodni: czwartki od 12.11.2026 to podpalenia, co druga środa od 18.11 otrucia, reszta dni kradzieże; w treningu po ok. 1/3', () => {
-  assert.equal(GENERATOR_VERSION, 10);
+  assert.equal(GENERATOR_VERSION, 11);
   for (const d of dates) {
     const want = weekdayOf(d) === 4 && d >= ARSON_FROM ? 'arson'
       : weekdayOf(d) === 3 && d >= POISON_FROM && daysBetween(POISON_FROM, d) % 14 === 0 ? 'poison' : 'theft';
@@ -41,13 +42,17 @@ test('rodzaj zbrodni: czwartki od 12.11.2026 to podpalenia, co druga środa od 1
   for (const code of codes.slice(0, 40)) assert.equal(crimeOf(caseOf(code)).id, practiceCrimeType(code), code);
 });
 
-test('sprawa dnia 2026-11-02 i inne dni z kradzieżą są takie same jak przed v10 (poza numerem wersji i odciskiem)', () => {
+test('sprawa dnia 2026-11-02 i inne dni z kradzieżą (bez cechy) są takie same jak przed v10 (poza numerem wersji i odciskiem)', () => {
   // Skróty treści (bez generatorVersion i fingerprint) policzone na generatorze v9 przed dodaniem podpaleń.
   // Uwaga: opublikowany plik cases/2026-11-02.json powstał na generatorze v8 i jest inną sprawą niż ta z v9/v10.
   // W grze 2.11 chroni więc plik (gra czyta go, gdy przechodzi usable() z js/cases.js: ten sam odcisk i to samo
   // jedyne rozwiązanie u obecnego solvera; sprawdza to tests/cases.test.mjs), a ten test pilnuje tylko, żeby
   // generator dla dni z kradzieżą się nie zmienił.
-  const want = { '2026-11-02': '763b51a384b726bc', '2026-11-05': 'b5fe898159b7f478', '2026-11-07': '3451781d38192e6b' };
+  // Od v11 około 35% dni od środy do niedzieli ma moduł cech (np. 2026-11-07), więc te dni się zmieniły; skrót
+  // soboty 2026-11-21 (dzień bez cechy) policzony na generatorze v10.
+  assert.ok(dailyTraitVariant('2026-11-07'), '2026-11-07 to od v11 dzień z cechą');
+  const want = { '2026-11-02': '763b51a384b726bc', '2026-11-05': 'b5fe898159b7f478', '2026-11-21': '513e255eb55e708d' };
+  for (const iso of Object.keys(want)) assert.equal(dailyTraitVariant(iso), null, iso);
   for (const [iso, hash] of Object.entries(want)) {
     const { generatorVersion, fingerprint, ...rest } = buildDailyCase(iso);
     void generatorVersion; void fingerprint;

@@ -182,6 +182,8 @@ test('otrucie: niewinni mają alibi na całe okno, fałszywka też, a sprawcę c
       assert.ok(items.length, `${tag}: ${s.full} bez alibi`);
       // Każde alibi niewinnego wyklucza każdą chwilę okna (pojęcie alibi z okna-chwili).
       for (const it of items) {
+        // Brak cechy ze śladu (sprawy z cechą) wyklucza osobę bez pobytu z godziną.
+        if (it.type === 'trait') continue;
         assert.ok(it.from - it.travel < c.window.from && (it.away || it.to + it.travel > c.window.to), `${tag}: ${res.describeClear(it)}`);
       }
     }

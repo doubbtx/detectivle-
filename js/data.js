@@ -374,7 +374,7 @@ export const RULES = [
   'Dowody dostarczone przez podejrzanych są prawdziwe, z wyjątkiem dokładnie jednego. Ten jeden sfałszował sprawca. Gdyby był prawdziwy, dawałby mu alibi na czas kradzieży.',
   'Czasy dotarcia na mapie podano dla najszybszego możliwego sposobu (pieszo, rowerem albo autem). Są dokładne co do minuty i takie same w każdą stronę. Mapa podaje tylko czasy do miejsca kradzieży, więc między dwoma innymi miejscami liczcie tak: przejście z A do B trwa co najmniej różnicę ich czasów (np. 31 i 15 min → co najmniej 16 min). Krócej się nie da, bo inaczej droga przez B do miejsca kradzieży byłaby szybsza niż podany czas z A.',
   'Fałszywkę zdradza albo karta urzędowa (rozkład, rejestr, pogoda…), albo to, że osobę z dowodu widziano wtedy gdzie indziej i nie zdążyłaby dotrzeć (liczcie czasy dotarcia). Dowód może dotyczyć dwóch osób, np. wspólne zdjęcie: należy do tego, kto go dostarczył, ale jeśli jest prawdziwy, obie osoby naprawdę tam były i obie mają alibi. Jeśli prawdziwy pobyt tej drugiej osoby mu przeczy, dowód jest fałszywy.',
-  'Prawdziwy bilet, paragon, zdjęcie, doręczenie w aplikacji kurierskiej albo zapis w rejestrze oznacza, że ta osoba naprawdę była w tym miejscu o tej porze. Wejście i wyjście w rejestrze kart, tak jak dwie godziny w jednym zeznaniu („przyszedł o…, zapłacił o…”), to pobyt w tym miejscu przez cały ten czas. Bilet do kina oznacza obecność na całym seansie, od początku do końca filmu (długość filmu podaje repertuar). Wyjazd pociągiem oznacza, że potem tej osoby nie było już w mieście. Zeznanie bez godziny („widziałam go przy Rynku”) niczego nie dowodzi, najwyżej podpowiada, gdzie szukać.',
+  'Prawdziwy bilet, paragon, zdjęcie, doręczenie w aplikacji kurierskiej albo zapis w rejestrze oznacza, że ta osoba naprawdę była w tym miejscu o tej porze. Wejście i wyjście w rejestrze kart, tak jak dwie godziny w jednym zeznaniu („przyszedł o…, zapłacił o…”), to pobyt w tym miejscu przez cały ten czas. Bilet do kina oznacza obecność na całym seansie, od początku do końca filmu (długość filmu podaje repertuar). Wyjazd pociągiem oznacza, że potem tej osoby nie było już w mieście. Zrzut ekranu z aplikacji kurierskiej to jeden dowód: jeśli choć jeden wpis na nim jest niemożliwy, cały zrzut jest fałszywy. Zeznanie bez godziny („widziałam go przy Rynku”) niczego nie dowodzi, najwyżej podpowiada, gdzie szukać.',
   'Wszystkie zegary są zgodne. Rozkłady, godziny otwarcia i strefy parkowania obowiązują dokładnie tak, jak zapisano je na kartach, także w święta. Liczy się dzień tygodnia podany w aktach.',
 ];
 
@@ -402,6 +402,48 @@ export const RULE_MOMENT = 'Sprawcy wystarczyła chwila, więc krótki pobyt gdz
 /** Zasada nr 3 w sprawach, w których kłamie też niewinna osoba (od piątku). */
 export const RULE_LIE = 'W tej sprawie fałszywe są dwa dowody dostarczone przez podejrzanych. Jeden sfałszował sprawca: gdyby był prawdziwy, dawałby mu alibi na czas kradzieży. Drugi to kłamstwo niewinnej osoby (ukrywała coś niezwiązanego z kradzieżą). Kłamca nie jest sprawcą i zawsze ma inne, potwierdzone alibi (od świadka, z kamery, rejestru albo z prawdziwego dowodu). Sprawca poza fałszywką nie ma żadnego potwierdzonego alibi. Pozostałe dowody od podejrzanych są prawdziwe.';
 
+/**
+ * Cechy osób (od generatora v11): ślad z miejsca zdarzenia mówi, jaką cechę ma sprawca, a pełny (zamknięty) wykaz
+ * mówi, kto ją ma. W takiej sprawie kłamie też jedna niewinna osoba, która może nie mieć żadnego innego alibi:
+ * od sprawcy odróżnia ją dopiero to, że nie ma cechy ze śladu.
+ */
+export const RULE_TRAIT = 'Ślad z miejsca zdarzenia mówi, jaką cechę ma sprawca (np. rozmiar buta, ubranie z nagrania, to, że pies go zna). Wykaz osób z tą cechą jest pełny, więc kto tej cechy nie ma, nie jest sprawcą. Cecha dotyczy całego dnia zdarzenia: od popołudnia do nocy nikt się nie przebierał, nie pożyczał ubrań ani butów. Sama cecha nie wskazuje sprawcy, bo ma ją też ktoś niewinny.';
+
+/** Zasada nr 3 w sprawach z cechą: kłamca nie musi mieć innego alibi, ale nie ma cechy sprawcy. */
+export const RULE_LIE_TRAIT = 'W tej sprawie fałszywe są dwa dowody dostarczone przez podejrzanych. Jeden sfałszował sprawca: gdyby był prawdziwy, dawałby mu alibi na czas kradzieży. Drugi to kłamstwo niewinnej osoby (ukrywała coś niezwiązanego z kradzieżą). Kłamca może nie mieć żadnego innego alibi, ale nie ma cechy sprawcy ze śladu z miejsca zdarzenia. Sprawca poza fałszywką nie ma żadnego potwierdzonego alibi i ma cechę ze śladu. Pozostałe dowody od podejrzanych są prawdziwe.';
+
+/** Warianty cech: ikona Lucide i krótka nazwa (do zasad w skrócie, tablicy i testów). */
+export const TRAIT_VARIANTS = {
+  shoe: { icon: 'footprints', label: 'rozmiar buta', ids: ['shoe'] },
+  dog: { icon: 'dog', label: 'pies, który nie szczekał', ids: ['dog'] },
+  clothes: { icon: 'shirt', label: 'ubranie z nagrania', ids: ['scarf', 'backpack'] },
+};
+
+/** Dopisek do zasady o cesze w skrócie, zależny od wariantu. */
+const TRAIT_SHORT = {
+  shoe: 'Tego dnia nikt nie zmieniał ani nie pożyczał butów.',
+  dog: 'Pies nie szczeka tylko na osoby z zeszytu.',
+  clothes: 'Tego dnia nikt się nie przebierał ani nie pożyczał ubrań.',
+};
+
+/** Czy sprawa ma moduł cech (zasada o cesze i kłamca odróżniany cechą). */
+export const hasTraits = (c) => Boolean(c?.traits?.ids?.length);
+
+/**
+ * Psy na miejscu zdarzenia (wariant „pies, który nie szczekał”). `who`: czyj pies (do zeszytu), `watch`: kto
+ * pilnował psa przez cały wieczór (świadek, że ani razu nie zaszczekał), `where`: skąd świadek słyszał.
+ * Klucz: id sceny; bez wpisu – jamnik Kapral właściciela, a świadkiem jest sąsiadka zza płotu (z kuchni widzi podwórze).
+ */
+export const TRAIT_DOGS = {
+  default: { name: 'Kapral', gen: 'Kaprala', kind: 'jamnik', whoseNote: 'nocuje na zapleczu', watch: { m: 'sąsiad zza płotu', f: 'sąsiadka zza płotu' }, where: 'w kuchni, przy oknie na podwórze' },
+  galeria: { name: 'Bary', gen: 'Barego', kind: 'owczarek stróża', kindF: 'owczarek stróżki', whoseNote: 'pilnuje galerii w nocy', watch: { m: 'stróż galerii', f: 'stróżka galerii' }, where: 'w stróżówce przy bramie' },
+  muzeum: { name: 'Nero', gen: 'Nera', kind: 'owczarek stróża', kindF: 'owczarek stróżki', whoseNote: 'pilnuje muzeum w nocy', watch: { m: 'stróż muzeum', f: 'stróżka muzeum' }, where: 'w stróżówce przy bramie' },
+  magazyn: { name: 'Bary', gen: 'Barego', kind: 'owczarek stróża', kindF: 'owczarek stróżki', whoseNote: 'pilnuje podwórza galerii', watch: { m: 'stróż galerii', f: 'stróżka galerii' }, where: 'w stróżówce przy bramie' },
+  przystan: { name: 'Burek', gen: 'Burka', kind: 'kundel bosmana', kindF: 'kundel bosmanki', whoseNote: 'mieszka w budzie przy szopie', watch: { m: 'bosman przystani', f: 'bosmanka przystani' }, where: 'w kantorku przy pomoście' },
+  zacisze: { name: 'Lord', gen: 'Lorda', kind: 'seter recepcjonisty', whoseNote: 'leży zawsze pod drzwiami sali kominkowej', watch: { m: 'portier hotelu', f: 'portierka hotelu' }, where: 'w holu, skąd widać korytarz', cat: true },
+  jutrzenka: { name: 'Pikuś', gen: 'Pikusia', kind: 'jamnik woźnego', kindF: 'jamnik woźnej', whoseNote: 'śpi na korytarzu przy garderobach', watch: { m: 'woźny', f: 'woźna' }, where: 'w portierni na końcu korytarza' },
+};
+
 /** Zasada nr 4 w sprawach z planem miasta (od generatora v8): czasy liczy się z przecznic. */
 export const RULE_MAP = 'Czasy dotarcia liczycie z planu Borowic (biurko „Mapa i rozkłady”). Ulice tworzą siatkę, a przejście o jedną przecznicę, czyli jedno pole planu w poziomie albo w pionie, trwa 2 minuty, pieszo, rowerem czy autem tak samo. Czas między dwoma miejscami to liczba przecznic w poziomie plus w pionie razy 2 min (np. z C14 do M10: 10 + 4 = 14 przecznic, czyli 28 min). Szybciej się nie da, a w każdą stronę jest tyle samo. Przez rzekę prowadzi most na każdej ulicy.';
 
@@ -426,9 +468,12 @@ export function rulesShortFor(c) {
     first,
     ...(cr === 'poison' ? [['hourglass', 'Krótki pobyt gdzie indziej nie daje alibi. Pobyt od X do Y (dojście d min) daje alibi, gdy X − d jest przed oknem, a Y + d po nim.']] : []),
     ['landmark', 'Urzędy, rejestry, kamery i świadkowie spoza piątki mówią prawdę.'],
-    c.innocentLie
-      ? ['ticket', 'Fałszywe są dwa dowody od podejrzanych: fałszywka sprawcy (dałaby mu alibi) i kłamstwo niewinnej osoby, która ma inne, potwierdzone alibi.']
-      : ['ticket', 'Dokładnie jeden dowód od podejrzanych jest fałszywy. Podrzucił go sprawca i dałby mu alibi.'],
+    c.innocentLie && hasTraits(c)
+      ? ['ticket', 'Fałszywe są dwa dowody od podejrzanych: fałszywka sprawcy (dałaby mu alibi) i kłamstwo niewinnej osoby. Kłamca nie ma cechy sprawcy ze śladu.']
+      : c.innocentLie
+        ? ['ticket', 'Fałszywe są dwa dowody od podejrzanych: fałszywka sprawcy (dałaby mu alibi) i kłamstwo niewinnej osoby, która ma inne, potwierdzone alibi.']
+        : ['ticket', 'Dokładnie jeden dowód od podejrzanych jest fałszywy. Podrzucił go sprawca i dałby mu alibi.'],
+    ...(hasTraits(c) ? [[TRAIT_VARIANTS[c.traits.variant]?.icon || 'footprints', `Ślad z miejsca mówi, jaką cechę ma sprawca. Wykaz jest pełny: kto cechy nie ma, nie jest sprawcą. ${TRAIT_SHORT[c.traits.variant] || ''}`.trim()]] : []),
     map ? ['map', '1 przecznica = 2 min. Liczcie przecznice w poziomie i w pionie na planie miasta.'] : ['map', 'Czasy dotarcia są najkrótsze możliwe; między dwoma miejscami co najmniej różnica ich czasów.'],
     ['search', 'Fałszywkę zdradza tabela urzędowa albo to, że ktoś był gdzie indziej i nie zdążyłby dotrzeć. Wspólny dowód dwóch osób jest prawdziwy tylko wtedy, gdy obie naprawdę tam były.'],
     ['footprints', 'Prawdziwy dowód = ta osoba tam była. Kino: cały seans. Pociąg: potem nie było jej w mieście.'],
@@ -449,10 +494,13 @@ export function rulesFor(c) {
     arson: 'na całe otwarcie drzwi, w którym podłożono minutnik',
     poison: 'na całe okno (każdą chwilę, w której dało się dosypać środek)',
   }[cr.id] || `na czas ${cr.act.gen}`;
-  const lie = cr.id === 'theft' ? RULE_LIE : RULE_LIE.replace('na czas kradzieży', alibiFor).replace('z kradzieżą', `z ${cr.ins}`);
+  const lieBase = hasTraits(c) ? RULE_LIE_TRAIT : RULE_LIE;
+  const lie = cr.id === 'theft' ? lieBase : lieBase.replace('na czas kradzieży', alibiFor).replace('z kradzieżą', `z ${cr.ins}`);
   const rules = base.map((r, i) => (i === 2 && c.innocentLie ? lie : i === 3 && map ? RULE_MAP : i === 5 && hasBankCards(c) ? `${r} ${RULE_CARD}` : r));
   // Otrucie: zasada chwili zaraz po zasadzie nr 1 (kiedy pobyt gdzie indziej daje alibi).
   if (cr.windowFrom === 'moment') rules.splice(1, 0, RULE_MOMENT);
+  // Cechy osób: zasada o śladzie i pełnym wykazie zaraz po zasadzie o kłamstwie.
+  if (hasTraits(c)) rules.splice(rules.indexOf(lie) + 1, 0, RULE_TRAIT);
   return rules;
 }
 

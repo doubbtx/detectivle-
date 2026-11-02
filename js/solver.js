@@ -68,6 +68,9 @@ export function solveCase(c) {
   const refills = [];
   const glasses = [];
   const dosed = [];
+  // Cechy osób (od generatora v11): ślad z miejsca (jaką cechę ma sprawca) i pełny wykaz (kto ją ma).
+  const traitSeen = new Map();
+  const traitLists = new Map();
 
   for (const card of c.cards) {
     for (const f of card.facts || []) {
@@ -104,6 +107,8 @@ export function solveCase(c) {
         case 'refill': refills.push({ time: f.time, ref }); break;
         case 'glass': glasses.push({ time: f.time, ref }); break;
         case 'dosed': dosed.push({ time: f.time, ref }); break;
+        case 'trait': traitSeen.set(f.trait, { ...f, ref }); break;
+        case 'traitlist': traitLists.set(f.trait, { ...f, ref }); break;
         default: break;
       }
     }
@@ -513,6 +518,16 @@ export function solveCase(c) {
   // należy do kogoś innego, a ta osoba i tak ma inne, potwierdzone alibi.
   const maxLies = c.innocentLie ? 1 : 0;
   const givesAlibi = (e) => clearingFrom(e.sightings, [e.card]).length > 0;
+  // Cechy osób. Cecha jest znana, gdy leżą obie karty: ślad z miejsca i pełny wykaz. Sprawca musi mieć każdą znaną
+  // cechę. W sprawie z cechami (c.traits) kłamstwo niewinnej osoby jest wytłumaczone, gdy kłamca ma inne
+  // potwierdzone alibi albo nie ma którejś cechy sprawcy; dopóki którejś cechy z zasad nie znamy (brak karty),
+  // nie da się tego wykluczyć, więc każde kłamstwo uchodzi za możliwe.
+  const ruleTraits = c.traits?.ids || [];
+  const traitRule = ruleTraits.length > 0;
+  const knownTraits = [...traitSeen.keys()].filter((t) => traitLists.get(t)?.complete);
+  const hasTrait = (who, t) => traitLists.get(t).values?.[who] === traitSeen.get(t).value;
+  const missingTrait = (who) => knownTraits.find((t) => !hasTrait(who, t)) || null;
+  const traitExcuse = (who) => traitRule && (ruleTraits.some((t) => !knownTraits.includes(t)) || Boolean(missingTrait(who)));
   /** Potwierdzone alibi osoby z kart uznanych w hipotezie za prawdziwe. */
   const clearedBy = (who, falseCards) => {
     const items = [...(neutralClears.get(who) || [])];
@@ -529,6 +544,16 @@ export function solveCase(c) {
     }
     return null;
   }
+  /** Czy wszystkie osoby dają się fizycznie przeprowadzić przez swoje prawdziwe pobyty (sprawca też przez miejsce zbrodni). */
+  const physicalOk = (susId, falseCards) => c.suspects.every((p) => {
+    const evs = trueEvents(p.id, falseCards);
+    // Okno-chwila: sprawca musiał zdążyć na miejsce w jakiejś chwili okna (wystarczy jedna).
+    if (p.id === susId && moment) return !firstConflict(evs) && momentFor(evs) !== null;
+    if (p.id === susId) evs.push({ place: SCENE, from: W1, to: W2, refs: [] });
+    return !firstConflict(evs);
+  });
+  /** Kłamstwo osoby `who` jest wytłumaczone: ma inne potwierdzone alibi albo (sprawa z cechą) nie ma cechy sprawcy. */
+  const excused = (who, falseCards) => clearedBy(who, falseCards).length > 0 || traitExcuse(who);
   const consistent = [];
   for (const win of windows) {
     W1 = win.from;
@@ -537,26 +562,35 @@ export function solveCase(c) {
     for (const sus of c.suspects) {
       for (const forged of evaluated.filter((e) => e.who === sus.id)) {
         if (!givesAlibi(forged)) continue;
+        // Sprawca ma każdą znaną cechę ze śladu.
+        if (missingTrait(sus.id)) continue;
         const lies = evaluated.filter((e) => e !== forged && e.contradicted);
         if (lies.length > maxLies) continue;
         if (lies.some((e) => e.who === sus.id)) continue;
-        const falseCards = new Set([forged.card, ...lies.map((e) => e.card)]);
-        if (lies.some((e) => !clearedBy(e.who, falseCards).length)) continue;
+        let falseCards = new Set([forged.card, ...lies.map((e) => e.card)]);
+        if (lies.some((e) => !excused(e.who, falseCards))) continue;
         if (neutralClears.has(sus.id)) continue;
         const ownTrue = evaluated.filter((e) => (e.who === sus.id || e.with.includes(sus.id)) && !falseCards.has(e.card));
         if (ownTrue.some((e) => givesAlibi(e))) continue;
         // Każda osoba musi dać się fizycznie „przeprowadzić” przez wszystkie swoje prawdziwe pobyty,
         // a sprawca dodatkowo przez pobyt na miejscu zbrodni.
-        // Okno-chwila: sprawca musiał zdążyć na miejsce w jakiejś chwili okna (wystarczy jedna).
-        const physicalOk = c.suspects.every((p) => {
-          const evs = trueEvents(p.id, falseCards);
-          if (p.id === sus.id && moment) return !firstConflict(evs) && momentFor(evs) !== null;
-          if (p.id === sus.id) evs.push({ place: SCENE, from: W1, to: W2, refs: [] });
-          return !firstConflict(evs);
-        });
-        if (!physicalOk) continue;
+        let physLie = null;
+        if (!physicalOk(sus.id, falseCards)) {
+          // Sprawa z cechą: kłamstwo niewinnej osoby może zdradzać fizyczna niemożliwość (tak jak fałszywkę sprawcy),
+          // a nie tabela. Szukamy jednego dowodu innej osoby, bez którego wszystko się zgadza.
+          if (!traitRule || lies.length >= maxLies) continue;
+          physLie = evaluated.find((e) => {
+            if (e === forged || falseCards.has(e.card) || e.who === sus.id) return false;
+            const fc = new Set([...falseCards, e.card]);
+            return excused(e.who, fc) && physicalOk(sus.id, fc);
+          }) || null;
+          if (!physLie) continue;
+          falseCards = new Set([...falseCards, physLie.card]);
+        }
         // Przy podpaleniu i otruciu hipoteza obejmuje też okno: to samo rozwiązanie w dwóch oknach to dwie hipotezy.
-        consistent.push(multiWin ? { culprit: sus.id, forged: forged.card, window: { from: W1, to: W2 } } : { culprit: sus.id, forged: forged.card });
+        const hyp = multiWin ? { culprit: sus.id, forged: forged.card, window: { from: W1, to: W2 } } : { culprit: sus.id, forged: forged.card };
+        if (physLie) hyp.lies = [physLie.card];
+        consistent.push(hyp);
       }
     }
   }
@@ -574,13 +608,14 @@ export function solveCase(c) {
   neutralClears = computeNeutralClears();
 
   // Wyjaśnienie: kto i czym ma potwierdzone alibi.
-  const explain = { suspects: {}, forged: null, lies: [], window: null };
+  const explain = { suspects: {}, forged: null, lies: [], window: null, trait: null };
   if (unique && fromOpenings) explain.window = explainWindow();
   if (unique && moment) explain.window = explainMoment();
   if (unique) {
     const f = byCard.get(unique.forged);
     explain.forged = { card: f.card, kind: f.kind, reason: f.reason, reasonCodes: f.reasonCodes, refs: [f.card, ...f.refs], proofRefs: [...f.refs], physical: false, ...(f.variant ? { variant: f.variant } : {}) };
-    explain.lies = evaluated.filter((e) => e !== f && e.contradicted).map((e) => {
+    const physLies = new Set(uniqueHyp.lies || []);
+    explain.lies = evaluated.filter((e) => e !== f && (e.contradicted || physLies.has(e.card))).map((e) => {
       const s0 = e.sightings[0];
       const tr = travel.get(s0.place);
       // Wszystkie miejsca z karty (np. dwa doręczenia kuriera) z czasami dotarcia.
@@ -588,9 +623,19 @@ export function solveCase(c) {
       return { card: e.card, who: e.who, kind: e.kind, reason: e.reason, reasonCodes: e.reasonCodes, refs: [e.card, ...e.refs], place: s0.place, from: s0.from, to: s0.to, travel: tr?.min, travelRef: tr?.ref, stops, alibi: givesAlibi(e) };
     });
     const lieCards = new Set(explain.lies.map((x) => x.card));
-    // Dlaczego kłamstwo nie jest fałszywką sprawcy: kłamca ma inne, potwierdzone alibi.
-    for (const lie of explain.lies) lie.cleared = clearedBy(lie.who, new Set([f.card, ...lieCards]));
-    if (!f.contradicted) explainPhysical(f, new Set([f.card, ...lieCards]));
+    const allFalse = new Set([f.card, ...lieCards]);
+    // Dlaczego kłamstwo nie jest fałszywką sprawcy: kłamca ma inne, potwierdzone alibi (albo nie ma cechy ze śladu).
+    for (const lie of explain.lies) {
+      lie.cleared = clearedBy(lie.who, allFalse);
+      if (physLies.has(lie.card)) Object.assign(lie, physicalProof(byCard.get(lie.card), allFalse));
+      const tx = traitMissText(lie.who);
+      if (tx) lie.trait = tx;
+    }
+    if (!f.contradicted) {
+      const pp = physicalProof(f, allFalse);
+      if (pp.card) explain.forged = pp;
+    }
+    explain.trait = traitSummary();
     for (const sus of c.suspects) {
       if (sus.id === unique.culprit) continue;
       const items = [];
@@ -598,6 +643,9 @@ export function solveCase(c) {
       for (const e of evaluated.filter((x) => (x.who === sus.id || x.with.includes(sus.id)) && !lieCards.has(x.card) && x !== f)) {
         for (const cl of clearingFrom(e.sightings, [e.card])) items.push({ type: 'supplied', note: e.okNote, ...cl });
       }
+      // Kto nie ma cechy ze śladu, nie jest sprawcą (to nie alibi, ale tak samo wyklucza tę osobę).
+      const tx = traitMissText(sus.id);
+      if (tx) items.push({ type: 'trait', refs: tx.refs, text: tx.text, trait: tx.trait });
       explain.suspects[sus.id] = items;
     }
   }
@@ -627,8 +675,32 @@ export function solveCase(c) {
     return { from: W1, to: W2, others: [], refs, reason, moment: true };
   }
 
+  /** Cechy: opis braku cechy u osoby (do wyjaśnienia i raportu) albo null, gdy osoba ma wszystkie znane cechy. */
+  function traitMissText(who) {
+    const t = missingTrait(who);
+    if (!t) return null;
+    const seen = traitSeen.get(t);
+    const list = traitLists.get(t);
+    const p = suspects.get(who);
+    const not = (seen.hasNot || [])[p?.f ? 1 : 0] || 'nie ma cechy ze śladu';
+    return { trait: t, refs: [seen.ref, list.ref], text: `${not} (${seen.short || 'ślad z miejsca'})` };
+  }
+
+  /** Cechy: krótkie podsumowanie śladu i wykazu (do ekranu wyniku). */
+  function traitSummary() {
+    if (!knownTraits.length) return null;
+    const parts = knownTraits.map((t) => {
+      const seen = traitSeen.get(t);
+      const list = traitLists.get(t);
+      const names = c.suspects.filter((p) => hasTrait(p.id, t)).map((p) => p.full);
+      return { trait: t, refs: [seen.ref, list.ref], holders: c.suspects.filter((p) => hasTrait(p.id, t)).map((p) => p.id), text: `${seen.what} [${seen.ref}], a według wykazu [${list.ref}] ${list.lead || 'tę cechę ma tylko'}: ${names.join(', ')}` };
+    });
+    const holders = c.suspects.filter((p) => knownTraits.every((t) => hasTrait(p.id, t))).map((p) => p.id);
+    return { refs: [...new Set(parts.flatMap((x) => x.refs))], parts, holders, reason: parts.map((x) => x.text).join('; ') };
+  }
+
   /** Fałszywka zgodna z tabelami: szukamy pobytu, którego nie da się z nią pogodzić. */
-  function explainPhysical(f, falseCards) {
+  function physicalProof(f, falseCards) {
     const people = [f.who, ...f.with];
     // Ile różnych kart (poza czasami dotarcia) obala fałszywkę: w dobrej sprawie dokładnie jedna.
     const proofSets = new Set();
@@ -647,7 +719,7 @@ export function solveCase(c) {
         }
       }
     }
-    if (!options.length) return;
+    if (!options.length) return {};
     options.sort((a, b) => Number(b.overlap) - Number(a.overlap));
     const { pid, e, o, overlap } = options[0];
     const person = suspects.get(pid);
@@ -677,7 +749,7 @@ export function solveCase(c) {
       reason = `według karty ${oRefs.map((r) => `[${r}]`).join(' i ')} ${person.full} ${gp('był', 'była')} ${placeLoc(o.place)} ${when(o)}, a dowód [${f.card}] umieszcza tę osobę ${placeLoc(e.place)} ${when(e)}`
         + (how ? `; droga między tymi miejscami to ${how}` : '');
     }
-    explain.forged = {
+    return {
       card: f.card, kind: f.kind, reason, reasonCodes: [pid === f.who ? 'physical' : 'physical-other'],
       refs: [...new Set([f.card, ...oRefs, ...ownRefs, ...travelRefs])], proofRefs: oRefs, physical: true, about: pid, proofCount: proofSets.size,
     };
@@ -702,6 +774,7 @@ export function solveCase(c) {
     // Czy dowód (gdyby był prawdziwy) daje alibi w oknie rozwiązania.
     givesAlibi,
     describeClear(item) {
+      if (item.type === 'trait') return item.text;
       const when = item.from === item.to ? `o ${fmt(item.from)}` : `od ${fmt(item.from)} do ${fmt(item.to)}`;
       return `${placeLoc(item.place)} ${when}${item.away ? ', potem wyjazd z miasta' : ''} (dotarcie: ${item.travel} min)`;
     },
@@ -776,11 +849,13 @@ export function qualityIssues(c, res = solveCase(c)) {
   if (c.innocentLie) {
     if (res.explain.lies.length !== 1) issues.push(`liczba kłamstw niewinnych: ${res.explain.lies.length}`);
     for (const lie of res.explain.lies) {
+      if (c.lieCard && c.lieCard !== lie.card) issues.push('solver wskazał inne kłamstwo niż zamierzone');
+      // Sprawa z cechą: kłamstwo zdradza fizyczna niemożliwość, tak jak fałszywkę sprawcy (sprawdza traitIssues).
+      if (hasTraitRule(c)) continue;
       // Kłamstwo ma obalać tylko karta z tabeli, a nie inny pobyt kłamcy.
       const e = res.evaluated.find((x) => x.card === lie.card);
       const evs = [...res.trueEvents(lie.who, new Set([c.solution.forged, lie.card])), ...e.sightings.map((x) => ({ ...x, refs: [lie.card] }))];
       if (res.firstConflict(evs)) issues.push('kłamstwo niewinnej osoby obala też fizyczna sprzeczność');
-      if (c.lieCard && c.lieCard !== lie.card) issues.push('solver wskazał inne kłamstwo niż zamierzone');
     }
   } else if (res.explain.lies.length) {
     issues.push('sprzeczny dowód poza fałszywką w sprawie bez kłamstwa');
@@ -825,6 +900,68 @@ export function qualityIssues(c, res = solveCase(c)) {
       else if (windowsLeft(solveCase({ ...c, cards: rest })) < 2) issues.push(`okno da się ustalić bez ${what}`);
     }
   }
+  if (hasTraitRule(c)) issues.push(...traitIssues(c, res));
+  return issues;
+}
+
+const hasTraitRule = (c) => Boolean(c.traits?.ids?.length);
+const traitFactCards = (c) => c.cards.filter((k) => (k.facts || []).some((f) => f.t === 'trait' || f.t === 'traitlist'));
+
+/**
+ * Kontrola jakości modułu cech (generator v11):
+ * - każda cecha z zasad ma ślad i pełny wykaz; sprawca ma wszystkie cechy, a ma je też co najmniej jedna niewinna
+ *   osoba (każdą cechę osobno i wszystkie naraz), więc sama cecha nie rozwiązuje sprawy;
+ * - kłamstwo niewinnej osoby zdradza fizyczna niemożliwość (jedna karta, z liczeniem czasu), a kłamca nie ma
+ *   żadnego innego alibi i nie ma cechy: od sprawcy odróżnia go tylko cecha;
+ * - bez kart z cechą zostają co najmniej dwie hipotezy (karta z cechą jest potrzebna).
+ */
+export function traitIssues(c, res = solveCase(c)) {
+  const issues = [];
+  const facts = c.cards.flatMap((k) => (k.facts || []).map((f) => ({ ...f, ref: k.id })));
+  const sid = c.solution.culprit;
+  const all = c.suspects.map((s) => s.id);
+  const holdersOf = (t) => {
+    const seen = facts.find((f) => f.t === 'trait' && f.trait === t);
+    const list = facts.find((f) => f.t === 'traitlist' && f.trait === t);
+    if (!seen || !list || !list.complete) return null;
+    return all.filter((id) => list.values?.[id] === seen.value);
+  };
+  const sets = [];
+  for (const t of c.traits.ids) {
+    const h = holdersOf(t);
+    if (!h) { issues.push(`cecha ${t}: brak śladu albo pełnego wykazu`); continue; }
+    if (!h.includes(sid)) issues.push(`cecha ${t}: sprawca jej nie ma`);
+    if (h.length < 2) issues.push(`cecha ${t}: ma ją tylko ${h.length} osoba`);
+    sets.push(h);
+  }
+  const both = all.filter((id) => sets.every((h) => h.includes(id)));
+  if (sets.length && both.length < 2) issues.push('wszystkie cechy naraz ma mniej niż dwie osoby');
+  const lie = res.explain.lies[0];
+  if (!lie) issues.push('sprawa z cechą bez kłamstwa niewinnej osoby');
+  else {
+    if (!lie.trait) issues.push('kłamca ma cechę sprawcy');
+    if (lie.cleared?.length) issues.push('kłamca ma inne potwierdzone alibi (cecha niepotrzebna)');
+    if (!lie.physical) issues.push('kłamstwo nie jest obalane fizyczną niemożliwością');
+    else {
+      if (lie.proofCount !== 1) issues.push(`kłamstwo obala ${lie.proofCount} różnych kart`);
+      if (new Set(lie.refs).size < 3) issues.push('kłamstwo obala jedna karta bez liczenia czasu');
+      if (lie.about !== lie.who) issues.push('kłamstwo powinno obalać pobyt kłamcy');
+      // Ten sam warunek współpracy co dla fałszywki: kłamstwo i karta, która je obala, u różnych graczy (inaczej
+      // kontrola jakości odsiewałaby inne rodzaje kłamstw niż fałszywek i rodzaj dowodu coś by zdradzał).
+      const deskOf = (id) => c.cards.find((k) => k.id === id)?.desk;
+      const lieDesk = deskOf(lie.card);
+      const refDesks = lie.proofRefs.filter((r) => !c.cards.find((k) => k.id === r)?.map).map(deskOf);
+      for (const size of [2, 3, 4, 5]) {
+        const seatOf = (desk) => TEAM_DESKS[size].findIndex((ds) => ds.includes(desk));
+        if (!refDesks.some((d) => seatOf(d) !== seatOf(lieDesk))) issues.push(`przy ${size} graczach jedna osoba ma i kłamstwo, i jego obalenie`);
+      }
+    }
+    if (!lie.alibi) issues.push('kłamstwo nie daje alibi (inna forma niż fałszywka sprawcy)');
+  }
+  // Karta z cechą jest potrzebna: bez kart ze śladem i wykazem zostają co najmniej dwie hipotezy.
+  const tc = new Set(traitFactCards(c).map((k) => k.id));
+  const without = solveCase({ ...c, cards: c.cards.filter((k) => !tc.has(k.id)) });
+  if (without.consistent.length < 2) issues.push(`bez kart z cechą hipotez: ${without.consistent.length}`);
   return issues;
 }
 
@@ -842,7 +979,7 @@ export function investigationProfile(c, res = solveCase(c)) {
   const hasSupplied = new Set(c.cards.filter((k) => k.kind === 'supplied').map((k) => k.by));
   for (const [who, items] of res.neutralClears) if (hasSupplied.has(who)) for (const it of items) for (const r of it.refs) if (cost(r)) need.add(r);
   const minimal = new Set();
-  for (const ex of [res.explain.forged, ...(res.explain.lies || []), res.explain.window]) {
+  for (const ex of [res.explain.forged, ...(res.explain.lies || []), ...(res.explain.lies || []).map((l) => l.trait), res.explain.window]) {
     if (ex) for (const r of ex.refs) if (cost(r)) minimal.add(r);
   }
   // Minimalna ścieżka (np. kamera z pułapką na sprawcę) też wchodzi do pełnego sprawdzenia.
@@ -888,6 +1025,8 @@ export function proofDepth(res, c = null) {
   const lie = res.explain.lies?.[0];
   if (!lie) return new Set(forgedRefs).size;
   // Kłamstwo: karta i jej obalenie, a do tego czas dotarcia (gdy nie daje alibi) albo najtańsze inne alibi kłamcy.
+  // Sprawa z cechą: kłamca nie ma innego alibi, a od sprawcy odróżnia go cecha (ślad i wykaz).
+  if (lie.trait) return new Set(forgedRefs).size + new Set([...lie.refs, ...lie.trait.refs]).size;
   const extra = lie.alibi ? (lie.cleared || []).reduce((best, it) => (!best || it.refs.length < best.length ? it.refs : best), null) || [] : (lie.stops || []).map((x) => x.travelRef).concat(lie.travelRef);
   return new Set(forgedRefs).size + new Set([...lie.refs, ...extra].filter(Boolean)).size;
 }

@@ -87,7 +87,17 @@ export function buildEpilogue(c, sol, outcome) {
   const cr = crimeOf(c);
   const arson = cr.id === 'arson';
   const poison = cr.id === 'poison';
-  const quote = `„${confession(code, culprit, c.crimeDate.weekday)} ${motive(rng, culprit, cr.id, c)}”`;
+  // Cechy osób (v11): ślad z miejsca w przyznaniu i w protokole.
+  const tr = c.traits || null;
+  const traitQuote = !tr ? ''
+    : tr.variant === 'shoe' ? ` Nie ${g('pomyślałem', 'pomyślałam')}, że zostawię odcisk buta.`
+      : tr.variant === 'dog' ? ` ${tr.dog} mnie zna, więc nawet nie szczeknął. Nie ${g('pomyślałem', 'pomyślałam')}, że to coś znaczy.`
+        : ` ${g('Myślałem', 'Myślałam')}, że bez twarzy na nagraniu nikt mnie nie rozpozna. ${cap(tr.scarf)} i ${tr.bag} mnie zdradziły.`;
+  const traitLine = !tr ? null
+    : tr.variant === 'shoe' ? `Ślad z miejsca też się zgadzał: odcisk w rozmiarze ${tr.size} pasował do ${g('jego', 'jej')} butów.`
+      : tr.variant === 'dog' ? `Ślad z miejsca też się zgadzał: ${tr.dog} ${g('go', 'ją')} znał, dlatego tamtego wieczoru ani razu nie zaszczekał.`
+        : `Ślad z miejsca też się zgadzał: na nagraniu z kamery widać było ${tr.scarf} i ${tr.bag}, takie jak ${g('jego', 'jej')}.`;
+  const quote = `„${confession(code, culprit, c.crimeDate.weekday)}${traitQuote} ${motive(rng, culprit, cr.id, c)}”`;
   const who = culprit.fullAcc || culprit.full;
   // Przy podpaleniu nie ma łupu: epilog mówi, że nikt nie ucierpiał, i co dalej z miejscem pożaru.
   // Przy otruciu (środek nasenny): poszkodowany przespał wieczór i rano był zdrów.
@@ -115,7 +125,7 @@ export function buildEpilogue(c, sol, outcome) {
       `${lg('chciał', 'chciała')} ukryć przed szefem, że ${lg('wyszedł', 'wyszła')} wcześniej z pracy`,
       `${lg('krył', 'kryła')} znajomego, z którym ${lg('był umówiony', 'była umówiona')}`,
     ]);
-    return `Przy okazji wyszło na jaw, że ${liar.full} ${lg('skłamał', 'skłamała')} (${card.id} „${card.title}”), bo ${excuse}. Z ${cr.ins} nie ${lg('miał', 'miała')} nic wspólnego.`;
+    return `Przy okazji wyszło na jaw, że ${liar.full} ${lg('skłamał', 'skłamała')} (${card.id} „${card.title}”), bo ${excuse}. Z ${cr.ins} nie ${lg('miał', 'miała')} nic wspólnego${lie.trait ? `, a do śladu z miejsca i tak nie ${lg('pasował', 'pasowała')}` : ''}.`;
   });
 
   if (outcome === 'revealed') {
@@ -124,6 +134,7 @@ export function buildEpilogue(c, sol, outcome) {
       meta: 'akta odtajnione',
       paragraphs: [
         `Sprawcą jest ${culprit.full} (${culprit.role}). Alibi ${g('opierał', 'opierała')} na fałszywce ${forged.id} ${title(forged)}, którą obala karta ${proof.id} ${title(proof)}.`,
+        ...(traitLine ? [traitLine] : []),
         ...lieLines,
       ],
       quote,
@@ -140,6 +151,7 @@ export function buildEpilogue(c, sol, outcome) {
             ? `Śledztwo utknęło w martwym punkcie. Dopiero po trzech tygodniach policja zatrzymała ${who}, gdy ${g('kupował', 'kupowała')} w aptece kolejne opakowanie tego samego środka nasennego.`
             : `Śledztwo utknęło w martwym punkcie. Dopiero po trzech tygodniach policja zatrzymała ${who} przy próbie sprzedaży łupu.`,
         `W protokole przesłuchania zapisano, że alibi opierało się na fałszywce ${forged.id} ${title(forged)}, którą obalała karta ${proof.id} ${title(proof)}.`,
+        ...(traitLine ? [traitLine] : []),
         ...lieLines,
         recovered,
       ],
@@ -152,6 +164,7 @@ export function buildEpilogue(c, sol, outcome) {
     paragraphs: [
       `${culprit.full} (${culprit.role}) ${g('został zatrzymany', 'została zatrzymana')} ${arrestLoc}.`,
       `Gdy pokazano ${g('mu', 'jej')} kartę ${proof.id} ${title(proof)}, ${g('przestał', 'przestała')} zaprzeczać, że ${forged.id} ${title(forged)} to fałszywka.`,
+      ...(traitLine ? [traitLine] : []),
       recovered,
       ...lieLines,
     ],

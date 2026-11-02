@@ -10,6 +10,7 @@ import { makeRng, hashString } from './rng.js';
 import {
   CHARACTERS, ROLES, WITNESSES, SCENES, PLACES, TRAIN_DESTINATIONS, TRAIN_NOTES, FILMS,
   VENUE_ITEMS, CCTV_DETAILS, PHOTO_POSES, DESK_DEFS, ITEM_NOM, CARD_HOLDERS, ARSON_SCENES, POISON_SCENES, CRIMES,
+  TRAIT_VARIANTS, TRAIT_DOGS,
 } from './data.js';
 import {
   fmt, fmtHour, addDays, weekdayOf, dayType, dateLong, dateShort, sunsetFor, daysBetween,
@@ -22,7 +23,7 @@ import { PLACE_CELLS, SCENE_CELLS, MIN_PER_CELL, minutesApart } from './town.js'
  * Wersja generatora. Podbij ją przy każdej zmianie, która zmienia treść spraw.
  * Opublikowane sprawy (cases/*.json) i tak się nie zmienią, bo gra czyta je z plików.
  */
-export const GENERATOR_VERSION = 10;
+export const GENERATOR_VERSION = 11;
 
 /** Krótki „odcisk” sprawy: 4 znaki, po których ekipa sprawdza, że ma te same akta. */
 export function caseFingerprint(c) {
@@ -135,6 +136,27 @@ export function practiceCrimeType(code) {
   return h === 0 ? 'arson' : h === 1 ? 'poison' : 'theft';
 }
 
+/** Jak często sprawa (od środy do niedzieli i w treningu) ma moduł cech osób. */
+export const TRAIT_SHARE = 0.35;
+const TRAIT_KEYS = ['shoe', 'dog', 'clothes'];
+
+/**
+ * Wariant cechy w sprawie dnia (generator v11): około 35% spraw od środy do niedzieli (fałszywka „fizyczna”),
+ * pn–wt nigdy. Losowanie z osobnego skrótu daty, więc dni bez cechy wyglądają dokładnie tak jak w v10.
+ */
+export function dailyTraitVariant(iso) {
+  if (difficultyForDate(iso) < 3) return null;
+  if ((hashString(`trait:${iso}`) % 1000) / 1000 >= TRAIT_SHARE) return null;
+  return TRAIT_KEYS[hashString(`trait-variant:${iso}`) % TRAIT_KEYS.length];
+}
+
+/** Wariant cechy w sprawie treningowej (około 35% kodów; trening ma zawsze trudność 3–7). */
+export function practiceTraitVariant(code) {
+  const norm = code.toUpperCase();
+  if ((hashString(`trait:${norm}`) % 1000) / 1000 >= TRAIT_SHARE) return null;
+  return TRAIT_KEYS[hashString(`trait-variant:${norm}`) % TRAIT_KEYS.length];
+}
+
 export function buildDailyCase(iso) {
   return buildCase({
     seed: `daily:${iso}`,
@@ -143,6 +165,7 @@ export function buildDailyCase(iso) {
     number: caseNumber(iso),
     kind: 'daily',
     crimeType: dailyCrimeType(iso),
+    traits: dailyTraitVariant(iso),
   });
 }
 
@@ -159,6 +182,7 @@ export function buildPracticeCase(code) {
     code: norm,
     kind: 'practice',
     crimeType: practiceCrimeType(norm),
+    traits: practiceTraitVariant(norm),
   });
 }
 
@@ -170,7 +194,10 @@ export function randomPracticeCode() {
 }
 
 export function buildCase(opts) {
-  for (let attempt = 0; attempt < 120; attempt++) {
+  // Sprawy z cechą (dwie karty obalające, przy podpaleniu szeroki pas alibi) rzadziej przechodzą kontrolę jakości przy
+  // jednej próbie, więc mają więcej prób. Dla spraw bez cechy limit się nie zmienia (te same sprawy co w v10).
+  const maxAttempts = opts.traits ? 400 : 120;
+  for (let attempt = 0; attempt < maxAttempts; attempt++) {
     const rng = makeRng(`${opts.seed}#${attempt}`);
     let c;
     try {
@@ -217,6 +244,10 @@ function generate(rng, opts) {
     P.decoys = Math.max(P.decoys, 3);
     P.extraTrueItems = 0;
   }
+  // Cechy osób (v11): tylko przy fałszywce „fizycznej” (od środy); pn–wt bez cech.
+  const traitVar = opts.traits && P.forgeMode !== 'table' ? opts.traits : null;
+  // Sprawa z cechą ma już dodatkowy dowód z alibi (kłamstwo), więc bez dodatkowego prawdziwego dowodu (piątek).
+  if (traitVar) P.extraTrueItems = 0;
   const crimeIso = addDays(opts.date, -1);
   const weekday = weekdayOf(crimeIso);
   const dt = dayType(weekday);
@@ -1267,7 +1298,7 @@ function generate(rng, opts) {
    * której nie da się pogodzić z fałszywym dowodem (czasy dotarcia albo wyjazd pociągiem),
    * a która sama nie daje alibi na czas kradzieży.
    */
-  function makePhysicalTrap(s, forgedEvs) {
+  function makePhysicalTrap(s, forgedEvs, dry = false) {
     const others = events[s.id].filter((e) => !forgedEvs.includes(e));
     for (let k = 0; k < 60; k++) {
       const source = rng.chance(P.sealedTrapChance) ? 'cctv' : 'witness';
@@ -1283,7 +1314,28 @@ function generate(rng, opts) {
       const nearZ = arson && rng.chance(0.6);
       // Otrucie: często sprawcę widziano w czasie okna (krótki pobyt gdzie indziej nie daje alibi, a obala fałszywkę).
       const inWin = moment && rng.chance(0.2);
-      const pickT = (lo, hi) => (nearZ && Math.max(lo, arson.Z - 8) <= Math.min(hi, arson.Z + 10)
+      // Sprawa z cechą (dwie karty obalające: sprawcy i kłamcy): godzinę losujemy od razu spośród tych, które nie
+      // dają alibi, zamiast odrzucać chybione (przy podpaleniu pas alibi jest szeroki i większość losowań przepada).
+      const pickOutside = (lo, hi) => {
+        const okLo = moment ? W2 - d - 3 : hullLo - d - 3;
+        const okHi = moment ? W1 + d + 3 : hullHi + d + 3;
+        const a = Math.max(lo, 17 * 60);
+        const b = Math.min(hi, 23 * 60 + 30);
+        let segs = [[a, Math.min(b, okLo)], [Math.max(a, okHi), b]].filter(([x, y]) => x <= y);
+        if (moment) {
+          // Bez chwil tuż przed oknem i tuż po nim (patrz niżej), a w sprawie z cechą także bez chwil w oknie: T2 nie
+          // może mieć krótkiego pobytu w oknie (jej prawdziwy dowód zabiera całe okno), więc taka karta wskazywałaby sprawcę.
+          segs = segs.flatMap(([x, y]) => [[x, Math.min(y, W1 - 6)], [Math.max(x, W2 + 6), y]]).filter(([x, y]) => x <= y);
+        }
+        const prefer = nearZ ? [arson.Z - 8, arson.Z + 10] : inWin ? [W1, W2] : null;
+        const pref = prefer ? segs.map(([x, y]) => [Math.max(x, prefer[0]), Math.min(y, prefer[1])]).filter(([x, y]) => x <= y) : [];
+        const use = pref.length ? pref : segs;
+        if (!use.length) return lo;
+        let r = rng.next() * use.reduce((sum, [x, y]) => sum + y - x + 1, 0);
+        const seg = use.find(([x, y]) => (r -= y - x + 1) < 0) || use[use.length - 1];
+        return rng.int(seg[0], seg[1]);
+      };
+      const pickT = (lo, hi) => (traitVar ? pickOutside(lo, hi) : nearZ && Math.max(lo, arson.Z - 8) <= Math.min(hi, arson.Z + 10)
         ? rng.int(Math.max(lo, arson.Z - 8), Math.min(hi, arson.Z + 10))
         : inWin && Math.max(lo, W1) <= Math.min(hi, W2)
           ? rng.int(Math.max(lo, W1), Math.min(hi, W2))
@@ -1302,9 +1354,12 @@ function generate(rng, opts) {
       if (t < 17 * 60 || t > 23 * 60 + 30) continue;
       // Otrucie: tuż przed oknem i tuż po nim (do 5 min) nie widać nikogo, także niewinnych, więc i sprawcy nie.
       if (moment && ((t >= W1 - 5 && t < W1) || (t > W2 && t <= W2 + 5))) continue;
+      if (moment && traitVar && t >= W1 - 5 && t <= W2 + 5) continue;
       const ev = { place, from: t, to: t };
       if (!forgedEvs.some((f) => clash(ev, f, -4))) continue;
       if (others.some((o) => clash(ev, o, 4))) continue;
+      // Próba na sucho: czy taki dowód dałoby się obalić (bez kart i bez zmian w pobytach).
+      if (dry) return true;
       taken.add(place);
       usedPlaces.add(place);
       if (source === 'witness') {
@@ -1324,9 +1379,9 @@ function generate(rng, opts) {
         if (rng.chance(P.tipChance)) makeTip(s, place);
       }
       events[s.id].push(ev);
-      return;
+      return source;
     }
-    retry();
+    return dry ? false : retry();
   }
 
   /**
@@ -1507,14 +1562,19 @@ function generate(rng, opts) {
   // jednej osoby w dwóch różnych miejscach zwykle wzajemnie się wykluczają (oba zabierają całe okno).
   const weekend = P.forgeMode === 'cross' && !moment;
   const lieKinds = weekend ? ['parking', 'delivery'] : LIE_KINDS;
-  const lieKind = P.innocentLie ? kinds.splice(kinds.findIndex((k) => lieKinds.includes(k)), 1)[0] : null;
+  // Sprawa z cechą: kłamie osoba odróżniana od sprawcy cechą (niżej), a nie kłamca z innym alibi.
+  const lieKind = P.innocentLie && !traitVar ? kinds.splice(kinds.findIndex((k) => lieKinds.includes(k)), 1)[0] : null;
   let kp = 0;
 
   const culprit = suspects[culpritIdx];
   // Weekend: zawsze dwa wspólne dowody i jeden zwykły. W około 60% spraw fałszywką jest wspólny dowód sprawcy
   // (alibi krzyżowe), w pozostałych oba wspólne dowody są prawdziwe, a fałszywką jest zwykły dowód sprawcy
   // (zdradza go fizyczna niemożliwość). Z samych akt nie da się więc wskazać fałszywki.
-  const mode = weekend && rng.chance(0.63) ? 'self' : moment && P.forgeMode === 'cross' ? 'self' : P.forgeMode;
+  let mode = weekend && rng.chance(0.63) ? 'self' : moment && P.forgeMode === 'cross' ? 'self' : P.forgeMode;
+  // Sprawa z cechą: w weekend zawsze odmiana bez alibi krzyżowego (fałszywka i kłamstwo mają tę samą budowę:
+  // zwykły dowód obalany fizyczną niemożliwością). Przy alibi krzyżowym zabrakłoby osób na prawdziwy wspólny dowód,
+  // a dwa fałszywe wspólne dowody zdradzałyby się samą formą.
+  if (traitVar && mode === 'cross') mode = 'self';
   const JOINT_KINDS = ['receipt', 'photo', 'cinema'];
   // Rodzaj dowodu zarezerwowany na fałszywkę krzyżową i na prawdziwy wspólny dowód (zmyłkę).
   // Bilet do kina łatwiej „zgrać” w sprzeczność z pobytem Y, więc losujemy go rzadziej: wtedy rodzaj wspólnego
@@ -1525,7 +1585,11 @@ function generate(rng, opts) {
   let crossKind = null;
   let jointKind = null;
   let jointKind2 = null;
-  if (weekend && mode === 'self') {
+  if (weekend && mode === 'self' && traitVar) {
+    // Sprawa z cechą: jeden prawdziwy wspólny dowód (drugą zmyłkę zastępuje kłamca).
+    jointKind = rng.pick(JOINT_KINDS.filter((k) => kinds.includes(k)));
+    kinds.splice(kinds.indexOf(jointKind), 1);
+  } else if (weekend && mode === 'self') {
     [jointKind, jointKind2] = rng.sample(JOINT_KINDS.filter((k) => kinds.includes(k)), 2);
     for (const k of [jointKind, jointKind2]) kinds.splice(kinds.indexOf(k), 1);
   } else if (mode === 'cross') {
@@ -1546,15 +1610,46 @@ function generate(rng, opts) {
   // Alibi krzyżowe: dwa symetryczne wspólne dowody. Fałszywy (sprawca + Y) i prawdziwy (zmyłka A + N2).
   // A nie ma innego dowodu z alibi (tak jak sprawca), a N2, tak jak Y, ma prawdziwy pobyt tylko
   // na zapieczętowanym nagraniu albo w rejestrze. Żeby wskazać fałszywkę, trzeba to sprawdzić.
-  const jointOwnerIdx = weekend ? rng.pick(decoyIdx) : -1;
+  let jointOwnerIdx = weekend ? rng.pick(decoyIdx) : -1;
   // Kolejność Y i N2 losowa: inaczej fałszywka zawsze dotyczyłaby osoby wyżej na liście.
   const wkN = weekend ? rng.shuffle(neutralIdx) : neutralIdx;
+  // Sprawa z cechą (weekend bez alibi krzyżowego): prawdziwy wspólny dowód mają dwie osoby spoza pary L i T2 (bez cechy
+  // u właściciela). Gdyby miała go T2, „osoba z cechą ze wspólnym dowodem” byłaby zawsze niewinna, bo sprawca w sprawie
+  // z cechą nigdy nie ma wspólnego dowodu.
+  if (weekend && traitVar) jointOwnerIdx = wkN[0];
   const jointPartnerIdx = weekend ? wkN[1] : -1;
   // Drugi prawdziwy wspólny dowód (weekend bez alibi krzyżowego): druga zmyłka razem z Y.
-  const jointOwner2Idx = weekend && mode === 'self' ? decoyIdx.find((i) => i !== jointOwnerIdx) : -1;
-  const jointPartner2Idx = weekend && mode === 'self' ? wkN[0] : -1;
+  const jointOwner2Idx = weekend && mode === 'self' && !traitVar ? decoyIdx.find((i) => i !== jointOwnerIdx) : -1;
+  const jointPartner2Idx = weekend && mode === 'self' && !traitVar ? wkN[0] : -1;
+  // Sprawa z cechą: kłamca L (dowód z alibi obalany fizyczną niemożliwością, bez innego alibi, bez cechy) powstaje
+  // dokładnie tak jak sprawca, a T2 to niewinna osoba z cechą, której jedynym alibi jest własny prawdziwy dowód
+  // (bez karty obalającej fałszywkę sprawca i T2 wyglądają tak samo). Oboje to zmyłki (osoby z własnym dowodem).
+  let liarIdx = -1;
+  let t2Idx = -1;
+  if (traitVar) [liarIdx, t2Idx] = rng.sample(decoyIdx, 2);
+  const liar = liarIdx >= 0 ? suspects[liarIdx] : null;
   let forgedCard;
   let forgedEvents = [];
+  /**
+   * Fałszywka „fizyczna”: rodzaj z wagami (niektóre rodzaje częściej przechodzą kontrolę jakości), przestawiony na
+   * pozycję kp w kolejce rodzajów. Dzięki temu żaden rodzaj dowodu nie jest „zawsze prawdziwy” ani „zwykle fałszywy”.
+   * Otrucie: osobne wagi (przy oknie-chwili rodzaje inaczej przechodzą kontrolę jakości), dobrane pomiarem tak,
+   * żeby udział fałszywek wśród dowodów z alibi był podobny dla każdego rodzaju.
+   * Podpalenie: też osobne wagi (alibi na oba otwarcia: kino łatwiej, pociąg i parking trudniej przechodzą).
+   */
+  function pickSelfKind(mult = null) {
+    const W0 = moment
+      ? { receipt: 1.7, photo: 2.5, train: 1.26, parking: 1.77, bus: 1.42, delivery: 1.88, cinema: 1.09 }
+      : arson
+        ? { receipt: 2.5, photo: 3.6, train: 2.8, parking: 4.6, bus: 1.6, delivery: 1.1, cinema: 0.27 }
+        : { receipt: 2.6, photo: 3.8, train: 1.45, parking: 2.3, bus: 1.3, delivery: 0.9, cinema: 0.7 };
+    const W = mult ? Object.fromEntries(Object.entries(W0).map(([k, w]) => [k, w * (mult[k] || 1)])) : W0;
+    const avail = kinds.slice(kp);
+    let x = rng.next() * avail.reduce((sum, k) => sum + (W[k] || 1), 0);
+    const pick = avail.find((k) => (x -= W[k] || 1) < 0) || avail[avail.length - 1];
+    const at = kinds.indexOf(pick, kp);
+    [kinds[kp], kinds[at]] = [kinds[at], kinds[kp]];
+  }
   if (mode === 'cross') {
     // Alibi krzyżowe: sprawca pokazuje wspólny dowód z niewinną osobą Y, a prawdziwy pobyt Y temu przeczy.
     const forgedKind = crossKind;
@@ -1574,36 +1669,60 @@ function generate(rng, opts) {
   } else {
     // Fałszywka „fizyczna”: rodzaj losujemy z wagami, bo niektóre rodzaje częściej przechodzą kontrolę
     // jakości. Dzięki temu żaden rodzaj dowodu nie jest „zawsze prawdziwy” ani „zwykle fałszywy”.
-    if (mode === 'self') {
-      // Otrucie: osobne wagi (przy oknie-chwili rodzaje inaczej przechodzą kontrolę jakości), dobrane pomiarem tak,
-      // żeby udział fałszywek wśród dowodów z alibi był podobny dla każdego rodzaju.
-      // Podpalenie: też osobne wagi (alibi na oba otwarcia: kino łatwiej, pociąg i parking trudniej przechodzą).
-      const W = moment
-        ? { receipt: 1.7, photo: 2.5, train: 1.26, parking: 1.77, bus: 1.42, delivery: 1.88, cinema: 1.09 }
-        : arson
-          ? { receipt: 2.5, photo: 3.6, train: 2.8, parking: 4.6, bus: 1.6, delivery: 1.1, cinema: 0.27 }
-          : { receipt: 2.6, photo: 3.8, train: 1.45, parking: 2.3, bus: 1.3, delivery: 0.9, cinema: 0.7 };
-      const avail = kinds.slice(kp);
-      let x = rng.next() * avail.reduce((sum, k) => sum + (W[k] || 1), 0);
-      const pick = avail.find((k) => (x -= W[k] || 1) < 0) || avail[avail.length - 1];
-      const at = kinds.indexOf(pick, kp);
-      [kinds[kp], kinds[at]] = [kinds[at], kinds[kp]];
-    }
+    if (mode === 'self') pickSelfKind();
     const forgedKind = kinds[kp++];
     const res = attempt(culprit, () => makeClaim(forgedKind, culprit, mode === 'table'));
     forgedCard = res.card;
     forgedEvents = res.events;
   }
+  // Sprawa z cechą: kłamstwo niewinnej osoby L. Rodzaj losowany z tymi samymi wagami co fałszywka sprawcy, a dowód
+  // daje alibi i zgadza się z tabelami; obali go (tak jak fałszywkę) pobyt L widziany gdzie indziej.
+  let lieCard = null;
+  let lieEvents = [];
+  if (liar) {
+    pickSelfKind();
+    const lk = kinds[kp++];
+    const res = attempt(liar, () => makeClaim(lk, liar, false));
+    lieCard = res.card;
+    lieEvents = res.events;
+    liar.claimCard = lieCard;
+  }
   // Otrucie: chwila sprawcy przy karafce. Każdy jego prawdziwy pobyt musi dać się z nią pogodzić (z zapasem),
   // więc w każdej hipotezie sprawca mógł zdążyć na miejsce zbrodni (fałszywka oczywiście tej chwili przeczy).
   if (poison) events[culprit.id].push({ place: SCENE_EV, from: poison.m0, to: poison.m0 });
+  // Kłamca w sprawie z cechą też mógł zdążyć na miejsce zbrodni (tak jak sprawca): bez cechy byłby drugim podejrzanym.
+  if (poison && liar) {
+    const mL = rng.int(poison.A + 2, poison.B - 3);
+    events[liar.id].push({ place: SCENE_EV, from: mL, to: mL });
+  }
   for (const i of decoyIdx) {
-    if (i === jointOwnerIdx || i === jointOwner2Idx) continue;
+    if (i === jointOwnerIdx || i === jointOwner2Idx || i === liarIdx) continue;
+    // T2 (niewinna osoba z cechą) to bliźniak sprawcy: rodzaj jej prawdziwego dowodu losujemy z tymi samymi wagami,
+    // a sam dowód musi być taki, że dałoby się go obalić tak jak fałszywkę (pobytem gdzie indziej). Inaczej rodzaj
+    // dowodu albo godziny pobytu różniłyby sprawcę od T2, bo nie każdą fałszywkę da się obalić.
+    if (i === t2Idx) {
+      // Mnożniki wag (pomiar na ~1300 parach sprawca–T2): kontrola jakości inaczej odsiewa fałszywkę niż prawdziwy
+      // dowód, więc bez nich P(sprawca | rodzaj dowodu) w parze sprawca–T2 wahałoby się od 35% do 65%.
+      pickSelfKind(moment
+        ? { bus: 1, cinema: 1.3, receipt: 1.1, delivery: 0.89, photo: 0.66, train: 1.13, parking: 1.07 }
+        : arson
+          ? { train: 3.05, bus: 1.26, delivery: 1.36, parking: 0.81, receipt: 0.8, cinema: 2.67, photo: 0.3 }
+          : { train: 1.46, receipt: 0.99, delivery: 0.98, bus: 1.44, photo: 0.66, parking: 0.67, cinema: 1.54 });
+      const kind = kinds[kp++];
+      attempt(suspects[i], () => {
+        const res = makeClaim(kind, suspects[i], false);
+        if (!makePhysicalTrap(suspects[i], res.events, true)) retry();
+        return res;
+      });
+      continue;
+    }
     const kind = kinds[kp++];
     attempt(suspects[i], () => makeClaim(kind, suspects[i], false));
   }
   for (const i of neutralIdx) {
     if (neutralPlace[i]) continue;
+    // Właściciel wspólnego dowodu w sprawie z cechą (weekend): jego jedynym alibi jest wspólny dowód (jak zmyłka).
+    if (i === jointOwnerIdx) continue;
     if (i === jointPartnerIdx || i === jointPartner2Idx) {
       noTip.add(suspects[i].id);
       // Partner prawdziwego wspólnego dowodu ma alibi na oba otwarcia z tego dowodu, więc przy podpaleniu jego
@@ -1647,7 +1766,7 @@ function generate(rng, opts) {
   // Prawdziwe wspólne dowody dwóch niewinnych osób.
   const makeJoint = (kind, pair) => {
     for (let k = 0; k < 30; k++) {
-      const [ai, bi] = pair || rng.sample(innocents.filter((i) => !avoid[suspects[i].id]), 2);
+      const [ai, bi] = pair || rng.sample(innocents.filter((i) => !avoid[suspects[i].id] && i !== liarIdx && i !== t2Idx), 2);
       const A = suspects[ai];
       const B = suspects[bi];
       const sn = snapshot();
@@ -1667,33 +1786,40 @@ function generate(rng, opts) {
     return false;
   };
   let jointDone = false;
-  if (jointKind && (weekend || innocents.filter((i) => !avoid[suspects[i].id]).length >= 2)) {
+  if (jointKind && (weekend || innocents.filter((i) => !avoid[suspects[i].id] && i !== liarIdx && i !== t2Idx).length >= 2)) {
     jointDone = makeJoint(jointKind, weekend ? [jointOwnerIdx, jointPartnerIdx] : null);
   }
   if (jointKind2 && !makeJoint(jointKind2, [jointOwner2Idx, jointPartner2Idx])) retry();
   // W alibi krzyżowym zawsze leży też prawdziwy wspólny dowód: inaczej fałszywka byłaby jedynym takim dowodem.
-  if (weekend && !jointDone) retry();
+  // Sprawa z cechą (weekend bez alibi krzyżowego): gdy wspólny dowód się nie mieści, jego właściciel dostaje zwykły
+  // prawdziwy dowód tego rodzaju.
+  if (weekend && !jointDone && traitVar) attempt(suspects[jointOwnerIdx], () => makeClaim(jointKind, suspects[jointOwnerIdx], false));
+  else if (weekend && !jointDone) retry();
   // Karty-przykrywki: prawdziwe dowody bez alibi (godzina tuż poza zasięgiem) u sprawcy i u zmyłek,
   // żeby samo liczenie kart z alibi nie wskazywało sprawcy.
   const COVER_KINDS = ['receipt', 'parking', 'delivery'];
-  for (const i of [culpritIdx, ...decoyIdx, ...(P.neutralCover ? neutralIdx : [])]) {
-    if (!rng.chance(P.coverChance)) continue;
-    const s = suspects[i];
-    // Przykrywka pasuje do historii: kto wracał autobusem albo pociągiem, nie parkował; aplikacja kurierska
-    // tylko u osoby, która twierdzi, że rozwoziła paczki.
-    const own = s.claimCard?.facts?.find((f) => f.t === 'claim')?.kind;
-    const kinds2 = COVER_KINDS.filter((k) => (k !== 'parking' || !['bus', 'train'].includes(own)) && (k !== 'delivery' || own === 'delivery'));
-    const kind = rng.pick(kinds2.length ? kinds2 : ['receipt']);
-    try {
-      attempt(s, () => makeClaim(kind, s, false, true, { cover: true }));
-    } catch (e) {
-      if (!(e instanceof RetryError)) throw e;
+  const makeCovers = () => {
+    for (const i of [culpritIdx, ...decoyIdx, ...(weekend && traitVar ? [jointOwnerIdx] : []), ...(P.neutralCover ? neutralIdx : [])]) {
+      if (!rng.chance(P.coverChance)) continue;
+      const s = suspects[i];
+      // Przykrywka pasuje do historii: kto wracał autobusem albo pociągiem, nie parkował; aplikacja kurierska
+      // tylko u osoby, która twierdzi, że rozwoziła paczki.
+      const own = s.claimCard?.facts?.find((f) => f.t === 'claim')?.kind;
+      const kinds2 = COVER_KINDS.filter((k) => (k !== 'parking' || !['bus', 'train'].includes(own)) && (k !== 'delivery' || own === 'delivery'));
+      const kind = rng.pick(kinds2.length ? kinds2 : ['receipt']);
+      try {
+        attempt(s, () => makeClaim(kind, s, false, true, { cover: true }));
+      } catch (e) {
+        if (!(e instanceof RetryError)) throw e;
+      }
     }
-  }
+  };
+  // Sprawa z cechą: przykrywki dopiero po kartach obalających (inaczej przykrywka sprawcy częściej psułaby jego kartę
+  // obalającą i sprawca miałby zwykle mniej dostarczonych kart niż T2).
+  if (!traitVar) makeCovers();
 
   // Kłamstwo niewinnej osoby: fałszywy dowód, a obok niego inne, prawdziwe alibi tej osoby.
   // Kłamca ma niezależne alibi od świadka, kamery albo rejestru.
-  let lieCard = null;
   if (lieKind) {
     // W weekend kłamie jedna ze zmyłek (w obu odmianach tak samo, żeby kłamca nie zdradzał odmiany).
     const pool = weekend ? decoyIdx : neutralIdx.filter((i) => !extraIdx.includes(i));
@@ -1723,8 +1849,22 @@ function generate(rng, opts) {
     if (!lieNoAlibi && rng.chance(0.8)) liar.claimCard = lieCard;
   }
   // Pułapki niewinnych są na nagraniu tak samo często jak pułapka sprawcy, żeby kamera z zeznaniem-tropem go nie zdradzała.
-  for (const i of rng.sample(innocents, P.traps)) attempt(suspects[i], () => makeNeutral(rng.chance(P.sealedTrapChance) ? 'cctv' : rng.pick(['witness', 'cardlog']), suspects[i], 'trap'));
-  if (mode === 'self') makePhysicalTrap(culprit, forgedEvents);
+  // Kłamca w sprawie z cechą nie dostaje dodatkowych pułapek (tak jak sprawca ma tylko kartę obalającą).
+  // T2 (niewinna osoba z cechą) zawsze ma taką pułapkę: sprawca zawsze ma kartę obalającą, więc bez tego „osoba z cechą,
+  // którą ktoś widział” wskazywałaby sprawcę bez liczenia.
+  const trapWho = liar ? rng.sample(innocents.filter((i) => i !== liarIdx && i !== t2Idx), P.traps - 1) : rng.sample(innocents, P.traps);
+  for (const i of trapWho) attempt(suspects[i], () => makeNeutral(rng.chance(P.sealedTrapChance) ? 'cctv' : rng.pick(['witness', 'cardlog']), suspects[i], 'trap'));
+  if (mode === 'self' && liar) {
+    // Karta obalająca fałszywkę i karta obalająca kłamstwo powstają tak samo (kolejność losowa).
+    const srcs = rng.chance(0.5)
+      ? [makePhysicalTrap(culprit, forgedEvents), makePhysicalTrap(liar, lieEvents)]
+      : [makePhysicalTrap(liar, lieEvents), makePhysicalTrap(culprit, forgedEvents)];
+    // Pułapka T2 (pobyt widziany gdzie indziej, bez alibi) pochodzi z tego samego źródła co jedna z dwóch kart
+    // obalających (kamera albo świadek): inaczej źródło „widziano ją gdzie indziej” różniłoby sprawcę od T2.
+    const t2Src = rng.pick(srcs);
+    attempt(suspects[t2Idx], () => makeNeutral(t2Src, suspects[t2Idx], 'trap'));
+    makeCovers();
+  } else if (mode === 'self') makePhysicalTrap(culprit, forgedEvents);
   // Pułapka sprawcy jest na nagraniu (z ewentualnym zeznaniem-tropem) mniej więcej tak często jak pułapka
   // któregoś z niewinnych, żeby trop do kamery nie wskazywał ani sprawcy, ani niewinnych.
   else if (P.culpritTrap) attempt(culprit, () => makeNeutral(rng.chance(0.4) ? 'cctv' : rng.pick(['witness', 'cardlog']), culprit, 'trap'));
@@ -1733,7 +1873,11 @@ function generate(rng, opts) {
   // Trzy losowe osoby niewinne i czasem sprawca, ale tylko wtedy, gdy taki pobyt nie daje mu alibi na żadne
   // z otwarć drzwi (często sprawcę i tak widać przy zapłonie na karcie, która obala fałszywkę).
   if (arson) {
-    const who = [...rng.sample(innocents, 3), ...(rng.chance(0.6) ? [culpritIdx] : [])];
+    // Sprawa z cechą: kłamca i T2 (osoby, które bez śladu albo bez karty obalającej wyglądają jak sprawca) mają taki
+    // pobyt tak samo często jak sprawca, pozostali niewinni zawsze.
+    const who = traitVar
+      ? [...innocents.filter((i) => i !== liarIdx && i !== t2Idx), ...[culpritIdx, liarIdx, t2Idx].filter(() => rng.chance(0.6))]
+      : [...rng.sample(innocents, 3), ...(rng.chance(0.6) ? [culpritIdx] : [])];
     for (const i of rng.shuffle(who)) {
       const s = suspects[i];
       try {
@@ -1750,6 +1894,9 @@ function generate(rng, opts) {
   // obalać też jego pobyt), więc wtedy krótkich pobytów w oknie nie ma nikt.
   if (poison && mode !== 'table') {
     for (const i of innocents) {
+      // Sprawa z cechą: kłamca i T2 jak sprawca nie mają krótkich pobytów w oknie (karty obalające w sprawie z cechą też
+      // nie wypadają w oknie). Inaczej „osoba z cechą widziana krótko w oknie” wskazywałaby niewinną osobę albo sprawcę.
+      if (i === liarIdx || i === t2Idx) continue;
       if (!rng.chance(0.9)) continue;
       const s = suspects[i];
       try {
@@ -1763,6 +1910,9 @@ function generate(rng, opts) {
   // W raporcie wybiera się fałszywkę spośród dowodów od podejrzanych: musi ich być co najmniej cztery,
   // inaczej dałoby się ją po prostu zgadnąć.
   if (cards.filter((k) => k.kind === 'supplied').length < 4) retry();
+
+  // Cechy osób: ślad z miejsca i pełny wykaz (karty bez godzin, nie zmieniają niczyich pobytów).
+  const traitsField = traitVar ? makeTraitCards() : null;
 
   // --- Karty urzędowe ze wspólnych tabel --------------------------------------
   const wantTable = (has) => has || rng.chance(P.noiseTableChance);
@@ -2197,7 +2347,11 @@ function generate(rng, opts) {
     ],
     R: NOISE_THEFT.R.filter((fn) => !/Rejestr systemu alarmowego/.test(fn.toString())),
   } : null;
-  const NOISE = arson ? NOISE_ARSON : poison ? NOISE_POISON : NOISE_THEFT;
+  const NOISE0 = arson ? NOISE_ARSON : poison ? NOISE_POISON : NOISE_THEFT;
+  // Przy odcisku buta bez szumu „nie da się ustalić rozmiaru buta” (myliłby się z kartą śladu).
+  // Przy ubraniu bez szumu „Zdjęcie z zebrania” (cała piątka przy stole: bliźniak zdjęcia ze spotkania w herbaciarni).
+  const NOISE = traitVar === 'shoe' ? { ...NOISE0, Z: NOISE0.Z.filter((fn) => !/rozmiaru buta/.test(fn.toString())) }
+    : traitVar === 'clothes' ? { ...NOISE0, Z: NOISE0.Z.filter((fn) => !/Zdjęcie z zebrania/.test(fn.toString())) } : NOISE0;
 
   // Zeznania o motywach (szum, ale budzą podejrzenia).
   const MOTIVES_ARSON = [
@@ -2400,6 +2554,18 @@ function generate(rng, opts) {
     if (types.has('cardowner')) return { label: `Zażądaj wykazu kart: ${card.title.replace(/^Właściciele kart wejściowych: /, '')}`, cost: 30 };
     if (types.has('sunset')) return { label: 'Sprawdź kalendarz astronomiczny', cost: 15 };
     if (types.has('legend')) return { label: 'Poproś o objaśnienia znaków w rozkładach', cost: 15 };
+    // Cechy osób: ślad z miejsca i wykazy.
+    const tf = (card.facts || []).find((f) => f.t === 'trait' || f.t === 'traitlist');
+    if (tf?.t === 'trait' && tf.trait === 'shoe') return { label: 'Zabezpiecz odcisk buta z miejsca zdarzenia', cost: 15 };
+    if (tf?.t === 'trait') return { label: `Zabezpiecz nagranie: ${card.title.toLowerCase()}`, cost: 30 };
+    if (tf?.trait === 'shoe') return { label: 'Zażądaj protokołu zabezpieczenia obuwia', cost: 30 };
+    if (tf?.trait === 'dog') return { label: 'Poproś o zeszyt z listą znajomych psa', cost: 15 };
+    if (card.title === 'Zdjęcie ze spotkania') return { label: 'Poproś o zdjęcie ze spotkania w herbaciarni', cost: 15 };
+    // Zmyłki przy cechach: etykiety w tym samym stylu co karty śladu (forma koperty nie mówi, że to szum).
+    if (card.title === 'Zdjęcie z oględzin: drugi odcisk') return { label: 'Zabezpiecz odcisk buta z błota przy wejściu', cost: 15 };
+    if (card.title === 'Książeczka zdrowia psa') return { label: 'Poproś o książeczkę zdrowia psa', cost: 15 };
+    if (card.title === 'Notatka recepcji') return { label: 'Zapytaj recepcję o zwierzęta w hotelu', cost: 15 };
+    if (card.title === 'Rzeczy znalezione') return { label: 'Poproś o rejestr rzeczy znalezionych', cost: 15 };
     if (card.title === 'Monitoring miejski') {
       // Okno nagrania (45 min wokół zapisanej chwili): da się logicznie wybrać kamerę do sprawdzenia.
       const m = /(\d{1,2}):(\d{2})/.exec(card.lines[1] || '');
@@ -2471,5 +2637,191 @@ function generate(rng, opts) {
     innocentLie: Boolean(lieCard),
     forgeMode: mode,
     lieCard: lieCard ? lieCard.id : null,
+    ...(traitsField ? { traits: traitsField } : {}),
   };
+
+  /**
+   * Karty modułu cech. Cechę ma sprawca, T2 (niewinna osoba z jednym prawdziwym dowodem) i czasem inne niewinne
+   * osoby, nigdy kłamca L. Ślad i wykaz leżą na różnych biurkach.
+   */
+  function makeTraitCards() {
+    const T2 = suspects[t2Idx];
+    const others = innocents.filter((i) => i !== liarIdx && i !== t2Idx).map((i) => suspects[i]);
+    // Właściciel prawdziwego wspólnego dowodu (weekend) nie ma cechy: jego jedynym alibi jest ten dowód, a sprawca
+    // w sprawie z cechą nigdy nie ma wspólnego dowodu, więc „osoba z cechą ze wspólnym dowodem” byłaby zawsze niewinna.
+    const noTrait = new Set(weekend && jointOwnerIdx >= 0 ? [suspects[jointOwnerIdx].id] : []);
+    // Imię i nazwisko z twardą spacją: wąska karta nie łamie nazwiska w połowie.
+    const nb = (p) => p.full.replace(/ /g, ' ');
+    const names = (list) => {
+      const n = list.map(nb);
+      return n.length > 1 ? `${n.slice(0, -1).join(', ')} i ${n[n.length - 1]}` : n[0];
+    };
+    const order = rng.shuffle(suspects.slice());
+    /** Nazwiska po dwa w linii (krótkie linie kart); pozycja z dopiskiem w nawiasie zawsze sama w linii. */
+    const pairsOf = (list) => {
+      const out = [];
+      let cur = [];
+      for (const x of list) {
+        if (x.includes('(')) {
+          out.push(x);
+          continue;
+        }
+        cur.push(x);
+        if (cur.length === 2) {
+          out.push(cur.join(', '));
+          cur = [];
+        }
+      }
+      if (cur.length) out.push(cur.join(', '));
+      return out;
+    };
+    // Przedział, w którym na pewno działał sprawca (całe okno, przy podpaleniu oba otwarcia, przy otruciu cały czas
+    // karafki na stole): świadek przy psie albo kamera obejmują go z zapasem.
+    const lo = Math.min(hullLo, W1);
+    const hi = Math.max(hullHi, W2);
+    const noise = rng.chance(0.4);
+    if (traitVar === 'shoe') {
+      const range = (p) => (p.f ? [36, 41] : [40, 46]);
+      const fitsSize = (p, v) => v >= range(p)[0] && v <= range(p)[1];
+      const S = culprit.f === T2.f ? rng.int(...range(culprit)) : rng.pick([40, 41]);
+      const otherSize = (p) => {
+        const opts = [];
+        for (let v = range(p)[0]; v <= range(p)[1]; v++) if (v !== S) opts.push(v);
+        return rng.pick(opts);
+      };
+      const sizes = { [culprit.id]: S, [T2.id]: S, [liar.id]: otherSize(liar) };
+      for (const p of others) sizes[p.id] = !noTrait.has(p.id) && fitsSize(p, S) && rng.chance(0.3) ? S : otherSize(p);
+      // Ślad w miejscu, w którym był tylko sprawca (przy minutniku, w proszku obok karafki, w tym, co rozsypał przy
+      // kradzieży), a nie tam, gdzie chodzi też właściciel albo obsługa.
+      const where = arson ? 'w trocinach rozsypanych przy minutniku'
+        : poison ? 'w rozsypanym proszku obok karafki'
+          : { cukiernia: 'w mące rozsypanej przy kasetce', galeria: 'w gipsowym pyle z potrąconego postumentu', lutnik: 'w trocinach rozsypanych przy gablocie' }[scene.id] || 'na papierach zrzuconych przy kradzieży';
+      const g2 = (m, f) => [m, f];
+      addCard({
+        desk: 'Z', title: 'Zdjęcie z oględzin: odcisk buta',
+        lines: [`Odcisk buta ${where}.`, `Rozmiar ${S}. Ślad świeży, z tego wieczoru.`],
+        facts: [{ t: 'trait', trait: 'shoe', value: S, what: `na miejscu został świeży odcisk buta w rozmiarze ${S}`, short: 'odcisk buta z miejsca', hasNot: g2(`nie miał butów w rozmiarze ${S}`, `nie miała butów w rozmiarze ${S}`) }],
+      });
+      addCard({
+        desk: 'R', title: 'Protokół zabezpieczenia obuwia', sub: 'buty, w których podejrzani chodzili tego wieczoru',
+        lines: [...order.map((p) => `${nb(p)}: rozmiar ${sizes[p.id]}`), 'Nikt z nich nie zmieniał tego wieczoru butów.'],
+        facts: [{ t: 'traitlist', trait: 'shoe', complete: true, values: sizes, lead: `buty w rozmiarze ${S} miały tylko te osoby` }],
+      });
+      if (noise) {
+        // Rozmiar zmyłki niezależny od podejrzanych (z całego zakresu, bez rozmiarów z protokołu): rozmiar z zakresu
+        // płci którejś osoby zdradzałby jej płeć, a rozmiar z protokołu myliłby się z cudzym butem.
+        const inList = new Set(Object.values(sizes));
+        const pool = [];
+        for (let v = 36; v <= 46; v++) if (!inList.has(v)) pool.push(v);
+        const v2 = rng.pick(pool);
+        const who = v2 <= 39 ? 'listonoszka' : 'listonosz';
+        addCard({ desk: 'Z', title: 'Zdjęcie z oględzin: drugi odcisk', lines: [`Odcisk buta w rozmiarze ${v2}, w zaschniętym błocie.`, `Według ${scene.owner.f ? 'właścicielki' : 'właściciela'} to ${who}, tydzień temu.`] });
+      }
+      return { variant: 'shoe', ids: ['shoe'], size: S };
+    }
+    if (traitVar === 'dog') {
+      const dog = TRAIT_DOGS[scene.id] || TRAIT_DOGS.default;
+      const known = { [culprit.id]: true, [T2.id]: true, [liar.id]: false };
+      for (const p of others) known[p.id] = !noTrait.has(p.id) && rng.chance(0.35);
+      const w = nextWitness();
+      const a = round5(lo - rng.int(15, 45));
+      let b = round5(hi + rng.int(15, 45));
+      // Podpalenie: świadek kończy przed zapłonem (pies nie milczy przy pożarze). Zapłon jest co najmniej 5 min po
+      // ostatnim otwarciu drzwi, więc oba otwarcia nadal mieszczą się w przedziale.
+      if (arson) b = Math.min(b, Math.max(Math.ceil(hi / 5) * 5, Math.floor((arson.Z - 3) / 5) * 5));
+      const role = dog.watch[w.f ? 'f' : 'm'];
+      // Czyj pies: stróż albo stróżka (świadek siedzi przy własnym psie).
+      const kind = w.f && dog.kindF ? dog.kindF : dog.kind;
+      addCard({
+        desk: 'S', kind: 'witness', title: `Zeznanie: ${w.full}`, sub: role,
+        lines: [`„${g(w, 'Siedziałem', 'Siedziałam')} ${dog.where} od ${fmt(a)} do ${fmt(b)}. ${dog.name} przez cały ten czas ani razu nie zaszczekał.”`],
+        facts: [{ t: 'trait', trait: 'dog', value: true, what: `według świadka ${dog.name} od ${fmt(a)} do ${fmt(b)} ani razu nie zaszczekał`, short: 'pies nie szczekał', hasNot: [`nie jest na liście osób, które zna ${dog.name}`, `nie jest na liście osób, które zna ${dog.name}`] }],
+      });
+      const outsider = rng.pick(['Ewelina Struś (listonoszka)', 'Ludwik Pawłowski (weterynarz)', 'Wanda Rogala (sąsiadka)', 'Józef Wierzba (kominiarz)']);
+      // Przy otruciu do sali wchodziła też obsługa, więc pies zna całą obsługę (inaczej szczekałby na kelnera).
+      const staffLine = poison ? [`cała obsługa ${scene.id === 'zacisze' ? 'hotelu' : 'Domu Kultury'}`] : [];
+      // Świadek siedział przy psie, więc też jest w zeszycie (inaczej „pełny wykaz” przeczyłby zeznaniu).
+      const list = rng.shuffle([...order.filter((p) => known[p.id]).map(nb), scene.owner.full.replace(/ /g, ' '), outsider, `${w.full.replace(/ /g, ' ')} (${role.replace(/ .*/, '')})`, ...staffLine]);
+      const pairs = pairsOf(list);
+      addCard({
+        desk: 'D', title: `Zeszyt: kogo zna ${dog.name}`, sub: `${kind}, ${dog.whoseNote}`,
+        lines: [`Pełny wykaz osób, które ${dog.name} zna:`, ...pairs, `Na każdego innego ${dog.name} zawsze szczeka.`],
+        facts: [{ t: 'traitlist', trait: 'dog', complete: true, values: known, lead: `${dog.name} zna z podejrzanych tylko te osoby` }],
+      });
+      if (noise) {
+        addCard(dog.cat
+          ? { desk: 'R', title: 'Notatka recepcji', lines: ['Kot hotelowy Mruczek syczy na każdego gościa.', 'Do sali kominkowej kot nie wchodzi.'] }
+          : { desk: 'D', title: 'Książeczka zdrowia psa', lines: [`${dog.name}, ${kind}: szczepiony w marcu.`, 'Słuch i węch bez zastrzeżeń.'] });
+      }
+      return { variant: 'dog', ids: ['dog'], dog: dog.name, dogGen: dog.gen };
+    }
+    // Ubranie z nagrania: dwie cechy (szalik albo latem czapka, i plecak). Obie razem ma sprawca i T2, kłamca nie ma
+    // co najmniej jednej.
+    const month = Number(crimeIso.slice(5, 7));
+    const summer = month >= 5 && month <= 9;
+    const scarf = rng.pick(summer
+      ? [
+        ['czerwona czapka', 'czerwonej czapce', 'Czerwone czapki', 'czerwonej czapki', 'red'],
+        ['zielona czapka', 'zielonej czapce', 'Zielone czapki', 'zielonej czapki', 'green'],
+        ['żółta czapka', 'żółtej czapce', 'Żółte czapki', 'żółtej czapki', 'yellow'],
+      ]
+      : [
+        ['czerwony szalik', 'czerwonym szaliku', 'Czerwone szaliki', 'czerwonego szalika', 'red'],
+        ['zielony szalik', 'zielonym szaliku', 'Zielone szaliki', 'zielonego szalika', 'green'],
+        ['żółty szalik', 'żółtym szaliku', 'Żółte szaliki', 'żółtego szalika', 'yellow'],
+      ]);
+    const bag = rng.pick([
+      ['jasny plecak', 'jasnym plecakiem', 'Jasne plecaki', 'jasnego plecaka', 'light'],
+      ['czarny plecak', 'czarnym plecakiem', 'Czarne plecaki', 'czarnego plecaka', 'dark'],
+    ]);
+    const miss = rng.pick(['scarf', 'backpack', 'both']);
+    const hasS = { [culprit.id]: true, [T2.id]: true, [liar.id]: miss === 'backpack' };
+    const hasB = { [culprit.id]: true, [T2.id]: true, [liar.id]: miss === 'scarf' };
+    for (const p of others) {
+      hasS[p.id] = rng.chance(0.35);
+      hasB[p.id] = rng.chance(0.35);
+      if (noTrait.has(p.id) && hasS[p.id] && hasB[p.id]) {
+        if (rng.chance(0.5)) hasS[p.id] = false;
+        else hasB[p.id] = false;
+      }
+    }
+    const fig = `postać w ${scarf[1]}, z ${bag[1]}`;
+    // Bez godzin i bez kolejności wejść: kamera nie może wyznaczać okna zdarzenia (przy podpaleniu kolejność wejść
+    // wskazywałaby rozstrzygające otwarcie bez opinii biegłego).
+    const camLines = !arson && !poison
+      ? ['Nagranie z czasu kradzieży, obraz nieostry.', 'W środku była tylko jedna postać:', `w ${scarf[1]}, z ${bag[1]}.`, 'Twarzy nie widać.']
+      : arson
+        ? ['Zegar kamery stoi, kolejności wejść nie widać.', 'Nagrały się dwa wejścia:', `${nb(scene.owner)} oraz postać`, `w ${scarf[1]}, z ${bag[1]}.`, 'Twarzy tej postaci nie widać.']
+        : ['Zegar kamery stoi, nagranie z tego wieczoru.', `Zanim ${nb(scene.owner)} ${g(scene.owner, 'zasnął', 'zasnęła')},`, `do ${scene.roomGen || 'sali'} wchodziła tylko`, `obsługa i ${fig}.`, 'Twarzy tej postaci nie widać.'];
+    addCard({
+      desk: 'R', title: poison ? 'Kamera na korytarzu' : arson ? 'Kamera przy wejściu' : 'Kamera w środku', sub: scene.name,
+      lines: camLines,
+      facts: [
+        { t: 'trait', trait: 'scarf', value: true, what: `kamera nagrała sprawcę w ${scarf[1]}`, short: 'nagranie z kamery', hasNot: [`nie miał ${scarf[3]}`, `nie miała ${scarf[3]}`], color: scarf[4], item: summer ? 'cap' : 'scarf' },
+        { t: 'trait', trait: 'backpack', value: true, what: `kamera nagrała sprawcę z ${bag[1]}`, short: 'nagranie z kamery', hasNot: [`nie miał ${bag[3]}`, `nie miała ${bag[3]}`], color: bag[4] },
+      ],
+    });
+    // Który wykaz jest w zeznaniu (jawnym), a który na zdjęciu (w kopercie), losujemy: inaczej wykaz szalików zawsze
+    // leżałby za darmo, a koperta ze zdjęciem często byłaby zbędna.
+    const w = nextWitness();
+    const lists = [
+      { trait: 'scarf', it: scarf, has: hasS },
+      { trait: 'backpack', it: bag, has: hasB },
+    ];
+    const [spoken, pictured] = rng.chance(0.5) ? lists : [lists[1], lists[0]];
+    const sh = order.filter((p) => spoken.has[p.id]);
+    addCard({
+      desk: 'S', kind: 'witness', title: `Zeznanie: ${w.full}`, sub: `${g(w, 'kelner', 'kelnerka')} w herbaciarni „Pod Dzbankiem”`,
+      lines: [`„O 15:00 cała piątka siedziała u nas przy jednym stole. ${spoken.it[2]} ${sh.every((p) => p.f) ? 'miały' : 'mieli'} tylko ${names(sh)}.”`],
+      facts: [{ t: 'traitlist', trait: spoken.trait, complete: true, values: spoken.has, lead: `${spoken.it[2].toLowerCase()} miały tylko te osoby` }],
+    });
+    const bh = order.filter((p) => pictured.has[p.id]);
+    addCard({
+      desk: 'Z', title: 'Zdjęcie ze spotkania', sub: 'herbaciarnia „Pod Dzbankiem”, 15:10',
+      lines: ['Cała piątka przy jednym stole.', pictured.trait === 'scarf' ? `W ${scarf[1]}:` : `Z ${bag[1]}:`, ...pairsOf(bh.map(nb)), `Nikt inny nie miał ${pictured.it[3]}.`],
+      facts: [{ t: 'traitlist', trait: pictured.trait, complete: true, values: pictured.has, lead: `${pictured.it[2].toLowerCase()} miały tylko te osoby` }],
+    });
+    if (noise) addCard({ desk: 'D', title: 'Rzeczy znalezione', lines: [summer ? 'Szara czapka, znaleziona tydzień temu w sieni.' : 'Szary szalik, znaleziony tydzień temu w sieni.', `Nikt się po ${summer ? 'nią' : 'niego'} nie zgłosił.`] });
+    return { variant: 'clothes', ids: ['scarf', 'backpack'], scarf: scarf[0], bag: bag[0] };
+  }
 }

@@ -17,6 +17,8 @@ export function cardLook(k) {
   if (cl) return { train: 'ticket', bus: 'ticket', cinema: 'ticket', parking: 'ticket', receipt: 'receipt', photo: 'photo', delivery: 'phone' }[cl.kind] || null;
   if (k.kind === 'witness') return 'witness';
   if (k.title === 'Monitoring miejski') return 'cctv';
+  // Cechy osób: ślad z miejsca (odcisk buta, postać z kamery bez twarzy).
+  if (has(k, 'trait') || /^Zdjęcie z oględzin: drugi odcisk/.test(k.title)) return 'trace';
   if (has(k, 'train') || has(k, 'bus') || has(k, 'vehicle')) return 'board';
   if (has(k, 'weather')) return 'weather';
   // Podpalenie: rejestr alarmu (pasek z otwarciami drzwi), czujka dymu, opinia biegłego (tarcza minutnika).
@@ -34,6 +36,16 @@ export function cardIcon(k) {
   const cl = claimOf(k);
   if (cl) return { train: 'train-front', bus: 'bus-front', cinema: 'clapperboard', parking: 'ticket', receipt: 'receipt', photo: 'camera', delivery: 'smartphone' }[cl.kind] || 'file-text';
   if (k.kind === 'witness') return 'message-circle';
+  // Cechy osób: odcisk buta i protokół obuwia, zeszyt psa, nagranie i zdjęcie z ubraniem.
+  const tf = (k.facts || []).find((f) => f.t === 'trait' || f.t === 'traitlist');
+  if (tf && tf.trait === 'shoe') return 'footprints';
+  if (tf && tf.trait === 'dog') return 'dog';
+  if (tf && tf.t === 'trait') return 'scan-face';
+  if (tf) return 'shirt';
+  // Zmyłki przy cechach mają te same ikony co prawdziwe karty śladu.
+  if (/^Zdjęcie z oględzin: drugi odcisk/.test(k.title)) return 'footprints';
+  if (/^Książeczka zdrowia psa|^Notatka recepcji/.test(k.title)) return 'dog';
+  if (/^Rzeczy znalezione/.test(k.title)) return 'shirt';
   if (/Monitoring|Kamera/.test(k.title)) return 'cctv';
   if (has(k, 'opening')) return 'door-open';
   if (has(k, 'ignition')) return 'alarm-smoke';
@@ -206,6 +218,25 @@ export function cardVisual(k, { suspectById }) {
     }).join('');
     const sector = tm.max > tm.min ? `<path class="tm-range" d="M 60 60 L ${x1.toFixed(1)} ${y1.toFixed(1)} A ${R} ${R} 0 ${large} 1 ${x2.toFixed(1)} ${y2.toFixed(1)} Z"/>` : '';
     return `<div class="tm-wrap" aria-hidden="true"><svg class="tm-dial" viewBox="0 0 120 120"><circle class="tm-face" cx="60" cy="60" r="${R + 14}"/>${sector}<g class="tm-ticks">${ticks.join('')}</g><g class="tm-labels">${labels}</g><circle class="tm-hub" cx="60" cy="60" r="4"/></svg><p class="tm-cap">nastaw<br><b>${tm.min}–${tm.max} min</b></p></div>`;
+  }
+  if (look === 'trace') {
+    const tr = (k.facts || []).filter((f) => f.t === 'trait');
+    const shoe = tr.find((f) => f.trait === 'shoe');
+    // Zmyłka „drugi odcisk” wygląda tak samo jak prawdziwy ślad (rozmiar z jej pierwszej linii).
+    const size = shoe ? shoe.value : (k.lines[0] || '').match(/rozmiarze (\d+)/)?.[1];
+    if (size) return `<div class="smoke-box trait-box" aria-hidden="true">${icon('footprints')}<b>${esc(size)}</b><span>rozmiar odcisku</span></div>`;
+    // Postać z kamery bez twarzy: kolor szalika i plecaka z karty (te same słowa są w liniach karty).
+    const SC = { red: '#c0392b', green: '#3c8d4f', yellow: '#e2b33c' };
+    const BG = { light: '#e8dcc0', dark: '#2c2c34' };
+    const scf = tr.find((f) => f.trait === 'scarf');
+    const sc = SC[scf?.color] || '#c0392b';
+    const cam = /w środku/.test(k.title) ? 'WNĘTRZE' : /korytarzu/.test(k.title) ? 'KORYTARZ' : 'WEJŚCIE';
+    // Latem zamiast szalika czapka w tym samym kolorze.
+    const neck = scf?.item === 'cap'
+      ? `<path d="M52.5 13 Q60 4 67.5 13 Z" fill="${sc}"/><rect x="51" y="12" width="13" height="2.4" rx="1" fill="${sc}"/>`
+      : `<path d="M53 23 Q60 28 67 23 L66 27 Q60 31 54 27 Z" fill="${sc}"/><rect x="55" y="26" width="4" height="12" fill="${sc}"/>`;
+    const bg = BG[tr.find((f) => f.trait === 'backpack')?.color] || '#e8dcc0';
+    return `<div class="cctv-screen" aria-hidden="true"><span class="cctv-rec">● REC</span><span class="cctv-cam">${cam}</span><svg viewBox="0 0 120 50" class="cctv-fig"><rect x="70" y="24" width="11" height="15" rx="3" fill="${bg}" stroke="#9fb3a3" stroke-width="1"/><circle cx="60" cy="16" r="7" fill="#9fb3a3"/><path d="M48 46 Q60 18 72 46 Z" fill="#9fb3a3"/>${neck}</svg><span class="cctv-time">${esc(k.lines.join(' ').match(/(\d{1,2}:\d{2})/)?.[1] || '--:--')}</span></div>`;
   }
   if (look === 'cctv') {
     const time = (k.lines[1] || '').match(/(\d{1,2}:\d{2})/)?.[1] || '';

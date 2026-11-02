@@ -1,7 +1,7 @@
 // Testy generatora i solvera: `npm test` (albo `node --test tests/`).
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { buildDailyCase, buildPracticeCase, difficultyForDate } from '../js/generator.js';
+import { buildDailyCase, buildPracticeCase, buildCase, difficultyForDate } from '../js/generator.js';
 import { solveCase, qualityIssues } from '../js/solver.js';
 import { addDays } from '../js/time.js';
 import { TEAM_DESKS } from '../js/data.js';
@@ -211,6 +211,12 @@ test('od piątku: dwa fałszywe dowody, a kłamca ma inne potwierdzone alibi', (
     const c = buildDailyCase(iso);
     const res = solveCase(c);
     const contradicted = res.evaluated.filter((e) => e.contradicted).map((e) => e.card);
+    // Sprawy z cechą (v11): kłamca nie ma innego alibi, a kłamstwo obala fizyczna niemożliwość (tests/traits.test.mjs).
+    if (c.traits) {
+      assert.equal(c.innocentLie, true, iso);
+      assert.deepEqual(contradicted, [], iso);
+      continue;
+    }
     if (difficultyForDate(iso) >= 5) {
       lieDays++;
       assert.equal(c.innocentLie, true, iso);
@@ -231,7 +237,7 @@ test('od piątku: dwa fałszywe dowody, a kłamca ma inne potwierdzone alibi', (
       assert.ok(!c.innocentLie, iso);
     }
   }
-  assert.ok(lieDays > 100);
+  assert.ok(lieDays > 90, `dni z kłamcą: ${lieDays}`);
   // Zwykle kłamstwo wygląda na alibi (brak skrótu „jedyny dowód bez alibi to kłamstwo”), ale nie zawsze.
   assert.ok(lieAlibi > lieDays * 0.5 && lieAlibi < lieDays * 0.9, `kłamstw z alibi: ${lieAlibi}/${lieDays}`);
 });
@@ -247,7 +253,11 @@ test('od środy fałszywkę obala fizyczna niemożliwość, a w weekend alibi kr
     const f = res.explain.forged;
     assert.equal(f.physical, true, iso);
     assert.ok(f.proofRefs.length >= 1, iso);
-    if (d >= 6) {
+    if (c.traits) {
+      // Sprawa z cechą: zawsze odmiana bez alibi krzyżowego, fałszywkę obala pobyt sprawcy.
+      assert.equal(c.forgeMode, 'self', iso);
+      assert.equal(f.about, c.solution.culprit, iso);
+    } else if (d >= 6) {
       // Weekend: zawsze dwa wspólne dowody; fałszywką jest jeden z nich (alibi krzyżowe) albo zwykły dowód sprawcy.
       assert.equal(res.evaluated.filter((e) => e.with.length).length, 2, `${iso}: wspólne dowody`);
       const card = c.cards.find((k) => k.id === c.solution.forged);
@@ -292,7 +302,8 @@ test('w weekend kartę obalającą trzeba zlecić (zapieczętowane nagranie albo
     const nonTravel = proof.filter((k) => !(k.facts || []).some((f) => f.t === 'travel' || f.t === 'grid'));
     assert.ok(nonTravel.length > 0 && nonTravel.every((k) => k.action), `${iso}: ${nonTravel.map((k) => k.id)}`);
   }
-  assert.ok(n > 50);
+  // Od v11 sprawy z cechą nie mają alibi krzyżowego, więc takich dni jest nieco mniej.
+  assert.ok(n > 40, `dni z alibi krzyżowym: ${n}`);
 });
 
 test('etykieta nagrania podaje okno czasowe, w którym leży zapisana chwila', () => {
@@ -336,7 +347,8 @@ test('alibi krzyżowe: dwa symetryczne wspólne dowody, a kłamca nie jest osob�
       assert.notEqual(res.explain.lies[0].who, p, `${iso}: kłamca to partner wspólnego dowodu`);
     }
   }
-  assert.ok(n > 50);
+  // Od v11 sprawy z cechą nie mają alibi krzyżowego, więc takich dni jest nieco mniej.
+  assert.ok(n > 40, `dni z alibi krzyżowym: ${n}`);
 });
 
 test('w raporcie zawsze co najmniej 4 dowody od podejrzanych do wyboru', () => {
@@ -375,6 +387,12 @@ test('nowe sposoby obalenia: każdy występuje w fałszywkach pn–wt i w kłams
       }
     }
     for (const lie of res.explain.lies) lies[lie.reasonCodes[0]] = (lies[lie.reasonCodes[0]] || 0) + 1;
+  }
+  // Od v11 około 35% dni pt–nd ma kłamstwo obalane fizycznie (sprawy z cechą), a rzadkie sposoby kłamstwa tabelowego
+  // trafiały akurat na takie dni, więc kłamstwa liczymy też w 120 sprawach pt–nd bez cechy (te same reguły co w dniach).
+  for (let i = 0; i < 120; i++) {
+    const c = buildCase({ seed: `lie:${i}`, date: ['2026-03-13', '2026-07-17', '2026-11-20', '2026-12-18'][i % 4], difficulty: 5 + (i % 3), kind: 'practice', crimeType: 'theft' });
+    for (const lie of solveCase(c).explain.lies) lies[lie.reasonCodes[0]] = (lies[lie.reasonCodes[0]] || 0) + 1;
   }
   for (const code of NEW_WAYS) assert.ok((forged[code] || 0) >= 4, `fałszywka ${code}: ${forged[code] || 0}`);
   for (const code of NEW_WAYS.filter((x) => x !== 'bus-vehicle')) assert.ok((lies[code] || 0) >= 2, `kłamstwo ${code}: ${lies[code] || 0}`);

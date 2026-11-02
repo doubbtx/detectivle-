@@ -23,7 +23,8 @@ console.log(c.openings
   : `Okno: ${fmt(c.window.from)}–${fmt(c.window.to)}\n`);
 console.log('## Zasady');
 rulesFor(c).forEach((r, i) => console.log(`${i + 1}. ${r}`));
-if (c.innocentLie) console.log('UWAGA: w tej sprawie kłamią dwie osoby. Jeden fałszywy dowód podrzucił sprawca, drugi to kłamstwo niewinnej osoby, która ma inne, potwierdzone alibi.');
+if (c.innocentLie) console.log(`UWAGA: w tej sprawie kłamią dwie osoby. Jeden fałszywy dowód podrzucił sprawca, drugi to kłamstwo niewinnej osoby, ${c.traits ? 'która nie ma cechy sprawcy ze śladu' : 'która ma inne, potwierdzone alibi'}.`);
+if (c.traits) console.log(`Cecha: ${c.traits.variant} (${c.traits.ids.join(', ')})`);
 console.log('');
 console.log('## Podejrzani');
 for (const s of c.suspects) console.log(`- ${s.full} (${s.role}): ${s.alibi}`);
@@ -40,6 +41,8 @@ if (showSolution) {
   console.log(`\n## Rozwiązanie: ${name(c.solution.culprit)}, fałszywka ${c.solution.forged}`);
   if (r.explain.window?.reason) console.log(`Okno: ${r.explain.window.reason}`);
   console.log(`Powód: ${r.explain.forged.reason}`);
+  for (const lie of r.explain.lies) console.log(`Kłamstwo ${name(lie.who)} [${lie.card}]: ${lie.reason}${lie.trait ? `; nie jest sprawcą, bo ${lie.trait.text} [${lie.trait.refs.join(', ')}]` : ''}`);
+  if (r.explain.trait) console.log(`Ślad: ${r.explain.trait.reason}`);
   for (const [id, items] of Object.entries(r.explain.suspects)) {
     console.log(`- ${name(id)}: ${items.map((i) => `${r.describeClear(i)} [${i.refs.join(', ')}]`).join(' | ')}`);
   }

@@ -3,7 +3,7 @@
 import { randomPracticeCode, DIFFICULTY_LABELS, EPOCH } from './generator.js';
 import { loadDailyCase, loadPracticeCase } from './cases.js';
 import { solveCase, investigationBudget } from './solver.js';
-import { TEAM_DESKS, DESK_DEFS, PLACES, SCENES, ARSON_SCENES, POISON_SCENES, rulesFor, rulesShortFor, hasTownMap, crimeOf, shownWindows, reasonsFor } from './data.js';
+import { TEAM_DESKS, DESK_DEFS, PLACES, SCENES, ARSON_SCENES, POISON_SCENES, rulesFor, rulesShortFor, hasTownMap, crimeOf, shownWindows, reasonsFor, hasTraits, TRAIT_VARIANTS } from './data.js';
 import { renderTownSvg } from './map.js';
 import { icon } from './icons.js';
 import { portrait } from './portraits.js';
@@ -466,7 +466,7 @@ function caseHeading() {
     <h1 class="case-title">${esc(c.title)}</h1>
     <p class="case-meta">Data ${crimeOf(c).gen}: ${esc(c.crimeDate.label)}</p>
     <p class="case-meta">Trudność ${difficultyDots(c.difficulty)} ${esc(DIFFICULTY_LABELS[c.difficulty])}</p>
-    ${c.innocentLie ? '<p class="case-meta lie-meta">W tej sprawie kłamią dwie osoby.</p>' : ''}
+    ${c.innocentLie ? `<p class="case-meta lie-meta">W tej sprawie kłamią dwie osoby.${hasTraits(c) ? ' Kłamcę od sprawcy odróżnia ślad z miejsca.' : ''}</p>` : ''}
     ${isArchive() ? '<p class="case-meta"><b>Sprawa archiwalna.</b> Wynik nie liczy się do serii.</p>' : ''}`;
 }
 
@@ -750,7 +750,8 @@ function renderAkta() {
       ${renderWindowBox(c)}
       <details class="intro-more" data-keep="intro"${keepOpen.intro ? ' open' : ''}><summary>Czytaj meldunek</summary><p class="intro">${esc(c.intro)}</p></details>
       ${(() => { const used = usedMin(); const bud = budgetMin(); const pct = Math.min(100, Math.round((used / Math.max(1, bud)) * 100)); return `<div class="budget${used > bud ? ' over' : used >= bud * 0.8 ? ' warn' : ''}" title="${state.mode === 'team' ? 'W ekipie każdy ma własny budżet, a nadgodziny są tylko informacją.' : `Każde rozpoczęte pół godziny ponad budżet to +${fmtPenalty(OVERTIME_PENALTY)} do czasu.`}"><span class="budget-label">${icon('clock')} Śledztwo <b>${fmtHM(used)} / ${fmtHM(bud)} h</b></span><span class="budget-bar"><span style="width:${pct}%"></span></span><span class="budget-note">${state.mode === 'team' ? 'koperty kosztują czas' : `ponad budżet: +${fmtPenalty(OVERTIME_PENALTY)} za każde 30 min`}</span></div>`; })()}
-      ${c.innocentLie ? `<details class="lie-stamp"><summary>Kłamią 2 osoby</summary><p>Jeden fałszywy dowód podrzucił sprawca. Drugi to kłamstwo niewinnej osoby, która ukrywała coś niezwiązanego z ${crimeOf(c).ins}. Kłamca ma poza nim inne, potwierdzone alibi.</p></details>` : ''}
+      ${c.innocentLie ? `<details class="lie-stamp"><summary>Kłamią 2 osoby</summary><p>Jeden fałszywy dowód podrzucił sprawca. Drugi to kłamstwo niewinnej osoby, która ukrywała coś niezwiązanego z ${crimeOf(c).ins}. ${hasTraits(c) ? 'Kłamca może nie mieć innego alibi, ale nie ma cechy sprawcy ze śladu z miejsca zdarzenia (wykaz jest pełny).' : 'Kłamca ma poza nim inne, potwierdzone alibi.'}</p></details>` : ''}
+      ${hasTraits(c) ? `<p class="trait-stamp">${icon(TRAIT_VARIANTS[c.traits.variant]?.icon || 'footprints')}<span><b>Ślad z miejsca:</b> ${esc(TRAIT_VARIANTS[c.traits.variant]?.label || 'cecha sprawcy')}. Kto nie ma cechy sprawcy, nie jest sprawcą.</span></p>` : ''}
     </div>
     <h3 class="sec-label">Podejrzani i ich alibi</h3>
     <ul class="suspects">${renderSuspects()}</ul>
@@ -967,7 +968,7 @@ function renderTopbar() {
     <div class="topbar-inner">
       <button class="btn btn-ghost btn-icon" data-act="leave" aria-label="Wyjdź do strony głównej">←</button>
       <div class="tb-title"><b>${label}</b><span><span class="tb-mode">${esc(who)} · </span>${state.mode === 'live' && state.live?.status !== 'open' ? `<span class="tb-live">${state.live?.status === 'stopped' ? 'rozłączono' : 'łączenie…'} · </span>` : ''}<span class="tb-budget">śledztwo <span class="nw${usedMin() > budgetMin() ? ' over' : ''}">${fmtHM(usedMin())}/${fmtHM(budgetMin())} h</span></span></span></div>
-      <div class="tb-clock" aria-live="off"><span id="clock">${fmtClock(elapsedSec())}</span>${totalPenalty() ? `<small>w tym +${fmtPenalty(totalPenalty())}</small>` : ''}</div>
+      <div class="tb-clock" aria-live="off"><span id="clock">${fmtClock(elapsedSec())}</span>${totalPenalty() ? `<small><span class="tb-long">w tym </span>+${fmtPenalty(totalPenalty())}</small>` : ''}</div>
       <div class="tb-actions">
         ${state.mode === 'team' && !isCaptain() ? '' : `<button class="btn btn-small" data-act="open-hints" aria-label="Podpowiedź, użyto ${progress.hints} z 3"><span class="tb-long">Podpowiedź</span><span class="tb-short" aria-hidden="true">?</span> <span class="pill">${progress.hints}/3</span></button>`}
         ${isCaptain()
@@ -1130,6 +1131,8 @@ function hintTexts() {
   } else {
     out.push(`${isTeamLike() ? 'Zacznijcie' : 'Zacznij'} od czasów dotarcia na biurku „Mapa i rozkłady”.`);
   }
+  // Sprawa z cechą: kłamca nie ma cechy ze śladu (karty śladu i wykazu, bez wskazywania osoby).
+  if (sol.explain.trait) out[0] += ` Dwie osoby mają obalone dowody: którą z nich jest sprawca, rozstrzyga ślad z miejsca (karty ${sol.explain.trait.refs.join(', ')}).`;
   const forged = sol.explain.forged;
   const refDesk = cardById((forged.proofRefs || forged.refs).find((r) => r !== forged.card))?.desk;
   out.push(`Fałszywkę obala karta z biurka „${deskName(refDesk)}”.${isTeamLike() ? ` Ma je gracz ${seatOfDesk(refDesk)}.` : ''}`);
@@ -1247,7 +1250,8 @@ function forgedKind(card) {
 /** Karty, które potwierdzają alibi danej osoby (bez kart z czasami dotarcia). */
 function alibiCards(sid) {
   const set = new Set();
-  for (const item of state.sol.explain.suspects[sid] || []) item.refs.slice(0, -1).forEach((r) => set.add(r));
+  // Ostatnia karta to plan miasta (czas dotarcia); brak cechy ze śladu potwierdzają obie karty (ślad i wykaz).
+  for (const item of state.sol.explain.suspects[sid] || []) (item.type === 'trait' ? item.refs : item.refs.slice(0, -1)).forEach((r) => set.add(r));
   return set;
 }
 
@@ -1398,10 +1402,14 @@ function renderResult() {
       <p class="verdict">${culprit.f ? 'Sprawczynią' : 'Sprawcą'} jest <b>${esc(culprit.full)}</b> (${esc(culprit.role)}). Sfałszowany dowód to <span class="chip">${forged.id}</span> ${esc(forged.title)}, a obala go ${[...proofSet()].map((r) => `<span class="chip">${r}</span>`).join(' lub ')}.</p>
       ${sol.explain.window?.reason ? `<p><b>${sol.explain.window.moment ? 'Kiedy dosypano środek' : 'Kiedy podłożono minutnik'}:</b> ${refsHtml(sol.explain.window.reason.charAt(0).toUpperCase() + sol.explain.window.reason.slice(1))}.</p>` : ''}
       <p>Dlaczego: ${refsHtml(sol.explain.forged.reason)}.</p>
+      ${sol.explain.trait ? `<p class="trait-explain">${icon(TRAIT_VARIANTS[c.traits?.variant]?.icon || 'footprints')}<span><b>Ślad z miejsca:</b> ${refsHtml(sol.explain.trait.reason.charAt(0).toUpperCase() + sol.explain.trait.reason.slice(1))}. ${(c.traits?.ids?.length || 0) > 1 ? 'Obie cechy ma też ktoś niewinny' : 'Cechę ma też ktoś niewinny'}, więc sam ślad nie wskazuje sprawcy.</span></p>` : ''}
       ${sol.explain.lies.map((lie) => {
         const liar = suspectById(lie.who);
         const card = cardById(lie.card);
         const head = `<b>Kłamstwo niewinnej osoby:</b> ${esc(liar.full)}, karta <span class="chip">${card.id}</span> ${esc(card.title)}. ${refsHtml(lie.reason.charAt(0).toUpperCase() + lie.reason.slice(1))}.`;
+        if (lie.trait) {
+          return `<p class="lie-explain">${head} To nie była fałszywka sprawcy, bo ${esc(liar.full)} ${esc(lie.trait.text.replace(/ \([^)]*\)$/, ''))} ${lie.trait.refs.map((r) => `<span class="chip">${r}</span>`).join(' ')}, a sprawca musi mieć cechę ze śladu.</p>`;
+        }
         if (lie.alibi) {
           const cl = (lie.cleared || [])[0];
           const alibi = cl ? `${esc(sol.describeClear(cl))} ${cl.refs.map((r) => `<span class="chip">${r}</span>`).join(' ')}` : '';
@@ -1418,7 +1426,7 @@ function renderResult() {
         ${renderCard(forged, { noActions: true, highlight: true })}
         ${sol.explain.forged.refs.filter((r) => r !== forged.id).map((r) => renderCard(cardById(r), { noActions: true })).join('')}
       </div>
-      <h3 class="sec-label">Alibi pozostałych</h3>
+      <h3 class="sec-label">${hasTraits(c) ? 'Alibi i wykluczenia pozostałych' : 'Alibi pozostałych'}</h3>
       <ul class="others">${others}</ul>
       <button class="btn" data-act="toggle-all">${state.showAll ? 'Ukryj wszystkie karty' : 'Pokaż wszystkie karty ze wszystkich biurek'}</button>
       ${state.showAll ? DESK_DEFS.map((d) => `<h3 class="sec-label">${esc(d.name)}</h3><div class="cards">${c.cards.filter((k) => k.desk === d.id).map((k) => renderCard(k, { noActions: true })).join('')}</div>`).join('') : ''}

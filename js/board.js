@@ -7,6 +7,41 @@ import { PLACES, crimeOf, shownWindows } from './data.js';
 import { fmt } from './time.js';
 import { portrait } from './portraits.js';
 import { PLACE_CELLS, cellsApart, blocksText, MIN_PER_CELL } from './town.js';
+import { icon } from './icons.js';
+
+/**
+ * Cechy osób na tablicy: tylko to, co jest na otwartych kartach. Z wykazu wypisujemy wartość przy osobie (rozmiar buta,
+ * „zna go pies”, szalik, plecak), a znacznik „pasuje do śladu” dopiero wtedy, gdy otwarty jest też ślad z miejsca.
+ */
+/** Kolor szalika (czapki) albo plecaka jako kółko: nazwa koloru nie mieści się w wąskiej kolumnie tablicy. */
+function swatch(name) {
+  const col = [['czerwon', '#c0392b'], ['zielon', '#3c8d4f'], ['żółt', '#e2b33c'], ['jasn', '#e8dcc0'], ['czarn', '#2c2c34']].find(([k]) => name.startsWith(k));
+  return `<span class="bd-sw" style="background:${col ? col[1] : 'transparent'}" aria-hidden="true"></span><span class="sr-only">${esc(name)}</span>`;
+}
+
+function traitBadges(c, canSee, sid) {
+  const visible = c.cards.filter((k) => canSee(k));
+  const lists = visible.flatMap((k) => (k.facts || []).filter((f) => f.t === 'traitlist'));
+  const seen = visible.flatMap((k) => (k.facts || []).filter((f) => f.t === 'trait'));
+  const out = [];
+  for (const l of lists) {
+    const v = l.values?.[sid];
+    const tr = seen.find((x) => x.trait === l.trait);
+    const match = Boolean(tr) && v === tr.value;
+    // Krótkie etykiety (wąska kolumna na telefonie): sam rozmiar, „zna” albo kolor; pełna nazwa w podpowiedzi.
+    const dog = c.traits?.dog || 'pies';
+    const full = l.trait === 'shoe' ? `rozmiar buta ${v}`
+      : l.trait === 'dog' ? `${dog} zna tę osobę`
+        : l.trait === 'scarf' ? (c.traits?.scarf || 'szalik') : (c.traits?.bag || 'plecak');
+    const label = l.trait === 'shoe' ? `${icon('footprints')}${esc(v)}`
+      : !v ? null
+        : l.trait === 'dog' ? `${icon('dog')}zna`
+          : `${icon(l.trait === 'scarf' ? 'shirt' : 'briefcase')}${swatch(full)}`;
+    const title = `${full}${match ? ' – pasuje do śladu z miejsca' : ''}`;
+    if (label) out.push(`<span class="bd-trait${match ? ' match' : ''}" title="${esc(title)}">${label}${match ? ' ✓' : ''}</span>`);
+  }
+  return out.length ? `<span class="bd-traits">${out.join('')}</span>` : '';
+}
 
 const esc = (s) => String(s).replace(/[&<>"]/g, (ch) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[ch]));
 // Najdłuższe role nie mieszczą się w wąskiej kolumnie tablicy na telefonie: miękki dywiz łamie je w miejscu sylaby
@@ -103,7 +138,7 @@ export function renderBoard({ c, pins, sel, canSee, hasMap, sceneCell, autoAll =
   const rows = c.suspects.map((s) => {
     const list = facts.filter((f) => f.who.includes(s.id)).sort((a, b) => a.from - b.from);
     return `<div class="bd-row">
-      <div class="bd-who">${portrait(s.full, 'portrait bd-face')}<b>${esc(s.first)}</b><span class="bd-role">${roleHtml(s.role)}</span></div>
+      <div class="bd-who">${portrait(s.full, 'portrait bd-face')}<b>${esc(s.first)}</b><span class="bd-role">${roleHtml(s.role)}</span>${traitBadges(c, canSee, s.id)}</div>
       <div class="bd-track"><p class="bd-alibi">${esc(s.alibi.replace(/\s*\((?:bilety?|paragon|zdjęcie|zrzut ekranu|bilet): [A-Z]\d+\)/g, ''))}</p>${lane(list)}<div class="bd-chips">${list.map(chip).join('') || '<span class="muted small">brak dowodów z godziną</span>'}</div></div>
     </div>`;
   }).join('');
@@ -138,6 +173,7 @@ export function renderBoard({ c, pins, sel, canSee, hasMap, sceneCell, autoAll =
       ${autoAll ? '' : '<li><span class="lg lg-pin"></span>dopięte przez ciebie (przycisk „Na tablicę”)</li>'}
       <li><span class="lg lg-win"></span>${winText}</li>
       ${ign === null ? '' : `<li><span class="lg lg-ign"></span>zapłon ${fmt(ign)}</li>`}
+      ${c.cards.some((k) => canSee(k) && (k.facts || []).some((f) => f.t === 'traitlist')) ? `<li><span class="bd-trait match bd-lg">✓</span>pasuje do śladu z miejsca (gdy otwarte są ślad i wykaz)</li>` : ''}
       ${moment ? `<li><span class="lg lg-mark"></span>obsługa ${moment.visits.map(fmt).join(', ')} · szklanki ${moment.glasses.map(fmt).join(', ')}</li>` : ''}
     </ul>
     <div class="bd-compare${chosen.length ? '' : ' empty'}" aria-live="polite">${compare}<p class="bd-clear"${sel.length ? '' : ' style="visibility:hidden"'}><button class="link-btn" data-act="board-clear"${sel.length ? '' : ' tabindex="-1" aria-hidden="true"'}>Wyczyść wybór</button></p></div>
