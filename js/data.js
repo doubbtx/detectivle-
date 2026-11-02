@@ -209,7 +209,7 @@ export const VENUE_ITEMS = {
 };
 
 export const CCTV_DETAILS = [
-  'kupuje coś w automacie z biletami', 'rozmawia przez telefon', 'idzie szybkim krokiem w stronę przystanku',
+  'kupuje coś w automacie', 'rozmawia przez telefon', 'idzie szybkim krokiem w stronę przystanku',
   'siedzi na ławce', 'zapina kurtkę i rozgląda się', 'czeka na kogoś pod zegarem',
 ];
 
@@ -221,7 +221,7 @@ export const PHOTO_POSES = [
 export const DESK_DEFS = [
   { id: 'D', name: 'Dokumenty', hint: 'bilety, paragony, akta' },
   { id: 'S', name: 'Świadkowie', hint: 'zeznania' },
-  { id: 'M', name: 'Mapa i rozkłady', hint: 'czasy dojścia, rozkłady jazdy' },
+  { id: 'M', name: 'Mapa i rozkłady', hint: 'czasy dotarcia, rozkłady jazdy' },
   { id: 'Z', name: 'Zdjęcia', hint: 'monitoring, zdjęcia, zrzuty ekranu' },
   { id: 'R', name: 'Rejestry', hint: 'godziny otwarcia, pogoda, karty wejściowe' },
 ];
@@ -243,7 +243,7 @@ export const RULES = [
   'Sprawca jest jednym z pięciorga podejrzanych i działał sam. Przez cały czas od otwarcia do zamknięcia drzwi był w środku.',
   'Dokumenty urzędowe, rejestry, rozkłady, mapy, nagrania z kamer i świadkowie spoza grona podejrzanych mówią prawdę.',
   'Dowody dostarczone przez podejrzanych są prawdziwe, z wyjątkiem dokładnie jednego. Ten jeden sfałszował sprawca, żeby mieć alibi.',
-  'Czasy dojścia na mapie dotyczą najszybszej możliwej drogi, są dokładne co do minuty i takie same w każdą stronę.',
+  'Czasy dotarcia na mapie to najszybszy możliwy sposób (pieszo, rowerem albo autem). Są dokładne co do minuty i takie same w każdą stronę.',
   'Prawdziwy bilet, paragon, zdjęcie albo zapis w rejestrze oznacza, że ta osoba naprawdę była w tym miejscu o tej porze. Wejście i wyjście w rejestrze kart, tak jak dwie godziny w jednym zeznaniu („przyszedł o…, zapłacił o…”), to pobyt w tym miejscu przez cały ten czas, a wyjazd pociągiem oznacza, że potem tej osoby nie było już w mieście.',
   'Wszystkie zegary są zgodne. Rozkłady, godziny otwarcia i strefy parkowania obowiązują dokładnie tak, jak zapisano je na kartach, także w święta. Liczy się dzień tygodnia podany w aktach.',
 ];

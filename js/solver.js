@@ -244,10 +244,10 @@ export function solveCase(c) {
   }
 
   /**
-   * Czy dwa pobyty tej samej osoby da się pogodzić? Gracz zna tylko czasy dojścia
+   * Czy dwa pobyty tej samej osoby da się pogodzić? Gracz zna tylko czasy dotarcia
    * do miejsca zbrodni, więc z kart wynika dolna granica: przejście z A do B trwa
    * co najmniej |dA − dB| minut. Pobyty nakładające się w czasie w różnych miejscach
-   * są zawsze sprzeczne. Miejsce zbrodni ma czas dojścia 0.
+   * są zawsze sprzeczne. Miejsce zbrodni ma czas dotarcia 0.
    */
   const travelMin = (place) => (place === SCENE ? 0 : travel.get(place)?.min);
   function conflict(a, b) {
@@ -340,7 +340,7 @@ export function solveCase(c) {
     window: { W1, W2 },
     describeClear(item) {
       const when = item.from === item.to ? `o ${fmt(item.from)}` : `od ${fmt(item.from)} do ${fmt(item.to)}`;
-      return `${placeLoc(item.place)} ${when} (dojście: ${item.travel} min)`;
+      return `${placeLoc(item.place)} ${when} (dotarcie: ${item.travel} min)`;
     },
   };
 }

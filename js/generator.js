@@ -465,12 +465,12 @@ function generate(rng, opts) {
           lines: [
             `Parkomat nr ${rng.int(10, 59)} · ${PLACES[place].name} · strefa ${zone}`,
             `${dShort}, wydano ${fmt(t)}`,
-            `ważny do ${fmt(t + 60)} · opłata 4,00 zł`,
+            'opłata 4,00 zł',
           ],
           facts: [{ t: 'claim', kind, who: by, place, zone, time: t }],
         });
         evs = [{ place, from: t, to: t }];
-        card.alibi = (id) => `Twierdzi, że ${g(s, 'zostawił', 'zostawiła')} auto ${PLACES[place].loc} (bilet parkingowy: ${id}).`;
+        card.alibi = (id) => `Twierdzi, że ${g(s, 'parkował', 'parkowała')} ${PLACES[place].loc} i ${g(s, 'sam', 'sama')} ${g(s, 'kupił', 'kupiła')} bilet w parkomacie (bilet: ${id}).`;
         break;
       }
       case 'bus': {
@@ -792,7 +792,7 @@ function generate(rng, opts) {
         `pn–pt: ${short(b.deps.wd)}`,
         `soboty: ${short(b.deps.sat)}`,
         `niedziele: ${short(b.deps.sun)}`,
-        'Autobus zatrzymuje się na przystanku tylko na chwilę. Bilet kasuje się od razu po wejściu, najpóźniej 2 minuty po odjeździe z rozkładu.',
+        'Autobus zatrzymuje się na przystanku tylko na chwilę. Bilet kasuje się od razu po wejściu, najpóźniej 2 minuty po rozkładowej godzinie odjazdu.',
       ],
       facts: [{ t: 'bus', stop: b.stop, line: b.line, deps: b.deps }],
     });
@@ -842,7 +842,7 @@ function generate(rng, opts) {
       () => ({ title: 'Protokół oględzin', lines: ['Zamek bez śladów forsowania.', 'Drzwi otwarto kodem wpisanym na klawiaturze.', 'Na klamce i klawiaturze brak odcisków palców.'] }),
       () => ({ title: 'Faktura za serwis alarmu', lines: [`Faktura nr ${rng.int(10, 299)}/2026`, 'Przegląd czujnika drzwi i synchronizacja zegara.', 'Stan: sprawny, zegar zgodny co do sekundy.'] }),
       () => ({ title: 'Notatka z tablicy na zapleczu', lines: [`„Przypominam: kodu nie podajemy nikomu obcemu. ${initials}”`] }),
-      () => ({ title: 'Wycinek z „Gazety Borowickiej”', lines: ['W weekend w Teatrze Miejskim premiera „Zemsty”.', 'Bilety na wszystkie spektakle wyprzedane.'] }),
+      () => ({ title: 'Wycinek z „Gazety Borowickiej”', lines: ['W Teatrze Miejskim trwają próby do premiery „Zemsty”.', 'Kasa biletowa czynna codziennie od 10:00.'] }),
       () => ({ title: 'Wycena rzeczoznawcy', lines: [`Przedmiot: ${stolenNom}`, `Wartość rynkowa: ${amount()} zł`] }),
       () => ({ title: 'Lista osób znających kod', lines: ['Kod zmieniono na początku miesiąca.', `Znają go: ${suspects.map((x) => x.full).join(', ')}.`] }),
       () => ({ title: 'Umowa z firmą ochroniarską', lines: ['Firma: Ochrona Borowice', 'Zakres: czujnik drzwi i alarm, bez kamer.', 'Patrol przyjeżdża tylko po włączeniu się alarmu.'] }),
@@ -864,14 +864,17 @@ function generate(rng, opts) {
       () => ({ title: 'Zdjęcie z oględzin', lines: ['Puste miejsce po skradzionym przedmiocie.', 'Na blacie smuga po rękawiczce.'] }),
       () => ({ title: 'Zdjęcie z oględzin', lines: ['Rozmyte ślady błota przy drzwiach.', 'Nie da się ustalić rozmiaru buta.'] }),
       () => ({ title: 'Zdjęcie klawiatury przy drzwiach', lines: ['Na klawiszach 1, 4, 7 i 9 starta farba.'] }),
-      () => ({ title: 'Zdjęcie z wigilii firmowej', lines: ['Cała piątka podejrzanych przy choince, rok temu.', 'Nic nie wskazuje na dawne konflikty.'] }),
+      () => ({ title: 'Zdjęcie z jubileuszu lokalu', lines: ['Rok temu: cała piątka podejrzanych wśród gości.', 'Wszyscy uśmiechnięci, z kieliszkami w dłoniach.'] }),
       () => ({ title: 'Kamera sklepu naprzeciwko', lines: ['Kamera jest atrapą i nic nie nagrywa.'] }),
       () => ({ title: 'Monitoring miejski', lines: [`Kamera nr ${rng.int(2, 19)} · ${rng.pick(['Rynek', 'Plac Wolności', 'Dworzec kolejowy'])}`, `Nagranie z godz. ${fmt(rng.int(19 * 60, 21 * 60 + 30))}`, 'Widać parę z psem.'] }),
     ],
     R: [
       () => ({ title: 'Rejestr systemu alarmowego', lines: [`${fmt(closeT)} uzbrojony przez ${g(owner, 'właściciela', 'właścicielkę')}`, `${fmt(W1)} rozbrojony kodem`, `${fmt(W2)} uzbrojony kodem`] }),
       () => ({ title: 'Rejestr zgłoszeń straży miejskiej', lines: [`${fmt(rng.int(19 * 60, 20 * 60))} głośna muzyka, Osiedle Leśne`, `${fmt(rng.int(20 * 60, 21 * 60 + 30))} pies bez smyczy, Park Zdrojowy`] }),
-      () => ({ title: 'Rowery miejskie: stacja Rynek', lines: [`${fmt(rng.int(19 * 60, 21 * 60))} wypożyczono rower nr ${rng.int(10, 60)} (karta anonimowa)`, `${fmt(rng.int(19 * 60, 21 * 60))} zwrócono rower nr ${rng.int(10, 60)}`] }),
+      () => {
+        const [a, b] = [rng.int(19 * 60, 21 * 60), rng.int(19 * 60, 21 * 60)].sort((x, y) => x - y);
+        return { title: 'Rowery miejskie: stacja Rynek', lines: [`${fmt(a)} wypożyczono rower nr ${rng.int(10, 60)} (karta anonimowa)`, `${fmt(b)} zwrócono rower nr ${rng.int(10, 60)}`] };
+      },
     ],
   };
 
@@ -890,7 +893,7 @@ function generate(rng, opts) {
     addCard({ desk: 'S', kind: 'witness', title: `Zeznanie: ${w.full}`, sub: g(w, 'znajomy z okolicy', 'znajoma z okolicy'), lines: [fn(motiveTargets[k])] });
   });
 
-  // Czasy dojścia: wszystkie miejsca z kart + kilka dodatkowych.
+  // Czasy dotarcia: wszystkie miejsca z kart + kilka dodatkowych.
   const travelPlaces = [...usedPlaces];
   const extraPlaces = rng.sample(Object.keys(PLACES).filter((k) => !usedPlaces.has(k)), rng.int(2, 4));
   const allTravel = rng.shuffle([...travelPlaces, ...extraPlaces]);
@@ -900,8 +903,9 @@ function generate(rng, opts) {
     const part = allTravel.slice(k, k + chunk);
     addCard({
       desk: 'M',
-      title: parts > 1 ? `Czasy dojścia do ${scene.short} (${k / chunk + 1}/${parts})` : `Czasy dojścia do ${scene.short}`,
-      sub: 'najszybsza droga, tyle samo w każdą stronę',
+      title: `Czasy dotarcia do ${scene.short}`,
+      sub: 'najszybciej, jak się da (pieszo, rowerem lub autem), tyle samo w każdą stronę',
+      travelPart: parts > 1,
       lines: part.map((p) => `${PLACES[p].name}: ${travel[p]} min`),
       facts: part.map((p) => ({ t: 'travel', place: p, min: travel[p] })),
     });
@@ -925,6 +929,9 @@ function generate(rng, opts) {
     });
   }
 
+  const travelCards = finalCards.filter((c) => c.travelPart);
+  travelCards.forEach((c, i) => { c.title = `${c.title} (${i + 1}/${travelCards.length})`; });
+
   suspects.forEach((s, i) => {
     if (s.claimCard) s.alibi = s.claimCard.alibi(s.claimCard.id);
     else s.alibi = `Twierdzi, że ${g(s, 'był', 'była')} ${PLACES[neutralPlace[i]].loc}.`;
@@ -947,7 +954,7 @@ function generate(rng, opts) {
     difficulty: opts.difficulty,
     title: `Kradzież ${scene.inLoc}`,
     scene: { name: scene.name, address: scene.address, short: scene.short },
-    intro: `${scene.name}, ${scene.address}. ${WEEKDAYS_ACC[weekday][0].toUpperCase()}${WEEKDAYS_ACC[weekday].slice(1)}, ${dateLong(crimeIso)}, ${scene.ownerRole} ${owner.full} ${g(owner, 'wyszedł', 'wyszła')} o ${fmt(closeT)} i ${g(owner, 'zamknął', 'zamknęła')} drzwi. Czujnik drzwi zarejestrował otwarcie kodem o ${fmt(W1)} i zamknięcie o ${fmt(W2)}. Rano okazało się, że skradziono ${stolen}. Kod znało pięć osób i to one są podejrzanymi.`,
+    intro: `${scene.name}, ${scene.address}. ${WEEKDAYS_ACC[weekday][0].toUpperCase()}${WEEKDAYS_ACC[weekday].slice(1)}, ${dateLong(crimeIso)}, ${scene.ownerRole} ${owner.full} ${g(owner, 'wyszedł', 'wyszła')} o ${fmt(closeT)} i ${g(owner, 'zamknął', 'zamknęła')} drzwi. System alarmowy zarejestrował otwarcie drzwi kodem o ${fmt(W1)} i ich zamknięcie o ${fmt(W2)}. Rano okazało się, że skradziono ${stolen}. Kod znało pięć osób i to one są podejrzanymi.`,
     window: { from: W1, to: W2 },
     suspects: suspects.map(({ id, full, first, f, role, alibi, items }) => ({ id, full, first, f, role, alibi, items })),
     desks: DESK_DEFS,

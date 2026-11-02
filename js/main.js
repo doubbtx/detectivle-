@@ -322,7 +322,7 @@ function renderHow() {
     <ol class="how-list">
       <li>Pięcioro podejrzanych ma alibi. Jedno z nich jest fałszywe: sprawca dostarczył <b>dokładnie jeden sfałszowany dowód</b>.</li>
       <li>Dowody leżą na pięciu biurkach: Dokumenty, Świadkowie, Mapa i rozkłady, Zdjęcia, Rejestry. Fałszywkę zawsze obala karta z <b>innego</b> biurka.</li>
-      <li>Liczcie czasy. Jeśli kogoś widziano o 19:40 w teatrze, a z teatru na miejsce zbrodni idzie się 25 minut, to nie mógł być w środku o 19:52.</li>
+      <li>Liczcie czasy. Jeśli kogoś widziano o 19:40 w teatrze, a z teatru na miejsce zbrodni najszybciej dociera się w 25 minut, to nie mógł być w środku o 19:52.</li>
       <li>Oskarżenie to dwie karty: <b>sfałszowany dowód</b> i <b>karta, która go obala</b>. Kto dostarczył fałszywkę, ten jest sprawcą. Masz ${CONFIG.maxAttempts} próby, każda pomyłka to +${fmtPenalty(CONFIG.wrongPenalty)}, a podpowiedź +${fmtPenalty(CONFIG.hintPenalty)}.</li>
       <li><b>Z ekipą:</b> każdy otwiera grę na swoim telefonie i wybiera inny numer gracza. Każdy widzi tylko swoje biurka, więc musicie rozmawiać (na Discordzie, przez telefon albo przy stole). Oskarżenie składa kapitan, czyli gracz 1.</li>
     </ol>
@@ -638,7 +638,7 @@ function hintTexts() {
     const it = items.find((i) => i.type === 'neutral');
     out.push(`${suspectById(id).full} ma alibi potwierdzone przez niezależne źródło. Zobacz karty ${it.refs.slice(0, -1).join(', ')} i ${it.refs[it.refs.length - 1]}.`);
   } else {
-    out.push(`${state.mode === 'team' ? 'Zacznijcie' : 'Zacznij'} od czasów dojścia na biurku „Mapa i rozkłady”.`);
+    out.push(`${state.mode === 'team' ? 'Zacznijcie' : 'Zacznij'} od czasów dotarcia na biurku „Mapa i rozkłady”.`);
   }
   const forged = sol.explain.forged;
   const refDesk = cardById(forged.refs.find((r) => r !== forged.card))?.desk;
