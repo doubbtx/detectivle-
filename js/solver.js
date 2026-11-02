@@ -422,3 +422,30 @@ export function qualityIssues(c, res = solveCase(c)) {
   }
   return issues;
 }
+
+/**
+ * Profil śledztwa: które zapieczętowane karty trzeba odpieczętować, żeby sprawdzić każdy
+ * dowód podejrzanych i każde niezależne alibi, i ile to kosztuje (w minutach śledztwa).
+ */
+export function investigationProfile(c, res = solveCase(c)) {
+  const byId = new Map(c.cards.map((k) => [k.id, k]));
+  const cost = (id) => byId.get(id)?.action?.cost || 0;
+  const need = new Set();
+  for (const e of res.evaluated) for (const r of e.refs) if (cost(r)) need.add(r);
+  for (const items of res.neutralClears.values()) for (const it of items) for (const r of it.refs) if (cost(r)) need.add(r);
+  const perDesk = {};
+  for (const id of need) {
+    const d = byId.get(id).desk;
+    perDesk[d] = (perDesk[d] || 0) + cost(id);
+  }
+  return { need: [...need].sort(), total: [...need].reduce((a, id) => a + cost(id), 0), perDesk };
+}
+
+/** Budżet godzin śledztwa (w minutach) dla zestawu biurek. Im trudniejszy dzień, tym ciaśniej. */
+export function investigationBudget(c, desks) {
+  const inv = c.investigation;
+  if (!inv) return 0;
+  const need = desks.reduce((a, d) => a + (inv.perDesk[d] || 0), 0);
+  const factor = 1.9 - 0.08 * (c.difficulty || 4);
+  return Math.max(60, Math.ceil((need * factor) / 30) * 30);
+}

@@ -12,6 +12,10 @@ Od piątku do niedzieli sprawa jest podchwytliwa: **kłamią dwie osoby**. Fałs
 
 Trudność rośnie w ciągu tygodnia: poniedziałek to około 25 kart i 2 dowody do sprawdzenia, niedziela około 45 kart, pułapki z czasami dotarcia i 5 dowodów od podejrzanych.
 
+### Czynności śledcze
+
+Część kart urzędowych (rozkłady, rejestry, nagrania z kamer, pogoda, godziny otwarcia) jest na start zapieczętowana. Widać tylko tytuł i czynność, np. „Zabezpiecz nagranie: kamera nr 7 · Rynek” (60 min). Każdy gracz ma budżet godzin śledztwa wyliczony z tego, co naprawdę trzeba sprawdzić. Każde rozpoczęte pół godziny nadgodzin dodaje minutę do czasu. Zeznania świadków, czasy dotarcia i dowody od podejrzanych są odkryte od początku.
+
 ### Gra z ekipą (2–5 osób)
 
 Każdy otwiera grę na swoim telefonie lub komputerze, klika **Graj z ekipą**, wybiera tę samą liczbę osób i **inny numer gracza**. Każdy widzi tylko swoje biurka, więc trzeba rozmawiać: na Discordzie, przez telefon albo przy stole. Karty można wklejać na czat przyciskiem „Kopiuj”. Oskarżenie składa gracz 1 (kapitan), a jego czas jest wynikiem ekipy.

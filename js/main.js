@@ -2,7 +2,7 @@
 
 import { randomPracticeCode, DIFFICULTY_LABELS } from './generator.js';
 import { loadDailyCase, loadPracticeCase } from './cases.js';
-import { solveCase } from './solver.js';
+import { solveCase, investigationBudget } from './solver.js';
 import { TEAM_DESKS, DESK_DEFS, REASONS, PLACES, rulesFor } from './data.js';
 import { buildEpilogue } from './epilogue.js';
 import { fmt, localTodayIso, addDays } from './time.js';
@@ -92,9 +92,38 @@ function savedProgress(mode, ref = state.ref) {
 function freshProgress() {
   return {
     startedAt: null, endedAt: null, penalty: 0, hints: 0, attempts: [],
-    status: 'playing', marks: {}, sus: {}, notes: '', teamSize: state.teamSize, seat: state.seat,
+    status: 'playing', marks: {}, sus: {}, notes: '', teamSize: state.teamSize, seat: state.seat, unlocked: {},
   };
 }
+
+// ---------------------------------------------------------------------------
+// Czynności śledcze: zapieczętowane karty i godziny śledztwa
+
+const OVERTIME_STEP = 30; // minut nadgodzin
+const OVERTIME_PENALTY = 60; // sekund kary za każde rozpoczęte pół godziny nadgodzin
+
+function usedMin() {
+  const u = progress?.unlocked || {};
+  return state.c.cards.reduce((a, k) => a + (u[k.id] && k.action ? k.action.cost : 0), 0);
+}
+
+function budgetMin() {
+  return investigationBudget(state.c, myDesks());
+}
+
+function overtimeSec(used = usedMin()) {
+  return Math.ceil(Math.max(0, used - budgetMin()) / OVERTIME_STEP) * OVERTIME_PENALTY;
+}
+
+function totalPenalty() {
+  return (progress?.penalty || 0) + overtimeSec();
+}
+
+function fmtHM(min) {
+  return `${Math.floor(min / 60)}:${String(min % 60).padStart(2, '0')}`;
+}
+
+const isSealed = (k) => Boolean(k.action) && state.screen === 'game' && !progress?.unlocked?.[k.id];
 
 function saveProgress() {
   if (progress) store.set(progressKey(), progress);
@@ -103,7 +132,7 @@ function saveProgress() {
 function elapsedSec() {
   if (!progress?.startedAt) return 0;
   const end = progress.endedAt ?? Date.now();
-  return Math.max(0, Math.floor((end - progress.startedAt) / 1000)) + progress.penalty;
+  return Math.max(0, Math.floor((end - progress.startedAt) / 1000)) + progress.penalty + overtimeSec();
 }
 
 function fmtClock(sec) {
@@ -339,6 +368,7 @@ function renderHow() {
     <ol class="how-list">
       <li>Pięcioro podejrzanych ma alibi. Jedno z nich jest fałszywe: sprawca dostarczył <b>dokładnie jeden sfałszowany dowód</b>.</li>
       <li>Dowody leżą na pięciu biurkach: Dokumenty, Świadkowie, Mapa i rozkłady, Zdjęcia, Rejestry. Fałszywkę zawsze obala karta z <b>innego</b> biurka.</li>
+      <li>Część kart urzędowych (rozkłady, rejestry, nagrania z kamer, pogoda) jest <b>zapieczętowana</b>. Widzisz tylko tytuł i czynność, np. „Pobierz rozkład jazdy” (30 min). Masz budżet godzin śledztwa, a nadgodziny dodają czas. Zlecaj tylko to, co może coś wyjaśnić.</li>
       <li>Liczcie czasy. Jeśli kogoś widziano o 19:40 w teatrze, a z teatru na miejsce zbrodni najszybciej dociera się w 25 minut, to nie mógł być w środku o 19:52.</li>
       <li>Na koniec składasz <b>raport z dochodzenia</b>: sfałszowany dowód, karta, która go obala, i co ta karta pokazuje. Kto dostarczył fałszywkę, ten jest sprawcą. Masz ${CONFIG.maxAttempts} próby, każda pomyłka to +${fmtPenalty(CONFIG.wrongPenalty)}, a podpowiedź +${fmtPenalty(CONFIG.hintPenalty)}. Za trafny powód, potwierdzone alibi pozostałych i trafienie za pierwszym razem raport dostaje gwiazdki.</li>
       <li><b>Z ekipą:</b> każdy otwiera grę na swoim telefonie i wybiera inny numer gracza. Każdy widzi tylko swoje biurka, więc musicie rozmawiać (na Discordzie, przez telefon albo przy stole). Oskarżenie składa kapitan, czyli gracz 1.</li>
@@ -518,6 +548,7 @@ function renderAkta() {
         <div><span class="w-label">zamknięcie</span><span class="w-time">${fmt(c.window.to)}</span></div>
       </div>
       <p class="w-note">Sprawca był w środku przez cały ten czas (${c.window.to - c.window.from} min).</p>
+      <p class="seal-note">Część kart urzędowych jest zapieczętowana. Zlecasz czynności śledcze, np. pobranie rozkładu albo zabezpieczenie nagrania. Masz ${fmtHM(budgetMin())} h śledztwa. Każde rozpoczęte pół godziny nadgodzin to +${fmtPenalty(OVERTIME_PENALTY)} do czasu.</p>
       ${c.innocentLie ? '<p class="lie-badge"><b>Uwaga: w tej sprawie kłamią dwie osoby.</b> Tylko jedno kłamstwo daje alibi na czas kradzieży. Drugie skrywa coś innego.</p>' : ''}
     </div>
     <h3 class="sec-label">Podejrzani i ich alibi</h3>
@@ -534,6 +565,25 @@ function renderCard(k, opts = {}) {
   const by = k.by ? suspectById(k.by) : null;
   const marked = progress?.marks?.[k.id];
   const kindLabel = k.kind === 'witness' ? 'zeznanie' : k.kind === 'supplied' ? 'od podejrzanego' : 'urzędowe';
+  const sealed = !opts.noActions && isSealed(k);
+  if (sealed) {
+    const after = usedMin() + k.action.cost;
+    const overtime = overtimeSec(after) > overtimeSec();
+    const confirming = state.confirm === `unlock:${k.id}`;
+    return `
+  <article class="card card-sealed" id="card-${k.id}" data-card="${k.id}">
+    <header class="card-head">
+      <span class="card-id">${k.id}</span>
+      <div class="card-titles">
+        <h4>${esc(k.title)}</h4>
+        ${k.sub ? `<p class="card-sub">${esc(k.sub)}</p>` : ''}
+      </div>
+      <span class="card-kind">zapieczętowane</span>
+    </header>
+    <p class="seal-action">${esc(k.action.label)}</p>
+    <button class="btn btn-small${confirming ? ' btn-primary' : ''}" data-act="unlock" data-id="${k.id}">${confirming ? `Nadgodziny: +${fmtPenalty(OVERTIME_PENALTY)} do czasu. Zlecić?` : `Zleć · ${k.action.cost} min${overtime ? ' (nadgodziny)' : ''}`}</button>
+  </article>`;
+  }
   return `
   <article class="card card-${k.kind}${marked ? ' card-marked' : ''}${opts.highlight ? ' card-hl' : ''}" id="card-${k.id}" data-card="${k.id}">
     <header class="card-head">
@@ -593,8 +643,8 @@ function renderTopbar() {
   <div class="topbar">
     <div class="topbar-inner">
       <button class="btn btn-ghost btn-icon" data-act="leave" aria-label="Wyjdź do strony głównej">←</button>
-      <div class="tb-title"><b>${esc(label)}</b><span>${esc(who)}</span></div>
-      <div class="tb-clock" aria-live="off"><span id="clock">${fmtClock(elapsedSec())}</span>${progress.penalty ? `<small>w tym +${fmtPenalty(progress.penalty)}</small>` : ''}</div>
+      <div class="tb-title"><b>${esc(label)}</b><span>${esc(who)} · śledztwo <span class="${usedMin() > budgetMin() ? 'over' : ''}">${fmtHM(usedMin())}/${fmtHM(budgetMin())} h</span></span></div>
+      <div class="tb-clock" aria-live="off"><span id="clock">${fmtClock(elapsedSec())}</span>${totalPenalty() ? `<small>w tym +${fmtPenalty(totalPenalty())}</small>` : ''}</div>
       <div class="tb-actions">
         <button class="btn btn-small" data-act="open-hints">Podpowiedź <span class="pill">${progress.hints}/3</span></button>
         ${isCaptain()
@@ -810,7 +860,7 @@ function shareText() {
   const mode = state.mode === 'solo' ? 'solo' : `ekipa · ${state.teamSize} ${state.teamSize === 5 ? 'osób' : 'osoby'}`;
   const rows = progress.attempts.map((a) => a.ok.map((x) => (x === null ? '⬜' : x ? '🟩' : '🟥')).join('')).join('\n');
   const tail = progress.status === 'solved'
-    ? `⏱ ${fmtClock(elapsedSec())} · 💡 ${progress.hints}${progress.report ? ` · raport ${starsText(progress.report.stars)}` : ''}`
+    ? `⏱ ${fmtClock(elapsedSec())} · 💡 ${progress.hints} · 🔎 ${fmtHM(usedMin())}/${fmtHM(budgetMin())} h${progress.report ? ` · raport ${starsText(progress.report.stars)}` : ''}`
     : 'Sprawa nierozwiązana';
   return [`${head} · ${mode}`, rows, tail, CONFIG.shareUrl].filter(Boolean).join('\n');
 }
@@ -868,7 +918,8 @@ function renderResult() {
         <div><dt>Czas</dt><dd>${solved ? fmtClock(elapsedSec()) : '–'}</dd></div>
         <div><dt>Próby</dt><dd>${progress.attempts.length}/${CONFIG.maxAttempts}</dd></div>
         <div><dt>Podpowiedzi</dt><dd>${progress.hints}</dd></div>
-        <div><dt>Kary</dt><dd>+${fmtPenalty(progress.penalty)}</dd></div>
+        <div><dt>Śledztwo</dt><dd>${fmtHM(usedMin())}/${fmtHM(budgetMin())} h</dd></div>
+        <div><dt>Kary</dt><dd>+${fmtPenalty(totalPenalty())}</dd></div>
         ${solved && progress.report ? `<div><dt>Raport</dt><dd class="stars" aria-label="${progress.report.stars} z 3 gwiazdek">${starsText(progress.report.stars)}</dd></div>` : ''}
       </dl>
       ${solved && progress.report ? `<ul class="report-review">
@@ -1031,6 +1082,20 @@ app.addEventListener('click', (e) => {
     case 'mark-card': {
       const id = target.dataset.id;
       progress.marks[id] = !progress.marks[id];
+      saveProgress();
+      render();
+      break;
+    }
+    case 'unlock': {
+      const k = cardById(target.dataset.id);
+      const after = usedMin() + k.action.cost;
+      if (overtimeSec(after) > overtimeSec() && state.confirm !== `unlock:${k.id}`) {
+        state.confirm = `unlock:${k.id}`;
+        render();
+        break;
+      }
+      state.confirm = null;
+      progress.unlocked = { ...(progress.unlocked || {}), [k.id]: true };
       saveProgress();
       render();
       break;

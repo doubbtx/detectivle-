@@ -15,7 +15,7 @@ import {
   fmt, fmtHour, addDays, weekdayOf, dayType, dateLong, dateShort, sunsetFor, daysBetween,
   WEEKDAYS, WEEKDAYS_ACC, isSummerTime,
 } from './time.js';
-import { solveCase, qualityIssues } from './solver.js';
+import { solveCase, qualityIssues, investigationProfile } from './solver.js';
 
 /**
  * Wersja generatora. Podbij ją przy każdej zmianie, która zmienia treść spraw.
@@ -123,6 +123,7 @@ export function buildCase(opts) {
     if (qualityIssues(c, res).length === 0) {
       c.attempt = attempt;
       c.generatorVersion = GENERATOR_VERSION;
+      c.investigation = investigationProfile(c, res);
       c.fingerprint = caseFingerprint(c);
       return c;
     }
@@ -991,9 +992,34 @@ function generate(rng, opts) {
     delete s.claimCard;
   });
 
-  const publicCards = finalCards.map((c) => ({
-    id: c.id, desk: c.desk, kind: c.kind, title: c.title, sub: c.sub || '', lines: c.lines, by: c.by || null, facts: c.facts,
-  }));
+  // Czynności śledcze: karty urzędowe (poza czasami dotarcia) są na start zapieczętowane.
+  const sealFor = (card) => {
+    if (card.kind !== 'official') return null;
+    const types = new Set((card.facts || []).map((f) => f.t));
+    if (types.has('travel')) return null;
+    if (types.has('train')) return { label: 'Pobierz rozkład jazdy ze stacji Borowice', cost: 30 };
+    if (types.has('bus')) return { label: `Pobierz rozkład MZK: ${card.title.replace(/^Przystanek/, 'przystanek')}`, cost: 30 };
+    if (types.has('street')) return { label: 'Zapytaj urząd o numerację budynków', cost: 30 };
+    if (types.has('hours')) return { label: 'Zapytaj urząd o godziny otwarcia lokali', cost: 30 };
+    if (types.has('weather')) return { label: 'Zamów raport ze stacji meteo', cost: 30 };
+    if (types.has('screening')) return { label: 'Pobierz repertuar kina „Mewa”', cost: 15 };
+    if (types.has('zone')) return { label: 'Pobierz uchwałę o strefach parkowania', cost: 30 };
+    if (types.has('cardlog')) return { label: `Zażądaj rejestru wejść: ${card.title.replace(/^Rejestr wejść: /, '')}`, cost: 60 };
+    if (types.has('cardowner')) return { label: `Zażądaj wykazu kart: ${card.title.replace(/^Właściciele kart wejściowych: /, '')}`, cost: 30 };
+    if (types.has('sunset')) return { label: 'Sprawdź kalendarz astronomiczny', cost: 15 };
+    if (types.has('legend')) return { label: 'Poproś o objaśnienia znaków w rozkładach', cost: 15 };
+    if (card.title === 'Monitoring miejski') return { label: `Zabezpiecz nagranie: ${card.lines[0].toLowerCase()}`, cost: 60 };
+    if (card.desk === 'R') return { label: `Zażądaj kopii dokumentu „${card.title}”`, cost: 30 };
+    return { label: `Przejrzyj dokument „${card.title}”`, cost: 15 };
+  };
+
+  const publicCards = finalCards.map((c) => {
+    const action = sealFor(c);
+    return {
+      id: c.id, desk: c.desk, kind: c.kind, title: c.title, sub: c.sub || '', lines: c.lines, by: c.by || null, facts: c.facts,
+      ...(action ? { action } : {}),
+    };
+  });
 
 
   return {

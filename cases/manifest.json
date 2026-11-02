@@ -1,158 +1,233 @@
 {
  "files": {
   "2026-11-02": {
-   "sha256": "5500503615cc44162334889054ab38f60a8d112d2f7c715a2975bfaaceb90022",
-   "fingerprint": "3LFR",
+   "sha256": "062f3154251a52a771d5f1e0d79cd70aeb5c666c6a367f12a8226d1e14a0d964",
+   "fingerprint": "5G8Q",
    "generatorVersion": 4
   },
   "2026-11-03": {
-   "sha256": "480e6ca7092cb49b1c9f8d3e35afd471c15b1569949648ff01e4c6e233cf0afc",
-   "fingerprint": "RU98",
+   "sha256": "feac7cc82af5668a999c518c8e6ac9f7d309daf655ee9645b8aabaaf7e28b31d",
+   "fingerprint": "JD57",
    "generatorVersion": 4
   },
   "2026-11-04": {
-   "sha256": "70930dfc399655a57ca8de406ebca9b5322c53bc395fda1a4d699833e51f7af2",
-   "fingerprint": "7T76",
+   "sha256": "c75c8006fd00ae0e589b73a47fdead155cf3f3d809968c632bbf03b4ad3eaf5d",
+   "fingerprint": "JJJA",
    "generatorVersion": 4
   },
   "2026-11-05": {
-   "sha256": "c39afadff003d1750b9f8dedf003958e0c560cf7ad6a2594593a351a3ad02c44",
-   "fingerprint": "9QBS",
+   "sha256": "2e2803e977f5da224a1296ee536e56d5ae9cfc94d4faa7477ada247aed054d20",
+   "fingerprint": "JCLL",
    "generatorVersion": 4
   },
   "2026-11-06": {
-   "sha256": "8487f25a53a3a04eb1f5c25060aec3f830e4e63a51c315c4a9c91a95de8de487",
-   "fingerprint": "X5S7",
+   "sha256": "651904abd3c90cec7d765f4f27544399f1f7ede3d42e6bc235abf7410276d32e",
+   "fingerprint": "EDR7",
    "generatorVersion": 4
   },
   "2026-11-07": {
-   "sha256": "626296a6f71d6a3c83ab3e12bbc3ce70acac36934be721c9fa6db9ff7ca82fc5",
-   "fingerprint": "G89D",
+   "sha256": "6846d74bc811a74bf4dcddbe73ba833b74ee7dbd3f41d487b79257744ed6900b",
+   "fingerprint": "CQTM",
    "generatorVersion": 4
   },
   "2026-11-08": {
-   "sha256": "44bfc8bee02fddfd1943fe1710d1fc924c03a29e2bd87ee40c37063eb57f43ab",
-   "fingerprint": "C2WB",
+   "sha256": "1443b2e7e7845ebd4c3a7e2b38f7bf1cce3feb9722e553c0c42fc55d833b4cf6",
+   "fingerprint": "SJVJ",
    "generatorVersion": 4
   },
   "2026-11-09": {
-   "sha256": "33616a31de7359e1c72d31ff380cb06ebfdbf5c7b4e8f3f14ae39e97a9191049",
-   "fingerprint": "W9AF",
+   "sha256": "589d4146e5617724e2a84ab02549d2c6d067fff1583efc8eb3908f3123b1dbb0",
+   "fingerprint": "3L2F",
    "generatorVersion": 4
   },
   "2026-11-10": {
-   "sha256": "bf57a56f9400bc4d62732fb78219426ebf7b57c91159397d004c7e476dd0f612",
-   "fingerprint": "UV6G",
+   "sha256": "1263b549bc58d9ad7432ee5a4171b5cc740585bc2df3628ec1f06266ce1109bd",
+   "fingerprint": "A972",
    "generatorVersion": 4
   },
   "2026-11-11": {
-   "sha256": "07662860a584be953a7b94d1c30a2fdfef76a9c1eae2dbea5319ef4f7c5a7243",
-   "fingerprint": "CWUP",
+   "sha256": "eda18d9aa8ac8448270a9de30dd5203c7a6c4f4f27fb157381597eee4ce63180",
+   "fingerprint": "CRRN",
    "generatorVersion": 4
   },
   "2026-11-12": {
-   "sha256": "c8ddf98b2478976d9b2ad68d0e34a8bec980d9f8a8b31b55bbd796d844d64b62",
-   "fingerprint": "JU8R",
+   "sha256": "aa80a267f9b092ff2a42d3da68614b8a9bd107b2ef67a26bfb8faacdcfd967dd",
+   "fingerprint": "SM2D",
    "generatorVersion": 4
   },
   "2026-11-13": {
-   "sha256": "3a94153f1aff953eb50b66e702b27d71d36c419158355b86ae52ec847c830c5e",
-   "fingerprint": "WUJ8",
+   "sha256": "debb1967754bd89ac81ad14e24479e5c9bb8e1f7e3a03d97c3889603602f5ddf",
+   "fingerprint": "FEQY",
    "generatorVersion": 4
   },
   "2026-11-14": {
-   "sha256": "c693793c4983d413401b6e66a7ad699cd9fd04c47048a12ccfa427230176f05d",
-   "fingerprint": "ZWCQ",
+   "sha256": "49c54c7ad73e163ad41ed7ca71967d2eb96a3f4f39b734a32a2f3d116440c6e6",
+   "fingerprint": "5PPX",
    "generatorVersion": 4
   },
   "2026-11-15": {
-   "sha256": "d62e7fc2d03535dddcd69b8c783aba523b57fda2a7a9749459be881d67528b26",
-   "fingerprint": "GMYM",
+   "sha256": "6910b4e1cb8b2ed6e638d78eef2838958c96878011802adbe9eb1be9d41bdb9d",
+   "fingerprint": "9D3T",
    "generatorVersion": 4
   },
   "2026-11-16": {
-   "sha256": "b7cc3fcb7615d974f581bb5bf7e2dc3c1ab3fae99e57e4e5f6b9add8a1f055c5",
-   "fingerprint": "YAKE",
+   "sha256": "58876dff3d31d6253d4582ba9a98eaaedac99fbc9fd75709004d34812eeefe0f",
+   "fingerprint": "32FU",
    "generatorVersion": 4
   },
   "2026-11-17": {
-   "sha256": "4c1238b1bd9d9142874b5a9a8347f256b57ddd1990aba0512d829516887a28eb",
-   "fingerprint": "JKX5",
+   "sha256": "4e64e26420cf00296fd340df41833c71f46cfabbd82adf55bae43ac66c5e3596",
+   "fingerprint": "DSSS",
    "generatorVersion": 4
   },
   "2026-11-18": {
-   "sha256": "ae8068236581c6c1438065e0f95f5c35497984c7497fba33700d033f739ba138",
-   "fingerprint": "JX2P",
+   "sha256": "78925bb7ef47e4262ec2287aefa461c455c4d75e54861e5dc03327dcd1e4e69e",
+   "fingerprint": "3U5J",
    "generatorVersion": 4
   },
   "2026-11-19": {
-   "sha256": "2963ee8864341d6ccda203ae80c4294611db9c6980083a2cee313e913d9f94fb",
-   "fingerprint": "AQ7K",
+   "sha256": "02b05af62d561a025e9c2f5984801000f5d311bdc86e2f3cc83849f15f1c071c",
+   "fingerprint": "A553",
    "generatorVersion": 4
   },
   "2026-11-20": {
-   "sha256": "373c9f60ed6084f541c09944c7aef82ca0eb29c5f45936b1582921a785da0515",
-   "fingerprint": "MQ4P",
+   "sha256": "4a7c9f04dcb52e0945c276272a6fb8b01a018160ed897a1039cd049948bf427b",
+   "fingerprint": "PCL4",
    "generatorVersion": 4
   },
   "2026-11-21": {
-   "sha256": "d98983771e2b7d9e3bba51788ded7179f6e9317c0c1b8ba1b707256f62e104ff",
-   "fingerprint": "JGJJ",
+   "sha256": "9939629d4331cf944ba328dc77a3c4f23f7ac3fa6d0e4acecbb20aa13b5b9301",
+   "fingerprint": "W76A",
    "generatorVersion": 4
   },
   "2026-11-22": {
-   "sha256": "bda5f133e0c8e9ade7c30ed35cfd652addfdc91c6263d011eebeeb7d00a60dba",
-   "fingerprint": "G6F9",
+   "sha256": "a12bba4b3c3c7805b01ef91a51eca8ff5cc9b2b530ac9e9e870a28ef6a87eff6",
+   "fingerprint": "NE7S",
    "generatorVersion": 4
   },
   "2026-11-23": {
-   "sha256": "2fdf5a254cb0b3be5a2b3352a7bb888c5644f0f7d3acddaabe290a9475248170",
-   "fingerprint": "WQJ6",
+   "sha256": "ede1eb3b9d9078e5d27c440f490b8e05376e17e38154ef4c6d6caed57692968f",
+   "fingerprint": "FKH4",
    "generatorVersion": 4
   },
   "2026-11-24": {
-   "sha256": "44dba680e69def1be379b87de3b666561f73d42c515b1fb3a59200ad6bd78b12",
-   "fingerprint": "3GQB",
+   "sha256": "81dc0cfa6c217747c25ae607afa0773ca9ce9143da92f989f3a3859183030cdb",
+   "fingerprint": "RMM7",
    "generatorVersion": 4
   },
   "2026-11-25": {
-   "sha256": "5bc60e90cec233809762d3fd26ed867130883b18f7156989edb897bc343821a6",
-   "fingerprint": "VB4V",
+   "sha256": "3b48bde3c8834a48564438bdaad47e49e4de755414d99ac727b8d164b20bc726",
+   "fingerprint": "FQET",
    "generatorVersion": 4
   },
   "2026-11-26": {
-   "sha256": "6516ada71be663cb4f77d0f7f5148f4ef023123d8273a254c5c4c6aa3b127f8c",
-   "fingerprint": "XA5C",
+   "sha256": "4e7809d18ed0648b3827e84183dd0a853dab21e515eabf19bd7a2f97df8ad5d8",
+   "fingerprint": "UC9Y",
    "generatorVersion": 4
   },
   "2026-11-27": {
-   "sha256": "4cc34bab18cbe59fdb7964772e20f05597a5b3996259d05d7d139b82b52de0e1",
-   "fingerprint": "JN7Z",
+   "sha256": "04bd8256ebe6bbe494c20cb665f5c7aed4fac1ac46a900d69088e78fd2357d0f",
+   "fingerprint": "6ZCH",
    "generatorVersion": 4
   },
   "2026-11-28": {
-   "sha256": "4868cf96755be016f4bb0cfe315d7c28fcad6623a4ee57cbaed11fda0b7df645",
-   "fingerprint": "WVEF",
+   "sha256": "0c9e82675661db4cc8d6f3ebd34e0e733731ce3ff9ba1246dd3de5c2654c70c2",
+   "fingerprint": "52TV",
    "generatorVersion": 4
   },
   "2026-11-29": {
-   "sha256": "b200974170ec722f9c6b34b267ebcb614ac4e6773d1de29ce7b4813f8bf33023",
-   "fingerprint": "PL39",
+   "sha256": "7a82d9fba192aa697a2e7c31db5e0bc3743c7a7c8cb1b849c35d247de242489d",
+   "fingerprint": "T9HU",
    "generatorVersion": 4
   },
   "2026-11-30": {
-   "sha256": "969ca76f2154d9f11da3a002819db6aae6f2b2ccf04596dae7be12b3692dce85",
-   "fingerprint": "73PZ",
+   "sha256": "22de9b7b6b2a7a1ca86bc67bedfca156eb6526612cf73e48e999dcb13f6866e2",
+   "fingerprint": "2UVW",
    "generatorVersion": 4
   },
   "2026-12-01": {
-   "sha256": "798228584bd2f049bc4aa6dcd0415cae8f86047cfbdf64806f04cc9ea67af1fa",
-   "fingerprint": "CDSP",
+   "sha256": "69c38fb6a160a8cb6d629cd38aa3d7dd383d601c94ef6c161f4e1bd88e8e58b8",
+   "fingerprint": "3TNE",
    "generatorVersion": 4
   },
   "2026-12-02": {
-   "sha256": "882cdcb694d2054220c5aa8c7f4ac44ef95d14eafa86a2da45f78bc4859c2348",
-   "fingerprint": "6NAK",
+   "sha256": "30ecb47b8d5b40282b8586cf8922bbc1ef6cafb201d7fd4416b04a7a7780f6aa",
+   "fingerprint": "BNVW",
+   "generatorVersion": 4
+  },
+  "2026-12-03": {
+   "sha256": "12db0aa9d7e4654e8239772af36186da2734f82fc9cb393e7d5d5a6db89e6381",
+   "fingerprint": "GBKB",
+   "generatorVersion": 4
+  },
+  "2026-12-04": {
+   "sha256": "ac82e8815f2ec3e05dd82b78312cd49216784a51d5e5bac3b11381404b51d41e",
+   "fingerprint": "K8HH",
+   "generatorVersion": 4
+  },
+  "2026-12-05": {
+   "sha256": "f063e76dcf09e78b5751e4b5a63016e0bf7be4b96aaa67df93b4be5ad2c7acc2",
+   "fingerprint": "UTYD",
+   "generatorVersion": 4
+  },
+  "2026-12-06": {
+   "sha256": "1501f78465de2d327e41fe2bc50c6e53b231137fd2b333773a433efaaa59f927",
+   "fingerprint": "6ZBY",
+   "generatorVersion": 4
+  },
+  "2026-12-07": {
+   "sha256": "356926794d55e2701dc78ea6da6ae79efd6a81b01d9815fa5b6113a1ce03acf8",
+   "fingerprint": "S3D4",
+   "generatorVersion": 4
+  },
+  "2026-12-08": {
+   "sha256": "77102d835e4c0465c5ec8ed549b4a23d42973be5342be30d89b54f06d9e29914",
+   "fingerprint": "NTFH",
+   "generatorVersion": 4
+  },
+  "2026-12-09": {
+   "sha256": "260762bfd594e42530f7f9fc98eb1945a122cbac5fc7e64aa64274a37b06c1f8",
+   "fingerprint": "BDPJ",
+   "generatorVersion": 4
+  },
+  "2026-12-10": {
+   "sha256": "2b7cdb5c57556a0b78ca5bf6a7a92f2328cb682aa85b1e40119faf3f7a0fd0a2",
+   "fingerprint": "ADHS",
+   "generatorVersion": 4
+  },
+  "2026-12-11": {
+   "sha256": "66dc0ba50d82adbc84cdbb0b6f062139768600f86bc476bd648abc3d3c9fad9b",
+   "fingerprint": "M8PE",
+   "generatorVersion": 4
+  },
+  "2026-12-12": {
+   "sha256": "29d2f67e2824e6c81391cb8d7f84d8608ade2f2888af9df00fe8ae2d3825e518",
+   "fingerprint": "CHB7",
+   "generatorVersion": 4
+  },
+  "2026-12-13": {
+   "sha256": "ce23b7c94cbcbab77b05a517c57c88b5d08f2f535c647ab772ada1c5bce4fe5f",
+   "fingerprint": "XREW",
+   "generatorVersion": 4
+  },
+  "2026-12-14": {
+   "sha256": "e3b9b0debf5e68f819efd4e777f64ee026ff979e580109c4cbc3c4c3dc7831db",
+   "fingerprint": "H7CN",
+   "generatorVersion": 4
+  },
+  "2026-12-15": {
+   "sha256": "69e432c8940f5eddaaefdd4b07a6e61026b289c804dae7f5fbb3cb3d69c3f15f",
+   "fingerprint": "PB9H",
+   "generatorVersion": 4
+  },
+  "2026-12-16": {
+   "sha256": "f41eda75812f418cd21581256b6a96ff0e95a57fab253cc95fe88511058847bb",
+   "fingerprint": "ZFAD",
+   "generatorVersion": 4
+  },
+  "2026-12-17": {
+   "sha256": "24436b7256c9de0dbeb477704db05bb6b9780d906165958e7218c328fb849822",
+   "fingerprint": "ME2A",
    "generatorVersion": 4
   }
  }
