@@ -16,12 +16,13 @@ import {
   WEEKDAYS, WEEKDAYS_ACC, isSummerTime,
 } from './time.js';
 import { solveCase, qualityIssues, investigationProfile, proofDepth } from './solver.js';
+import { PLACE_CELLS, SCENE_CELLS, MIN_PER_CELL, minutesApart } from './town.js';
 
 /**
  * Wersja generatora. Podbij ją przy każdej zmianie, która zmienia treść spraw.
  * Opublikowane sprawy (cases/*.json) i tak się nie zmienią, bo gra czyta je z plików.
  */
-export const GENERATOR_VERSION = 7;
+export const GENERATOR_VERSION = 8;
 
 /** Krótki „odcisk” sprawy: 4 znaki, po których ekipa sprawdza, że ma te same akta. */
 export function caseFingerprint(c) {
@@ -185,8 +186,12 @@ function generate(rng, opts) {
   const W2 = W1 + rng.int(24, 46);
   const closeT = W1 - rng.int(14, 45);
 
+  // Czasy dotarcia wynikają z planu Borowic: kratki w poziomie i w pionie razy MIN_PER_CELL.
+  const sceneCell = SCENE_CELLS[scene.id];
   const travel = {};
-  for (const key of Object.keys(PLACES)) travel[key] = rng.int(6, 36);
+  for (const key of Object.keys(PLACES)) travel[key] = minutesApart(sceneCell, PLACE_CELLS[key]);
+  /** Najszybsze przejście między dwoma miejscami w mieście. */
+  const between = (a, b) => (a === b ? 0 : minutesApart(PLACE_CELLS[a], PLACE_CELLS[b]));
   const usedPlaces = new Set();
   const taken = new Set();
   const useWitness = rng.sample(WITNESSES, WITNESSES.length);
@@ -221,7 +226,7 @@ function generate(rng, opts) {
   };
 
   // Pobyty każdej osoby (miejsce + przedział czasu). Nowe dowody muszą dać się z nimi
-  // pogodzić: przejście z A do B trwa co najmniej |dA − dB| minut (to gracz wyliczy z mapy).
+  // pogodzić: przejście z A do B trwa tyle, ile kratek między nimi na planie miasta.
   const AWAY = '@poza-miastem';
   const FAR = 100000;
   const events = Object.fromEntries(suspects.map((s) => [s.id, []]));
@@ -230,10 +235,8 @@ function generate(rng, opts) {
     if (a.place === b.place) return false;
     if (a.from <= b.to + margin && b.from <= a.to + margin) return true;
     const [x, y] = a.to < b.from ? [a, b] : [b, a];
-    const dx = tmin(x.place);
-    const dy = tmin(y.place);
-    if (dx === undefined || dy === undefined) return false;
-    return y.from - x.to < Math.abs(dx - dy) + margin;
+    if (tmin(x.place) === undefined || tmin(y.place) === undefined) return false;
+    return y.from - x.to < between(x.place, y.place) + margin;
   };
   // `avoid`: pobyty, z którymi nowe dowody danej osoby nie mogą kolidować (np. fałszywy wspólny dowód,
   // żeby fałszywkę obalała dokładnie jedna karta).
@@ -323,7 +326,7 @@ function generate(rng, opts) {
       if (opts.mustConflict) {
         // Godzina, która daje alibi, a jednocześnie nie da się jej pogodzić z prawdziwym pobytem osoby z dowodu.
         const E = opts.mustConflict[0];
-        const D = Math.abs(travel[place] - travel[E.place]);
+        const D = between(place, E.place);
         if (E.place === place || D < 10) retry();
         const [a, b] = clearRange(place);
         const from = Math.max(a, lo, E.from - (D - 5));
@@ -492,7 +495,7 @@ function generate(rng, opts) {
         const st1 = takePlace((p) => p.street);
         const st2 = takePlace((p) => p.street);
         const t1 = tPick(st1, 18 * 60, 22 * 60 + 30);
-        const t2 = t1 + Math.max(rng.int(9, 24), Math.abs(travel[st1] - travel[st2]) + rng.int(5, 10));
+        const t2 = t1 + Math.max(rng.int(9, 24), between(st1, st2) + rng.int(5, 10));
         if (noAlibi && t2 > W1 - travel[st2] - 4 && t2 < W2 + travel[st2] + 4) retry();
         const mkStreet = (street) => {
           const parity = rng.pick(['all', 'all', 'even', 'odd']);
@@ -698,7 +701,7 @@ function generate(rng, opts) {
       if (F.place === AWAY) {
         t = rng.int(Math.max(F.from + 10, W2 + d + 3), F.from + 90);
       } else {
-        const D = Math.abs(d - travel[F.place]);
+        const D = between(place, F.place);
         if (place === F.place || D < 10) continue;
         t = rng.int(F.from - (D - 5), F.to + (D - 5));
       }
@@ -810,13 +813,14 @@ function generate(rng, opts) {
   // Bilet do kina łatwiej „zgrać” w sprzeczność z pobytem Y, więc losujemy go rzadziej: wtedy rodzaj wspólnego
   // dowodu nie zdradza, który z dwóch jest fałszywy.
   // Alibi krzyżowe: losujemy parę rodzajów dla dwóch wspólnych dowodów i dopiero potem, który z nich jest
-  // fałszywy, żeby rodzaj dowodu niczego nie zdradzał. Bilet do kina łatwiej „zgrać” w sprzeczność
-  // z pobytem Y (częściej przechodzi kontrolę jakości), więc rzadziej przydzielamy mu rolę fałszywki.
+  // fałszywy, żeby rodzaj dowodu niczego nie zdradzał. Wagi FW wyrównują to, że niektóre rodzaje
+  // częściej przechodzą kontrolę jakości jako fałszywka (dobrane pomiarem na kilkuset dniach).
   let crossKind = null;
   let jointKind = null;
   if (mode === 'cross') {
     const pair = rng.sample(JOINT_KINDS.filter((k) => kinds.includes(k)), 2);
-    const forgedFirst = pair.includes('cinema') ? rng.chance(pair[0] === 'cinema' ? 0.4 : 0.6) : rng.chance(0.5);
+    const FW = { receipt: 1.35, photo: 1.05, cinema: 0.55 };
+    const forgedFirst = rng.chance(FW[pair[0]] / (FW[pair[0]] + FW[pair[1]]));
     [crossKind, jointKind] = forgedFirst ? pair : [pair[1], pair[0]];
     for (const k of pair) kinds.splice(kinds.indexOf(k), 1);
   } else {
@@ -851,7 +855,7 @@ function generate(rng, opts) {
     // Fałszywka „fizyczna”: rodzaj losujemy z wagami, bo niektóre rodzaje częściej przechodzą kontrolę
     // jakości. Dzięki temu żaden rodzaj dowodu nie jest „zawsze prawdziwy” ani „zwykle fałszywy”.
     if (mode === 'self') {
-      const W = { receipt: 3, photo: 2.3, train: 1.6, parking: 1.6, bus: 2, delivery: 0.9, cinema: 0.6 };
+      const W = { receipt: 3.4, photo: 2.6, train: 1.15, parking: 2.4, bus: 1.4, delivery: 0.9, cinema: 1.0 };
       const avail = kinds.slice(kp);
       let x = rng.next() * avail.reduce((sum, k) => sum + (W[k] || 1), 0);
       const pick = avail.find((k) => (x -= W[k] || 1) < 0) || avail[avail.length - 1];
@@ -1198,23 +1202,21 @@ function generate(rng, opts) {
     addCard({ desk: 'S', kind: 'witness', title: `Zeznanie: ${w.full}`, sub: g(w, 'znajomy z okolicy', 'znajoma z okolicy'), lines: [fn(motiveTargets[k])] });
   });
 
-  // Czasy dotarcia: wszystkie miejsca z kart + kilka dodatkowych.
-  const travelPlaces = [...usedPlaces];
-  const extraPlaces = rng.sample(Object.keys(PLACES).filter((k) => !usedPlaces.has(k)), rng.int(2, 4));
-  const allTravel = rng.shuffle([...travelPlaces, ...extraPlaces]);
-  const chunk = allTravel.length > 7 ? Math.ceil(allTravel.length / 2) : allTravel.length;
-  const parts = Math.ceil(allTravel.length / chunk);
-  for (let k = 0; k < allTravel.length; k += chunk) {
-    const part = allTravel.slice(k, k + chunk);
-    addCard({
-      desk: 'M',
-      title: `Czasy dotarcia do ${scene.short}`,
-      sub: 'najszybciej, jak się da (pieszo, rowerem lub autem), tyle samo w każdą stronę',
-      travelPart: parts > 1,
-      lines: part.map((p) => `${PLACES[p].name}: ${travel[p]} min`),
-      facts: part.map((p) => ({ t: 'travel', place: p, min: travel[p] })),
-    });
-  }
+  // Plan miasta: kratki miejsca kradzieży, wszystkich miejsc z kart i kilku dodatkowych.
+  // Z kratek gracz liczy czasy dotarcia (w poziomie + w pionie, razy MIN_PER_CELL minut).
+  const mapPlaces = [...usedPlaces, ...rng.sample(Object.keys(PLACES).filter((k) => !usedPlaces.has(k)), rng.int(2, 4))]
+    .sort((a, b) => PLACES[a].name.localeCompare(PLACES[b].name, 'pl'));
+  addCard({
+    desk: 'M',
+    title: 'Plan miasta Borowice',
+    sub: `1 kratka = ${MIN_PER_CELL} min drogi · liczcie kratki w poziomie i w pionie`,
+    mapCard: true,
+    lines: [
+      `Miejsce kradzieży: ${scene.name}, kratka ${sceneCell}`,
+      ...mapPlaces.map((p) => `${PLACES[p].name}: ${PLACE_CELLS[p]}`),
+    ],
+    facts: [{ t: 'grid', perCell: MIN_PER_CELL, scene: sceneCell }, ...mapPlaces.map((p) => ({ t: 'pos', place: p, cell: PLACE_CELLS[p] }))],
+  });
 
   // Dopełnienie biurek szumem.
   for (const desk of ['D', 'S', 'M', 'Z', 'R']) {
@@ -1234,8 +1236,6 @@ function generate(rng, opts) {
     });
   }
 
-  const travelCards = finalCards.filter((c) => c.travelPart);
-  travelCards.forEach((c, i) => { c.title = `${c.title} (${i + 1}/${travelCards.length})`; });
 
   suspects.forEach((s, i) => {
     if (s.claimCard) s.alibi = s.claimCard.alibi(s.claimCard.id);
@@ -1248,7 +1248,7 @@ function generate(rng, opts) {
   const sealFor = (card) => {
     if (card.kind !== 'official') return null;
     const types = new Set((card.facts || []).map((f) => f.t));
-    if (types.has('travel')) return null;
+    if (types.has('travel') || types.has('grid')) return null;
     if (types.has('train')) return { label: 'Pobierz rozkład jazdy ze stacji Borowice', cost: 30 };
     if (types.has('bus')) return { label: `Pobierz rozkład MZK: ${card.title.replace(/^Przystanek (.+): linia (\S+)$/, 'linia $2, przystanek $1')}`, cost: 30 };
     if (types.has('street')) return { label: 'Zapytaj urząd o numerację budynków', cost: 30 };
@@ -1277,6 +1277,7 @@ function generate(rng, opts) {
     const action = sealFor(c);
     return {
       id: c.id, desk: c.desk, kind: c.kind, title: c.title, sub: c.sub || '', lines: c.lines, by: c.by || null, facts: c.facts,
+      ...(c.mapCard ? { map: true } : {}),
       ...(action ? { action } : {}),
     };
   });

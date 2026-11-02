@@ -252,9 +252,16 @@ export const RULES = [
 /** Zasada nr 3 w sprawach, w których kłamie też niewinna osoba (od piątku). */
 export const RULE_LIE = 'W tej sprawie fałszywe są dwa dowody dostarczone przez podejrzanych. Jeden sfałszował sprawca: gdyby był prawdziwy, dawałby mu alibi na czas kradzieży. Drugi to kłamstwo niewinnej osoby (ukrywała coś niezwiązanego z kradzieżą). Kłamca nie jest sprawcą i zawsze ma inne, potwierdzone alibi (od świadka, z kamery, rejestru albo z prawdziwego dowodu). Sprawca poza fałszywką nie ma żadnego potwierdzonego alibi. Pozostałe dowody od podejrzanych są prawdziwe.';
 
+/** Zasada nr 4 w sprawach z planem miasta (od generatora v8): czasy liczy się z przecznic. */
+export const RULE_MAP = 'Czasy dotarcia liczycie z planu Borowic (biurko „Mapa i rozkłady”). Ulice tworzą siatkę, a przejście o jedną przecznicę, czyli jedno pole planu w poziomie albo w pionie, trwa 2 minuty, pieszo, rowerem czy autem tak samo. Czas między dwoma miejscami to liczba przecznic w poziomie plus w pionie razy 2 min (np. z C14 do M10: 10 + 4 = 14 przecznic, czyli 28 min). Szybciej się nie da, a w każdą stronę jest tyle samo. Przez rzekę prowadzi most na każdej ulicy.';
+
+/** Czy sprawa ma plan miasta (karta z polami miejsc). */
+export const hasTownMap = (c) => c.cards.some((k) => (k.facts || []).some((f) => f.t === 'grid'));
+
 /** Zasady dla danej sprawy. */
 export function rulesFor(c) {
-  return RULES.map((r, i) => (i === 2 && c.innocentLie ? RULE_LIE : r));
+  const map = hasTownMap(c);
+  return RULES.map((r, i) => (i === 2 && c.innocentLie ? RULE_LIE : i === 3 && map ? RULE_MAP : r));
 }
 
 /**

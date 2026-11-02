@@ -4,6 +4,7 @@
 
 import { PLACES, TRAIN_NOTES, TEAM_DESKS } from './data.js';
 import { dayType, fmt, WEEKDAYS_ACC } from './time.js';
+import { cellsApart, blocksText } from './town.js';
 
 const SCENE = '@scena';
 const AWAY = '@poza-miastem';
@@ -25,6 +26,9 @@ export function solveCase(c) {
   const suspects = new Map(c.suspects.map((s) => [s.id, s]));
 
   const travel = new Map();
+  // Plan miasta (od generatora v8): kratki miejsc; czas = kratki w poziomie + w pionie razy perCell.
+  let grid = null;
+  const cells = new Map();
   const trains = new Map();
   const legend = new Map();
   const hours = new Map();
@@ -45,6 +49,8 @@ export function solveCase(c) {
       const ref = card.id;
       switch (f.t) {
         case 'travel': travel.set(f.place, { min: f.min, ref }); break;
+        case 'grid': grid = { perCell: f.perCell, scene: f.scene, ref }; break;
+        case 'pos': cells.set(f.place, { cell: f.cell, ref }); break;
         case 'train': trains.set(f.no, { ...f, ref }); break;
         case 'legend': legend.set(f.symbol, ref); break;
         case 'hours': hours.set(f.place, { ...f, ref }); break;
@@ -62,6 +68,10 @@ export function solveCase(c) {
         default: break;
       }
     }
+  }
+
+  if (grid) {
+    for (const [place, { cell, ref }] of cells) travel.set(place, { min: cellsApart(grid.scene, cell) * grid.perCell, ref, cell });
   }
 
   // Rejestry wejść łączymy z listą właścicieli kart.
@@ -262,14 +272,22 @@ export function solveCase(c) {
    * są zawsze sprzeczne. Miejsce zbrodni ma czas dotarcia 0.
    */
   const travelMin = (place) => (place === SCENE ? 0 : travel.get(place)?.min);
+  /** Najkrótsze przejście między dwoma miejscami: z planu miasta albo (stare sprawy) |dA − dB|. */
+  function between(a, b) {
+    if (a === b) return 0;
+    const da = travelMin(a);
+    const db = travelMin(b);
+    if (da === undefined || db === undefined) return undefined;
+    if (grid && a !== SCENE && b !== SCENE) return cellsApart(cells.get(a).cell, cells.get(b).cell) * grid.perCell;
+    return Math.abs(da - db);
+  }
   function conflict(a, b) {
     if (a.place === b.place) return false;
     if (a.from <= b.to && b.from <= a.to) return true;
     const [x, y] = a.to < b.from ? [a, b] : [b, a];
-    const dx = travelMin(x.place);
-    const dy = travelMin(y.place);
-    if (dx === undefined || dy === undefined) return false;
-    return y.from - x.to < Math.abs(dx - dy);
+    const d = between(x.place, y.place);
+    if (d === undefined) return false;
+    return y.from - x.to < d;
   }
   function firstConflict(events) {
     for (let i = 0; i < events.length; i++) {
@@ -395,9 +413,12 @@ export function solveCase(c) {
             const tb = travel.get(o.place);
             if (ta) travelRefs.push(ta.ref);
             if (tb && tb.ref !== ta?.ref) travelRefs.push(tb.ref);
-            const D = ta && tb ? Math.abs(ta.min - tb.min) : null;
+            const D = ta && tb ? between(e.place, o.place) : null;
+            const how = grid
+              ? `${blocksText(cellsApart(ta.cell, tb.cell))} na planie miasta (${ta.cell} → ${tb.cell}), czyli ${D} min drogi [${[...new Set(travelRefs)].join(', ')}]`
+              : `co najmniej ${D} min drogi (czasy dotarcia ${ta?.min} i ${tb?.min} min [${[...new Set(travelRefs)].join(', ')}])`;
             reason = `według karty ${oRefs.map((r) => `[${r}]`).join(' i ')} ${person.full} ${gp('był', 'była')} ${placeLoc(o.place)} ${when(o)}, a dowód [${f.card}] umieszcza tę osobę ${placeLoc(e.place)} ${when(e)}`
-              + (D !== null ? `; między tymi miejscami jest co najmniej ${D} min drogi (czasy dotarcia ${ta.min} i ${tb.min} min [${[...new Set(travelRefs)].join(', ')}])` : '');
+              + (D !== null ? `; między tymi miejscami jest ${how}` : '');
           }
           explain.forged = {
             card: f.card, kind: f.kind, reason, reasonCodes: [pid === f.who ? 'physical' : 'physical-other'],
@@ -418,6 +439,8 @@ export function solveCase(c) {
     evaluated,
     neutralClears,
     explain,
+    travel,
+    between,
     window: { W1, W2 },
     describeClear(item) {
       const when = item.from === item.to ? `o ${fmt(item.from)}` : `od ${fmt(item.from)} do ${fmt(item.to)}`;
@@ -438,9 +461,8 @@ export function qualityIssues(c, res = solveCase(c)) {
   }
   const forged = res.evaluated.find((e) => e.card === c.solution.forged);
   const travelOk = forged.sightings.some((s) => {
-    const card = c.cards.find((k) => (k.facts || []).some((f) => f.t === 'travel' && f.place === s.place));
-    if (!card) return false;
-    const min = card.facts.find((f) => f.t === 'travel' && f.place === s.place).min;
+    const min = res.travel.get(s.place)?.min;
+    if (min === undefined) return false;
     return s.from < c.window.to + min && s.to > c.window.from - min;
   });
   if (!travelOk) issues.push('sfałszowany dowód nie dawałby sprawcy alibi');

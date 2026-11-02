@@ -105,9 +105,18 @@ function staysOf(c) {
   const travel = {};
   const owners = {};
   const films = [];
+  // Plan miasta: niezależnie od solvera liczymy przecznice z oznaczeń pól („J7”).
+  const cell = (label) => ['ABCDEFGHIJKLMNOPQRST'.indexOf(label[0]), Number(label.slice(1))];
+  const grid = c.cards.flatMap((k) => k.facts || []).find((f) => f.t === 'grid');
+  const cells = {};
   for (const k of c.cards) {
     for (const f of k.facts || []) {
       if (f.t === 'travel') travel[f.place] = f.min;
+      if (f.t === 'pos') {
+        cells[f.place] = cell(f.cell);
+        const [sx, sy] = cell(grid.scene);
+        travel[f.place] = (Math.abs(cells[f.place][0] - sx) + Math.abs(cells[f.place][1] - sy)) * grid.perCell;
+      }
       if (f.t === 'cardowner') owners[`${f.place}#${f.card}`] = f.who;
       if (f.t === 'screening') films.push(f);
     }
@@ -133,13 +142,16 @@ function staysOf(c) {
       }
     }
   }
-  return { stays, travel };
+  const between = (a, b) => (grid && cells[a] && cells[b]
+    ? (Math.abs(cells[a][0] - cells[b][0]) + Math.abs(cells[a][1] - cells[b][1])) * grid.perCell
+    : Math.abs(travel[a] - travel[b]));
+  return { stays, travel, between };
 }
 
 test('prawdziwe pobyty każdej osoby są fizycznie spójne (osobna implementacja)', () => {
   for (const iso of dates) {
     const c = buildDailyCase(iso);
-    const { stays, travel } = staysOf(c);
+    const { stays, travel, between } = staysOf(c);
     for (const [who, list] of Object.entries(stays)) {
       if (!c.suspects.some((s) => s.id === who)) continue;
       for (let i = 0; i < list.length; i++) {
@@ -151,7 +163,7 @@ test('prawdziwe pobyty każdej osoby są fizycznie spójne (osobna implementacja
           assert.ok(!overlap, `${iso}: ${who} jest w dwóch miejscach naraz (${a.card}, ${b.card})`);
           const [x, y] = a.to < b.from ? [a, b] : [b, a];
           if (travel[x.place] === undefined || travel[y.place] === undefined) continue;
-          assert.ok(y.from - x.to >= Math.abs(travel[x.place] - travel[y.place]), `${iso}: ${who} nie zdąży z ${x.card} do ${y.card}`);
+          assert.ok(y.from - x.to >= between(x.place, y.place), `${iso}: ${who} nie zdąży z ${x.card} do ${y.card}`);
         }
       }
     }
@@ -252,7 +264,7 @@ test('w weekend kartę obalającą trzeba zlecić (zapieczętowane nagranie albo
     n++;
     const res = solveCase(c);
     const proof = res.explain.forged.proofRefs.map((id) => c.cards.find((k) => k.id === id));
-    const nonTravel = proof.filter((k) => !(k.facts || []).some((f) => f.t === 'travel'));
+    const nonTravel = proof.filter((k) => !(k.facts || []).some((f) => f.t === 'travel' || f.t === 'grid'));
     assert.ok(nonTravel.length > 0 && nonTravel.every((k) => k.action), `${iso}: ${nonTravel.map((k) => k.id)}`);
   }
   assert.ok(n > 50);
@@ -289,7 +301,7 @@ test('alibi krzyżowe: dwa symetryczne wspólne dowody, a kłamca nie jest osob�
     assert.ok(forged && decoy, iso);
     // Właściciel prawdziwego wspólnego dowodu nie ma innego dowodu z alibi (tak jak sprawca).
     const alibiCards = (who) => res.evaluated.filter((e) => e.who === who && e.sightings.some((st) => {
-      const tr = c.cards.flatMap((k) => k.facts || []).find((f) => f.t === 'travel' && f.place === st.place);
+      const tr = res.travel.get(st.place);
       return tr && st.from < c.window.to + tr.min && st.to > c.window.from - tr.min;
     })).length;
     assert.equal(alibiCards(decoy.who), alibiCards(forged.who), `${iso}: ${alibiCards(decoy.who)} vs ${alibiCards(forged.who)}`);

@@ -45,6 +45,10 @@ Ta sama sprawa dnia, ale widzisz wszystkie biurka.
 
 Sprawy treningowe nie liczą się do serii. Każda ma 4-znakowy kod, np. `K7Q2`. Ten sam kod daje tę samą sprawę, więc ekipa może zagrać razem dowolną liczbę spraw dziennie. Link do sprawy treningowej: `adres-gry/#sprawa-K7Q2`.
 
+### Plan miasta
+
+Wszystkie sprawy dzieją się w tym samym miasteczku, Borowicach. Na biurku „Mapa i rozkłady” leży plan miasta z polami miejsc (jak w skorowidzu papierowego planu: kolumny A–T, wiersze 1–14), a w grze zakładka **Plan miasta** pokazuje go jako ilustrowaną mapę. Ulice tworzą siatkę, więc czas między dwoma miejscami to liczba przecznic w poziomie plus w pionie razy 2 minuty. Dotknięcie dwóch miejsc rysuje trasę po ulicach i podaje czas. W grze z ekipą plan ma osoba z biurkiem „Mapa i rozkłady”, więc reszta pyta ją o odległości.
+
 ## Uruchomienie
 
 Gra to zwykłe pliki HTML, CSS i JavaScript, bez bibliotek i bez kroku budowania. Potrzebny jest tylko dowolny serwer plików statycznych, bo moduły JavaScript nie działają po otwarciu `index.html` prosto z dysku.
@@ -83,6 +87,9 @@ Skrypt warto uruchamiać co kilka tygodni, zanim skończą się opublikowane dni
 | `js/generator.js` | Tworzy sprawę z daty (ten sam dzień = ta sama sprawa u wszystkich). Losuje scenę, podejrzanych, okno czasowe, alibi, jeden sfałszowany dowód i karty-szum. |
 | `js/solver.js` | Niezależny solver. Czyta tylko fakty zapisane na kartach i sprawdza wszystkie hipotezy „kto i którym dowodem”, łącznie ze spójnością fizyczną (nikt nie jest w dwóch miejscach naraz, a przejście z A do B trwa co najmniej różnicę ich czasów dotarcia). Sprawa trafia do gry tylko wtedy, gdy ma **dokładnie jedno** rozwiązanie i przechodzi kontrolę jakości: każdy niewinny ma potwierdzone alibi, fałszywka dawałaby sprawcy alibi i obala ją tylko jedna karta, a przy każdej wielkości ekipy fałszywka i jej obalenie są u różnych graczy. |
 | `js/data.js` | Treści: postacie z odmianą imion, miejsca, sceny, podział biurek między graczy, zasady. |
+| `js/town.js` | Stały plan Borowic: pole (A–T × 1–14) każdego miejsca i każdej sceny. Czas dotarcia = przecznice w poziomie + w pionie × 2 min. |
+| `js/map.js` | Ilustrowany plan miasta (SVG): ulice z nazwami, kamienice, rynek, rzeka z mostami, park, tory; trasa między dwoma wybranymi miejscami. |
+| `js/icons.js` | Wybrane ikony [Lucide](https://lucide.dev) (licencja ISC, tekst licencji w pliku). |
 | `js/main.js` | Interfejs: ekrany, zegar, podpowiedzi, oskarżenie, wynik do udostępnienia, statystyki. |
 | `server/room.js` | Logika pokoju gry na żywo i protokół WebSocket, wspólna dla obu serwerów i testów. |
 | `server/node-server.mjs` | Serwer lokalny bez zależności: gra + WebSocket (`npm run live`). |

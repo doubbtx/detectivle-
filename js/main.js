@@ -3,7 +3,10 @@
 import { randomPracticeCode, DIFFICULTY_LABELS, EPOCH } from './generator.js';
 import { loadDailyCase, loadPracticeCase } from './cases.js';
 import { solveCase, investigationBudget } from './solver.js';
-import { TEAM_DESKS, DESK_DEFS, REASONS, PLACES, rulesFor } from './data.js';
+import { TEAM_DESKS, DESK_DEFS, REASONS, PLACES, rulesFor, hasTownMap } from './data.js';
+import { renderTownSvg } from './map.js';
+import { icon } from './icons.js';
+import { PLACE_CELLS, SCENE_CELLS, cellsApart, blocksText, MIN_PER_CELL } from './town.js';
 import { buildEpilogue } from './epilogue.js';
 import { fmt, localTodayIso, addDays } from './time.js';
 import { store } from './storage.js';
@@ -66,6 +69,7 @@ function resetCaseUi() {
   state.accuse = { forged: null, proof: null, reason: null, alibis: {}, last: null };
   state.showAll = false;
   state.tab = 'akta';
+  state.mapSel = [];
   state.modal = null;
   state.confirm = null;
 }
@@ -640,6 +644,7 @@ function renderCard(k, opts = {}) {
     </header>
     ${by ? `<p class="stamp">${by.f ? 'Dostarczyła' : 'Dostarczył'}: ${esc(by.full)}</p>` : ''}
     <div class="card-lines">${k.lines.map((l) => `<p>${esc(l).replace(/(\d)–(\d)/g, '$1\u2060–\u2060$2')}</p>`).join('')}</div>
+    ${k.map && !opts.noActions && hasMapTab() ? `<p><button class="btn btn-small" data-act="tab" data-tab="plan">${icon('map')} Otwórz plan miasta</button></p>` : ''}
     ${opts.noActions ? '' : `
     <footer class="card-foot">
       <button class="link-btn" data-act="mark-card" data-id="${k.id}" aria-pressed="${Boolean(marked)}">${marked ? '★ Zaznaczona' : '☆ Zaznacz'}</button>
@@ -664,6 +669,62 @@ function renderDesk(desk) {
       <p class="muted small">${cards.length} ${cards.length >= 2 && cards.length <= 4 ? 'karty' : 'kart'} · ${esc(def.hint)}</p>
     </header>
     <div class="cards">${cards.map((k) => renderCard(k)).join('')}</div>
+  </section>`;
+}
+
+// ---------------------------------------------------------------------------
+// Plan miasta
+
+const mapCardOf = (c = state.c) => c.cards.find((k) => k.map);
+function hasMapTab() {
+  const mc = state.c && hasTownMap(state.c) ? mapCardOf() : null;
+  return Boolean(mc && myDesks().includes(mc.desk));
+}
+const mapPlaceName = (key) => (key === 'scene' ? state.c.scene.name : PLACES[key]?.name || key);
+const mapCell = (key) => (key === 'scene' ? SCENE_CELLS[sceneIdOf(state.c)] : PLACE_CELLS[key]);
+function sceneIdOf(c) {
+  const g = mapCardOf(c)?.facts.find((f) => f.t === 'grid');
+  return Object.keys(SCENE_CELLS).find((id) => SCENE_CELLS[id] === g?.scene);
+}
+
+/** Karty (z biurek gracza), które dotyczą danego miejsca. Zapieczętowane rozpoznajemy tylko po etykiecie czynności. */
+function cardsAtPlace(key) {
+  const name = PLACES[key]?.name;
+  return state.c.cards.filter((k) => myDesks().includes(k.desk) && !k.map).filter((k) => {
+    if (isSealed(k)) return Boolean(name && k.action.label.includes(name));
+    return (k.facts || []).some((f) => f.place === key || f.stop === key || (f.stops || []).some((st) => st.place === key)
+      || (f.t === 'claim' && ((f.kind === 'train' && key === 'dworzec') || (f.kind === 'cinema' && key === 'kino'))));
+  });
+}
+
+function renderPlan() {
+  const c = state.c;
+  const mc = mapCardOf();
+  const active = new Set(mc.facts.filter((f) => f.t === 'pos').map((f) => f.place));
+  const sel = state.mapSel || [];
+  const svg = renderTownSvg({ places: PLACES, scene: sceneIdOf(c), sceneLabel: c.scene.name, active, selected: sel });
+  const chip = (id) => `<button class="chip chip-btn" data-act="goto-card" data-id="${id}">${id}</button>`;
+  let info = '<p class="muted small">Dotknij miejsca, żeby zobaczyć jego pole i karty, które go dotyczą. Dotknij drugiego, a plan pokaże trasę po ulicach.</p>';
+  if (sel.length === 1) {
+    const key = sel[0];
+    const n = key === 'scene' ? 0 : cellsApart(mapCell('scene'), mapCell(key));
+    const cards = key === 'scene' ? [] : cardsAtPlace(key);
+    info = `<p class="plan-place"><b>${esc(mapPlaceName(key))}</b> · pole ${mapCell(key)}</p>
+      ${key === 'scene' ? '<p class="small">Tu doszło do kradzieży.</p>' : `<p class="small">Do miejsca kradzieży: ${blocksText(n)}, czyli ${n * MIN_PER_CELL} min.</p>`}
+      ${cards.length ? `<p class="small">Karty o tym miejscu: ${cards.map((k) => chip(k.id)).join(' ')}</p>` : key === 'scene' ? '' : '<p class="small muted">Na twoich biurkach nie ma kart o tym miejscu.</p>'}`;
+  } else if (sel.length === 2) {
+    const n = cellsApart(mapCell(sel[0]), mapCell(sel[1]));
+    info = `<p class="plan-place"><b>${esc(mapPlaceName(sel[0]))}</b> (${mapCell(sel[0])}) → <b>${esc(mapPlaceName(sel[1]))}</b> (${mapCell(sel[1])})</p>
+      <p class="small">Najkrótsza trasa: ${blocksText(n)}, czyli <b>${n * MIN_PER_CELL} min</b> (w każdą stronę tyle samo).</p>`;
+  }
+  return `
+  <section class="plan" aria-label="Plan miasta">
+    <header class="desk-head">
+      <h2>Plan Borowic</h2>
+      <p class="muted small">1 przecznica = ${MIN_PER_CELL} min · pinezki: miejsca z akt (karta ${mc.id}) · lupa: miejsce kradzieży</p>
+    </header>
+    <div class="town-wrap">${svg}</div>
+    <div class="plan-info" aria-live="polite">${info}${sel.length ? '<p><button class="link-btn" data-act="map-clear">Wyczyść wybór</button></p>' : ''}</div>
   </section>`;
 }
 
@@ -703,11 +764,11 @@ function renderTopbar() {
 }
 
 function renderTabs() {
-  const tabs = [{ id: 'akta', label: 'Akta' }, ...(state.mode === 'live' ? [{ id: 'table', label: `Stół ${state.live?.rs?.table.length ?? 0}` }] : []), ...myDesks().map((d) => ({ id: d, label: deskName(d) })), { id: 'notes', label: 'Notatki' }];
+  const tabs = [{ id: 'akta', label: 'Akta' }, ...(state.mode === 'live' ? [{ id: 'table', label: `Stół ${state.live?.rs?.table.length ?? 0}` }] : []), ...myDesks().map((d) => ({ id: d, label: deskName(d) })), ...(hasMapTab() ? [{ id: 'plan', label: 'Plan miasta' }] : []), { id: 'notes', label: 'Notatki' }];
   return `
   <nav class="tabs" aria-label="Biurka">
     <div class="tabs-inner">
-      ${tabs.map((t) => `<button class="tab${state.tab === t.id ? ' on' : ''}${t.id === 'akta' ? ' tab-akta' : ''}" data-act="tab" data-tab="${t.id}" aria-current="${state.tab === t.id ? 'page' : 'false'}">${esc(t.label)}${['akta', 'notes', 'table'].includes(t.id) ? '' : ` <span class="tab-n">${state.c.cards.filter((k) => k.desk === t.id).length}</span>`}</button>`).join('')}
+      ${tabs.map((t) => `<button class="tab${state.tab === t.id ? ' on' : ''}${t.id === 'akta' ? ' tab-akta' : ''}" data-act="tab" data-tab="${t.id}" aria-current="${state.tab === t.id ? 'page' : 'false'}">${esc(t.label)}${['akta', 'notes', 'table', 'plan'].includes(t.id) ? '' : ` <span class="tab-n">${state.c.cards.filter((k) => k.desk === t.id).length}</span>`}</button>`).join('')}
     </div>
   </nav>`;
 }
@@ -729,13 +790,13 @@ function renderGate() {
 function renderGame() {
   if (!progress.startedAt) return renderGate();
   const mine = myDesks();
-  if (!['akta', 'notes', 'table', ...mine].includes(state.tab) || (state.tab === 'table' && state.mode !== 'live')) state.tab = 'akta';
+  if (!['akta', 'notes', 'table', 'plan', ...mine].includes(state.tab) || (state.tab === 'table' && state.mode !== 'live') || (state.tab === 'plan' && !hasMapTab())) state.tab = 'akta';
   let right = state.tab;
   if (right === 'akta') right = mine[0];
-  const rightHtml = right === 'notes' ? renderNotes() : right === 'table' ? renderTable() : renderDesk(right);
+  const rightHtml = right === 'notes' ? renderNotes() : right === 'table' ? renderTable() : right === 'plan' ? renderPlan() : renderDesk(right);
   return `
   <div class="sticky-head">${renderTopbar()}${renderTabs()}</div>
-  <div class="game view-${state.tab === 'akta' ? 'akta' : 'other'}">
+  <div class="game view-${state.tab === 'akta' ? 'akta' : 'other'}${state.tab === 'plan' ? ' view-plan' : ''}">
     <div class="col-left">${renderAkta()}</div>
     <div class="col-right">${rightHtml}</div>
   </div>
@@ -1285,6 +1346,8 @@ function render() {
   const active = document.activeElement;
   const focusKey = app.contains(active) ? focusKeyOf(active) : null;
   const modalScroll = app.querySelector('.modal')?.scrollTop ?? 0;
+  const mapWrap = app.querySelector('.town-wrap');
+  const mapScroll = mapWrap ? [mapWrap.scrollLeft, mapWrap.scrollTop] : null;
   const caret = active && app.contains(active) && typeof active.selectionStart === 'number' ? [active.selectionStart, active.selectionEnd] : null;
   if (state.modal && !lastModal) modalOpener = focusKey;
   let html = '';
@@ -1301,6 +1364,18 @@ function render() {
   document.body.classList.toggle('in-game', state.screen === 'game');
   const head = app.querySelector('.sticky-head');
   if (head) document.documentElement.style.setProperty('--head-h', `${head.offsetHeight}px`);
+  // Plan miasta: przy odświeżeniu zostaje przewinięty tam, gdzie był; za pierwszym razem pokazuje miejsce kradzieży.
+  const wrap = app.querySelector('.town-wrap');
+  if (wrap && mapScroll) [wrap.scrollLeft, wrap.scrollTop] = mapScroll;
+  else if (wrap) {
+    const pin = wrap.querySelector('.t-scene');
+    if (pin) {
+      const r = pin.getBoundingClientRect();
+      const w = wrap.getBoundingClientRect();
+      wrap.scrollLeft += r.left + r.width / 2 - (w.left + w.width / 2);
+      wrap.scrollTop += r.top + r.height / 2 - (w.top + w.height / 2);
+    }
+  }
   const modal = app.querySelector('.modal');
   if (state.modal && state.modal !== lastModal) {
     modal?.querySelector('h2')?.focus({ preventScroll: true });
@@ -1386,6 +1461,15 @@ app.addEventListener('click', (e) => {
       window.scrollTo(0, 0);
       break;
     case 'goto-card': gotoCard(target.dataset.id); break;
+    case 'map-pick': {
+      const key = target.dataset.place;
+      const sel = state.mapSel || [];
+      if (sel.includes(key)) state.mapSel = sel.filter((x) => x !== key);
+      else state.mapSel = sel.length >= 2 ? [key] : [...sel, key];
+      render();
+      break;
+    }
+    case 'map-clear': state.mapSel = []; render(); break;
     case 'mark-sus': {
       const { id, v } = target.dataset;
       progress.sus[id] = progress.sus[id] === v ? '' : v;
@@ -1539,6 +1623,13 @@ app.addEventListener('input', (e) => {
 });
 
 document.addEventListener('keydown', (e) => {
+  if ((e.key === 'Enter' || e.key === ' ') && e.target.matches?.('g[data-act]')) {
+    e.preventDefault();
+    const place = e.target.dataset.place;
+    e.target.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    app.querySelector(`g[data-place="${place}"]`)?.focus();
+    return;
+  }
   if (e.key === 'Escape' && state.modal) {
     state.modal = null;
     state.confirm = null;

@@ -691,3 +691,64 @@ button.chip { cursor: pointer; }
 .log { margin: 0; padding-left: 1.4rem; display: grid; gap: 0.25rem; font-size: var(--step--1); max-height: 12rem; overflow-y: auto; }
 .table-item { display: grid; gap: 0.3rem; }
 .on-table { color: var(--ok); cursor: default; }
+
+/* ---------- Plan Borowic (mapa) ---------- */
+.town-wrap { background: var(--sheet); border: 1px solid var(--rule); border-radius: var(--radius); box-shadow: var(--shadow); overflow: auto; -webkit-overflow-scrolling: touch; max-height: 78vh; }
+/* Plan jest „wydrukowany”: ma własne, zawsze jasne kolory, także w ciemnym motywie. */
+.town { --m-ink: #29244f; --m-ink-soft: #5d5a7e; --m-paper: #fbfbf5; --m-olive: #56623f; --m-on-olive: #f4f5ec; --m-stamp: #b3261e; display: block; width: 100%; min-width: 760px; height: auto; font-family: var(--font-body); user-select: none; -webkit-user-select: none; }
+.town .m-land { fill: color-mix(in srgb, #e8dcc2 70%, var(--m-paper)); }
+.town .m-street-edge rect { fill: color-mix(in srgb, var(--m-ink) 22%, var(--m-paper)); }
+.town .m-street rect, .town .m-street-fill { fill: color-mix(in srgb, #fffdf6 85%, var(--m-paper)); }
+.town .m-yard { fill: color-mix(in srgb, #d9cba8 60%, var(--m-paper)); }
+.town .m-bldg { fill: color-mix(in srgb, #c98f6b 55%, var(--m-paper)); stroke: color-mix(in srgb, #8a5a3e 55%, var(--m-paper)); stroke-width: 0.8; }
+.town .m-house { fill: color-mix(in srgb, #c7a07e 60%, var(--m-paper)); }
+.town .m-civic { fill: color-mix(in srgb, #b07657 75%, var(--m-paper)); }
+.town .m-gap { stroke: color-mix(in srgb, #8a5a3e 55%, var(--m-paper)); stroke-width: 0.8; }
+.town .m-garden { fill: color-mix(in srgb, #b9c99a 55%, var(--m-paper)); }
+.town .m-park { fill: color-mix(in srgb, #8fb07a 70%, var(--m-paper)); }
+.town .m-tree { fill: color-mix(in srgb, #4f7a45 75%, var(--m-paper)); }
+.town .m-plaza { fill: color-mix(in srgb, #e9dfc9 80%, var(--m-paper)); stroke: color-mix(in srgb, #a89470 60%, var(--m-paper)); stroke-width: 0.8; stroke-dasharray: 2 2; }
+.town .m-cemetery { fill: color-mix(in srgb, #a9b99a 60%, var(--m-paper)); }
+.town .m-grave { fill: color-mix(in srgb, var(--m-ink) 35%, var(--m-paper)); }
+.town .m-water { fill: color-mix(in srgb, #7fb0d6 70%, var(--m-paper)); }
+.town .m-bridge { fill: color-mix(in srgb, var(--m-ink) 45%, var(--m-paper)); }
+.town .m-river-name { fill: color-mix(in srgb, #2f5d86 80%, var(--m-paper)); font: italic 600 11px var(--font-body); letter-spacing: 0.25em; }
+.town .m-rail { fill: none; stroke: color-mix(in srgb, var(--m-ink) 60%, var(--m-paper)); stroke-width: 2; }
+.town .m-rail-ties { fill: none; stroke: color-mix(in srgb, var(--m-ink) 60%, var(--m-paper)); stroke-width: 7; stroke-dasharray: 1.5 6; }
+.town .m-street-name { fill: color-mix(in srgb, var(--m-ink) 70%, var(--m-paper)); font: 500 7.5px var(--font-body); letter-spacing: 0.04em; }
+.town .m-street-name.main { font-weight: 700; font-size: 8.5px; }
+.town .m-index { fill: var(--m-ink-soft); font: 700 12px var(--font-display); }
+.town .m-frame { fill: none; stroke: color-mix(in srgb, var(--m-ink) 50%, var(--m-paper)); stroke-width: 1.2; }
+.town .t-place { cursor: pointer; }
+.town .t-dot { fill: color-mix(in srgb, #fffdf6 80%, var(--m-paper)); stroke: color-mix(in srgb, var(--m-ink) 45%, var(--m-paper)); stroke-width: 1; }
+.town .t-place:not(.on) .t-ico { color: color-mix(in srgb, var(--m-ink) 55%, var(--m-paper)); }
+.town .t-place:not(.on) .t-glyph { fill: color-mix(in srgb, var(--m-ink) 55%, var(--m-paper)); font-size: 10px; }
+.town .t-place:not(.on) .t-label { fill: color-mix(in srgb, var(--m-ink) 60%, var(--m-paper)); font-weight: 500; font-size: 8.5px; }
+.town .t-pin { fill: var(--m-ink); stroke: color-mix(in srgb, #fffdf6 85%, var(--m-paper)); stroke-width: 1.5; }
+.town .t-place.on .t-ico { color: #fffdf6; }
+.town .t-glyph { fill: #fffdf6; font: 700 13px var(--font-display); }
+.town .t-label { fill: var(--m-ink); font: 700 9.5px var(--font-body); paint-order: stroke; stroke: color-mix(in srgb, #fffdf6 85%, var(--m-paper)); stroke-width: 3px; stroke-linejoin: round; }
+.town .t-place.sel .t-pin, .town .t-place.sel .t-dot { fill: var(--m-olive); stroke: #fffdf6; }
+.town .t-place.sel .t-ico { color: var(--m-on-olive); }
+.town .t-place:focus { outline: none; }
+.town .t-place:focus-visible .t-pin, .town .t-place:focus-visible .t-dot, .town .t-scene:focus-visible path { stroke: var(--focus); stroke-width: 3; }
+.town .t-scene { cursor: pointer; }
+.town .t-scene path { fill: var(--m-stamp); stroke: #fffdf6; stroke-width: 1.8; }
+.town .t-scene-halo { fill: var(--m-stamp); opacity: 0.16; }
+.town .t-scene.sel path { stroke: var(--m-olive); stroke-width: 3; }
+.town .t-scene-ico { color: #fffdf6; }
+.town .t-scene-label { fill: var(--m-stamp); font: 700 11px var(--font-display); text-transform: uppercase; letter-spacing: 0.05em; paint-order: stroke; stroke: color-mix(in srgb, #fffdf6 85%, var(--m-paper)); stroke-width: 3.5px; stroke-linejoin: round; }
+.town .m-route-casing { fill: none; stroke: #fffdf6; stroke-width: 7; stroke-linecap: round; stroke-linejoin: round; }
+.town .m-route { fill: none; stroke: var(--m-olive); stroke-width: 4; stroke-dasharray: 8 5; stroke-linecap: round; stroke-linejoin: round; }
+.town .m-route-tag rect { fill: var(--m-olive); }
+.town .m-route-tag text { fill: var(--m-on-olive); font: 700 12px var(--font-display); letter-spacing: 0.03em; }
+/* Zakładka „Plan miasta”: na szerokim ekranie plan zajmuje całą szerokość. */
+@media (min-width: 60rem) {
+  .game.view-plan { grid-template-columns: minmax(0, 1fr); }
+  .game.view-plan .col-left { display: none; }
+}
+.plan .town-wrap { margin-top: 0.5rem; }
+.plan-info { margin-top: 0.75rem; padding: 0.75rem 0.9rem; background: var(--sheet); border: 1px solid var(--rule); border-radius: var(--radius); }
+.plan-info p { margin: 0.2rem 0; }
+.plan-place { font-size: var(--step-1); }
+.ico { width: 1em; height: 1em; vertical-align: -0.15em; }
