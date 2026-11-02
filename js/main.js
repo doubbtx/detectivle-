@@ -408,6 +408,7 @@ function renderHow() {
       <li>Pięcioro podejrzanych ma alibi. Jedno z nich jest fałszywe: sprawca dostarczył <b>dokładnie jeden sfałszowany dowód</b>.</li>
       <li>Dowody leżą na pięciu biurkach: Dokumenty, Świadkowie, Mapa i rozkłady, Zdjęcia, Rejestry. Fałszywkę zawsze obala karta z <b>innego</b> biurka.</li>
       <li>Część kart urzędowych (rozkłady, rejestry, nagrania z kamer, pogoda) jest <b>zapieczętowana</b>. Widzisz tylko tytuł i czynność, np. „Pobierz rozkład jazdy” (30 min). Masz budżet godzin śledztwa, a nadgodziny dodają czas. Zlecaj tylko to, co może coś wyjaśnić.</li>
+      <li>Od środy fałszywka zgadza się z rozkładami i rejestrami. Zdradza ją dopiero to, że ktoś był wtedy gdzie indziej i nie zdążyłby dotrzeć. W weekend dowody mogą dotyczyć dwóch osób naraz.</li>
       <li>Liczcie czasy. Jeśli kogoś widziano o 19:40 w teatrze, a z teatru na miejsce zbrodni najszybciej dociera się w 25 minut, to nie mógł być w środku o 19:52.</li>
       <li>Na koniec składasz <b>raport z dochodzenia</b>: sfałszowany dowód, karta, która go obala, i co ta karta pokazuje. Kto dostarczył fałszywkę, ten jest sprawcą. Masz ${CONFIG.maxAttempts} próby, każda pomyłka to +${fmtPenalty(CONFIG.wrongPenalty)}, a podpowiedź +${fmtPenalty(CONFIG.hintPenalty)}. Za trafny powód, potwierdzone alibi pozostałych i trafienie za pierwszym razem raport dostaje gwiazdki.</li>
       <li><b>Z ekipą:</b> każdy otwiera grę na swoim telefonie i wybiera inny numer gracza. Każdy widzi tylko swoje biurka, więc musicie rozmawiać (na Discordzie, przez telefon albo przy stole). Oskarżenie składa kapitan, czyli gracz 1.</li>
@@ -755,9 +756,9 @@ function hintTexts() {
     out.push(`${isTeamLike() ? 'Zacznijcie' : 'Zacznij'} od czasów dotarcia na biurku „Mapa i rozkłady”.`);
   }
   const forged = sol.explain.forged;
-  const refDesk = cardById(forged.refs.find((r) => r !== forged.card))?.desk;
+  const refDesk = cardById((forged.proofRefs || forged.refs).find((r) => r !== forged.card))?.desk;
   out.push(`Fałszywkę obala karta z biurka „${deskName(refDesk)}”.${isTeamLike() ? ` Ma je gracz ${seatOfDesk(refDesk)}.` : ''}`);
-  const keyRef = forged.refs.find((r) => r !== forged.card);
+  const keyRef = (forged.proofRefs || forged.refs).find((r) => r !== forged.card);
   out.push(`${isTeamLike() ? 'Porównajcie' : 'Porównaj'} dokładnie kartę ${keyRef} z dowodami dostarczonymi przez podejrzanych.`);
   return out;
 }
@@ -851,7 +852,7 @@ function renderModal() {
 
 function proofSet() {
   const f = state.sol.explain.forged;
-  return new Set(f.refs.filter((r) => r !== f.card));
+  return new Set((f.proofRefs || f.refs).filter((r) => r !== f.card));
 }
 
 function forgedKind(card) {

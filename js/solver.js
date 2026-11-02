@@ -237,6 +237,8 @@ export function solveCase(c) {
 
   const evaluated = claims.map((cl) => {
     const e = evaluate(cl);
+    // Wspólny dowód (np. zdjęcie dwóch osób) dotyczy też osób z listy `with`.
+    e.with = Array.isArray(cl.with) ? cl.with.filter((id) => suspects.has(id)) : [];
     // Prawdziwy bilet kolejowy oznacza, że po odjeździe tej osoby nie było już w mieście.
     e.events = e.sightings.map((x) => ({ ...x, refs: [e.card] }));
     if (cl.kind === 'train' && !e.contradicted && !e.unknown) e.events.push({ place: AWAY, from: cl.time + 1, to: FAR, refs: [e.card] });
@@ -288,7 +290,7 @@ export function solveCase(c) {
   function trueEvents(who, falseCards) {
     const skip = falseCards instanceof Set ? falseCards : new Set([falseCards]);
     const evs = [...(neutralEvents.get(who) || [])];
-    for (const e of evaluated) if (e.who === who && !skip.has(e.card)) evs.push(...e.events);
+    for (const e of evaluated) if ((e.who === who || e.with.includes(who)) && !skip.has(e.card)) evs.push(...e.events);
     return evs;
   }
 
@@ -316,7 +318,7 @@ export function solveCase(c) {
       if (lies.some((e) => e.who === sus.id || givesAlibi(e))) continue;
       const falseCards = new Set([forged.card, ...lies.map((e) => e.card)]);
       if (neutralClears.has(sus.id)) continue;
-      const ownTrue = evaluated.filter((e) => e.who === sus.id && !falseCards.has(e.card));
+      const ownTrue = evaluated.filter((e) => (e.who === sus.id || e.with.includes(sus.id)) && !falseCards.has(e.card));
       if (ownTrue.some((e) => givesAlibi(e))) continue;
       // Każda osoba musi dać się fizycznie „przeprowadzić” przez wszystkie swoje prawdziwe pobyty,
       // a sprawca dodatkowo przez pobyt na miejscu zbrodni.
@@ -336,21 +338,61 @@ export function solveCase(c) {
   const explain = { suspects: {}, forged: null, lies: [] };
   if (unique) {
     const f = byCard.get(unique.forged);
-    explain.forged = { card: f.card, kind: f.kind, reason: f.reason, reasonCodes: f.reasonCodes, refs: [f.card, ...f.refs] };
+    explain.forged = { card: f.card, kind: f.kind, reason: f.reason, reasonCodes: f.reasonCodes, refs: [f.card, ...f.refs], proofRefs: [...f.refs], physical: false };
     explain.lies = evaluated.filter((e) => e !== f && e.contradicted).map((e) => {
       const s0 = e.sightings[0];
       const tr = travel.get(s0.place);
       return { card: e.card, who: e.who, kind: e.kind, reason: e.reason, reasonCodes: e.reasonCodes, refs: [e.card, ...e.refs], place: s0.place, from: s0.from, to: s0.to, travel: tr?.min, travelRef: tr?.ref };
     });
     const lieCards = new Set(explain.lies.map((x) => x.card));
+    if (!f.contradicted) explainPhysical(f, new Set([f.card, ...lieCards]));
     for (const sus of c.suspects) {
       if (sus.id === unique.culprit) continue;
       const items = [];
       for (const n of neutralClears.get(sus.id) || []) items.push({ type: 'neutral', ...n });
-      for (const e of evaluated.filter((x) => x.who === sus.id && !lieCards.has(x.card))) {
+      for (const e of evaluated.filter((x) => (x.who === sus.id || x.with.includes(sus.id)) && !lieCards.has(x.card) && x !== f)) {
         for (const cl of clearingFrom(e.sightings, [e.card])) items.push({ type: 'supplied', note: e.okNote, ...cl });
       }
       explain.suspects[sus.id] = items;
+    }
+  }
+
+  /** Fałszywka zgodna z tabelami: szukamy pobytu, którego nie da się z nią pogodzić. */
+  function explainPhysical(f, falseCards) {
+    const people = [f.who, ...f.with];
+    // Ile różnych kart (poza czasami dotarcia) obala fałszywkę: w dobrej sprawie dokładnie jedna.
+    const proofSets = new Set();
+    for (const pid of people) {
+      for (const e of f.events) for (const o of trueEvents(pid, falseCards)) if (conflict(e, o)) proofSets.add(o.refs.join('+'));
+    }
+    for (const pid of people) {
+      const person = suspects.get(pid);
+      const gp = (m, fm) => (person.f ? fm : m);
+      for (const e of f.events) {
+        for (const o of trueEvents(pid, falseCards)) {
+          if (!conflict(e, o)) continue;
+          const when = (x) => (x.from === x.to ? `o ${fmt(x.from)}` : `od ${fmt(x.from)} do ${fmt(x.to)}`);
+          const oRefs = o.refs.filter(Boolean);
+          let reason;
+          const travelRefs = [];
+          if (e.place === AWAY) {
+            reason = `według dowodu [${f.card}] ${person.full} ${gp('wyjechał', 'wyjechała')} pociągiem o ${fmt(e.from - 1)}, a karta ${oRefs.map((r) => `[${r}]`).join(' i ')} pokazuje tę osobę ${placeLoc(o.place)} ${when(o)}, kiedy już nie ${gp('powinien', 'powinna')} być w mieście`;
+          } else {
+            const ta = travel.get(e.place);
+            const tb = travel.get(o.place);
+            if (ta) travelRefs.push(ta.ref);
+            if (tb && tb.ref !== ta?.ref) travelRefs.push(tb.ref);
+            const D = ta && tb ? Math.abs(ta.min - tb.min) : null;
+            reason = `według karty ${oRefs.map((r) => `[${r}]`).join(' i ')} ${person.full} ${gp('był', 'była')} ${placeLoc(o.place)} ${when(o)}, a dowód [${f.card}] umieszcza tę osobę ${placeLoc(e.place)} ${when(e)}`
+              + (D !== null ? `; między tymi miejscami jest co najmniej ${D} min drogi (czasy dotarcia ${ta.min} i ${tb.min} min [${[...new Set(travelRefs)].join(', ')}])` : '');
+          }
+          explain.forged = {
+            card: f.card, kind: f.kind, reason, reasonCodes: [pid === f.who ? 'physical' : 'physical-other'],
+            refs: [f.card, ...oRefs, ...new Set(travelRefs)], proofRefs: oRefs, physical: true, about: pid, proofCount: proofSets.size,
+          };
+          return;
+        }
+      }
     }
   }
 
@@ -397,7 +439,14 @@ export function qualityIssues(c, res = solveCase(c)) {
   const lieSet = new Set(res.explain.lies.map((x) => x.card));
   const storyEvents = [...res.trueEvents(c.solution.culprit, new Set([c.solution.forged, ...lieSet])), ...forged.sightings.map((x) => ({ ...x, refs: [forged.card] }))];
   if (forged.kind === 'train') storyEvents.push({ place: '@poza-miastem', from: forged.sightings[0].from + 1, to: 100000, refs: [forged.card] });
-  if (res.firstConflict(storyEvents)) issues.push('fałszywkę obala też fizyczna sprzeczność z innym pobytem sprawcy');
+  const mode = c.forgeMode || 'table';
+  if (mode === 'table' && res.firstConflict(storyEvents)) issues.push('fałszywkę obala też fizyczna sprzeczność z innym pobytem sprawcy');
+  if (mode !== 'table') {
+    if (forged.contradicted) issues.push('fałszywka fizyczna nie powinna kłócić się z tabelą');
+    if (!res.explain.forged.physical) issues.push('brak fizycznej sprzeczności obalającej fałszywkę');
+    else if (res.explain.forged.proofCount !== 1) issues.push(`fałszywkę obala ${res.explain.forged.proofCount} różnych kart`);
+    if (mode === 'cross' && res.explain.forged.about === c.solution.culprit) issues.push('alibi krzyżowe powinno obalać pobyt innej osoby');
+  }
   // Prawdziwe karty nie mogą sobie przeczyć: świadek w lokalu tylko w godzinach otwarcia.
   const dtq = dayType(c.crimeDate.weekday);
   const hoursRows = c.cards.flatMap((k) => (k.facts || []).filter((f) => f.t === 'hours'));
@@ -423,10 +472,16 @@ export function qualityIssues(c, res = solveCase(c)) {
   // Współpraca: sfałszowana karta i karta, która ją obala, muszą być u różnych graczy.
   const deskOf = (id) => c.cards.find((k) => k.id === id)?.desk;
   const forgedDesk = deskOf(c.solution.forged);
-  const refDesks = forged.refs.map(deskOf);
+  const refDesks = res.explain.forged.refs.filter((r) => r !== c.solution.forged).map(deskOf);
   for (const size of [2, 3, 4, 5]) {
     const seatOf = (desk) => TEAM_DESKS[size].findIndex((ds) => ds.includes(desk));
     if (!refDesks.some((d) => seatOf(d) !== seatOf(forgedDesk))) issues.push(`przy ${size} graczach jedna osoba ma i fałszywkę, i jej obalenie`);
+  }
+  // Bez kart obalających fałszywkę sprawa nie może być rozwiązywalna (brak skrótu przez samo wykluczanie).
+  const proof = new Set(res.explain.forged.proofRefs || []);
+  if (proof.size) {
+    const without = solveCase({ ...c, cards: c.cards.filter((k) => !proof.has(k.id)) });
+    if (without.consistent.length === 1) issues.push('sprawa rozwiązywalna bez karty obalającej fałszywkę');
   }
   for (const desk of ['D', 'S', 'M', 'Z', 'R']) {
     if (!c.cards.some((k) => k.desk === desk)) issues.push(`puste biurko ${desk}`);
@@ -473,4 +528,15 @@ export function investigationBudget(c, desks) {
   const minimal = sum(inv.minimalPerDesk);
   const k = 0.7 - 0.05 * (c.difficulty || 4);
   return Math.max(60, Math.ceil((minimal + k * (need - minimal)) / 30) * 30);
+}
+
+/**
+ * Głębokość dowodu: ile różnych kart trzeba zestawić, żeby udowodnić rozwiązanie
+ * (fałszywka + karty, które ją obalają, łącznie z czasami dotarcia; plus kłamstwo niewinnej
+ * osoby i jego obalenie). 2 = jedno sprawdzenie w tabeli, 5+ = łańcuch wniosków.
+ */
+export function proofDepth(res) {
+  if (!res.explain.forged) return 0;
+  const lie = res.explain.lies?.[0];
+  return new Set(res.explain.forged.refs).size + (lie ? new Set([...lie.refs, lie.travelRef].filter(Boolean)).size : 0);
 }

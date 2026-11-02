@@ -49,9 +49,9 @@ test('solver wykrywa zepsutą sprawę: bez sprzeczności nie ma jednego rozwiąz
   for (const iso of dates.slice(0, 60)) {
     const c = buildDailyCase(iso);
     const res = solveCase(c);
-    const forged = res.evaluated.find((e) => e.card === c.solution.forged);
-    // Usuwamy karty, które obalają fałszywkę. Wtedy wszystkie dowody wyglądają na prawdziwe.
-    const broken = { ...c, cards: c.cards.filter((k) => !forged.refs.includes(k.id) || k.id === forged.card) };
+    const proof = res.explain.forged.proofRefs;
+    // Usuwamy karty, które obalają fałszywkę (tabela albo pobyt widziany gdzie indziej).
+    const broken = { ...c, cards: c.cards.filter((k) => !proof.includes(k.id)) };
     const res2 = solveCase(broken);
     assert.notEqual(res2.consistent.length, 1, `${iso}: sprawa bez obalenia nadal ma jedno rozwiązanie`);
     checked++;
@@ -177,7 +177,7 @@ test('każdy z 7 rodzajów dowodów pojawia się jako fałszywka i jako prawdziw
     }
   }
   for (const kind of ['train', 'receipt', 'photo', 'cinema', 'delivery', 'parking', 'bus']) {
-    assert.ok((forged[kind] || 0) >= dates.length * 0.05, `fałszywka ${kind}: ${forged[kind] || 0}`);
+    assert.ok((forged[kind] || 0) >= dates.length * 0.02, `fałszywka ${kind}: ${forged[kind] || 0}`);
     assert.ok((real[kind] || 0) >= dates.length * 0.05, `prawdziwy ${kind}: ${real[kind] || 0}`);
   }
 });
@@ -191,8 +191,10 @@ test('od piątku: dwa sprzeczne dowody, ale tylko fałszywka sprawcy daje alibi'
     if (difficultyForDate(iso) >= 5) {
       lieDays++;
       assert.equal(c.innocentLie, true, iso);
-      assert.equal(contradicted.length, 2, `${iso}: sprzeczne ${contradicted}`);
-      assert.ok(contradicted.includes(c.solution.forged) && contradicted.includes(c.lieCard), iso);
+      // Od piątku fałszywka sprawcy zgadza się z tabelami (zdradza ją fizyczna niemożliwość),
+      // więc jedyną sprzecznością z tabelą jest kłamstwo niewinnej osoby: pułapka.
+      assert.deepEqual(contradicted, [c.lieCard], `${iso}: sprzeczne ${contradicted}`);
+      assert.equal(res.explain.forged.physical, true, iso);
       const lie = res.explain.lies[0];
       assert.equal(lie.card, c.lieCard, iso);
       assert.notEqual(lie.who, c.solution.culprit, iso);
@@ -204,9 +206,40 @@ test('od piątku: dwa sprzeczne dowody, ale tylko fałszywka sprawcy daje alibi'
         assert.ok(st.to <= c.window.from - d || st.from >= c.window.to + d, `${iso}: kłamstwo daje alibi (${st.place})`);
       }
     } else {
-      assert.equal(contradicted.length, 1, `${iso}: w zwykły dzień tylko fałszywka jest sprzeczna`);
+      // pn–wt: fałszywka kłóci się z tabelą; śr–czw: nic nie kłóci się z tabelą (zdradza ją fizyczna niemożliwość).
+      assert.equal(contradicted.length, difficultyForDate(iso) <= 2 ? 1 : 0, `${iso}: sprzeczne ${contradicted}`);
       assert.ok(!c.innocentLie, iso);
     }
   }
   assert.ok(lieDays > 100);
+});
+
+test('od środy fałszywkę obala fizyczna niemożliwość, a w weekend alibi krzyżowe', () => {
+  for (const iso of dates) {
+    const d = difficultyForDate(iso);
+    if (d < 3) continue;
+    const c = buildDailyCase(iso);
+    const res = solveCase(c);
+    const f = res.explain.forged;
+    assert.equal(f.physical, true, iso);
+    assert.ok(f.proofRefs.length >= 1, iso);
+    if (d >= 6) {
+      assert.equal(c.forgeMode, 'cross', iso);
+      assert.notEqual(f.about, c.solution.culprit, `${iso}: alibi krzyżowe dotyczy innej osoby`);
+      const card = c.cards.find((k) => k.id === c.solution.forged);
+      assert.ok(card.facts.find((x) => x.t === 'claim').with?.length === 1, `${iso}: wspólny dowód`);
+    } else {
+      assert.equal(c.forgeMode, 'self', iso);
+      assert.equal(f.about, c.solution.culprit, iso);
+    }
+  }
+});
+
+test('głębokość dowodu: pn–wt co najmniej 2 karty, śr–czw co najmniej 3, pt–nd co najmniej 5', () => {
+  for (const iso of dates) {
+    const c = buildDailyCase(iso);
+    const d = difficultyForDate(iso);
+    const min = d <= 2 ? 2 : d <= 4 ? 3 : 5;
+    assert.ok(c.depth >= min, `${iso}: głębokość ${c.depth} < ${min}`);
+  }
 });

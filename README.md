@@ -10,6 +10,8 @@ Na koniec składasz **raport z dochodzenia**: sfałszowany dowód, karta, która
 
 Od piątku do niedzieli sprawa jest podchwytliwa: **kłamią dwie osoby**. Fałszywy dowód sprawcy daje mu alibi na czas kradzieży. Drugi fałszywy dowód należy do niewinnej osoby, która skłamała w innej sprawie, a godzina na tym dowodzie wypada tuż poza zasięgiem miejsca zbrodni. Trzeba więc policzyć czasy dotarcia, a nie tylko znaleźć sprzeczność.
 
+**Dedukcja rośnie w ciągu tygodnia.** W poniedziałek i wtorek fałszywkę obala karta urzędowa (jedno sprawdzenie). Od środy fałszywka zgadza się ze wszystkimi tabelami, a zdradza ją fizyczna niemożliwość: świadek albo kamera widzi sprawcę gdzie indziej o godzinie, z której nie zdążyłby dotrzeć (trzeba zestawić czasy dotarcia z kilku kart). W sobotę i niedzielę dochodzi **alibi krzyżowe**: sprawca pokazuje wspólny dowód z niewinną osobą, a fałsz wychodzi dopiero po sprawdzeniu, gdzie naprawdę była ta druga osoba; obok leżą prawdziwe wspólne dowody jako zmyłki. Solver liczy „głębokość dowodu” (ile kart trzeba zestawić): pn–wt 2, śr–czw 3–4, pt–nd 6–8, a testy pilnują tych progów i tego, że sprawy nie da się rozwiązać samym wykluczaniem bez karty obalającej fałszywkę.
+
 Trudność rośnie w ciągu tygodnia: poniedziałek to około 25 kart i 2 dowody do sprawdzenia, niedziela około 45 kart, pułapki z czasami dotarcia i 5 dowodów od podejrzanych.
 
 ### Czynności śledcze

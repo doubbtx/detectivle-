@@ -26,6 +26,8 @@ function confession(code, p, weekday) {
     'bus-after-last': `Bilet ${g('skasowałem', 'skasowałam')} kiedy indziej i ${g('przerobiłem', 'przerobiłam')} godzinę. Nie ${g('wiedziałem', 'wiedziałam')}, że ostatni autobus odjechał wcześniej.`,
     'bus-no-departure': `Bilet ${g('skasowałem', 'skasowałam')} kiedy indziej i ${g('przerobiłem', 'przerobiłam')} godzinę. O tej porze żaden autobus stamtąd nie odjeżdżał.`,
   };
+  T.physical = `Ten dowód ${g('przygotowałem', 'przygotowałam')} wcześniej. Nie ${g('przewidziałem', 'przewidziałam')}, że ktoś zobaczy mnie wtedy zupełnie gdzie indziej.`;
+  T['physical-other'] = `${g('Myślałem', 'Myślałam')}, że wspólny dowód będzie mocniejszy. Nie ${g('wiedziałem', 'wiedziałam')}, że tej drugiej osoby nikt nie musi kryć, bo ma własne alibi.`;
   return T[code] || `Ten dowód ${g('podrobiłem', 'podrobiłam')}, żeby mieć alibi.`;
 }
 
@@ -50,7 +52,7 @@ export function buildEpilogue(c, sol, outcome) {
   const culprit = c.suspects.find((s) => s.id === c.solution.culprit);
   const g = (m, f) => (culprit.f ? f : m);
   const forged = c.cards.find((k) => k.id === c.solution.forged);
-  const proofId = sol.explain.forged.refs.find((r) => r !== forged.id);
+  const proofId = (sol.explain.forged.proofRefs || sol.explain.forged.refs).find((r) => r !== forged.id);
   const proof = c.cards.find((k) => k.id === proofId);
   const code = sol.explain.forged.reasonCodes?.[0];
   const arrestLoc = rng.pick(['w domu', 'w drodze do pracy', 'przed swoim blokiem', `na dworcu, z biletem w jedną stronę w kieszeni`]);

@@ -15,13 +15,13 @@ import {
   fmt, fmtHour, addDays, weekdayOf, dayType, dateLong, dateShort, sunsetFor, daysBetween,
   WEEKDAYS, WEEKDAYS_ACC, isSummerTime,
 } from './time.js';
-import { solveCase, qualityIssues, investigationProfile } from './solver.js';
+import { solveCase, qualityIssues, investigationProfile, proofDepth } from './solver.js';
 
 /**
  * Wersja generatora. Podbij ją przy każdej zmianie, która zmienia treść spraw.
  * Opublikowane sprawy (cases/*.json) i tak się nie zmienią, bo gra czyta je z plików.
  */
-export const GENERATOR_VERSION = 5;
+export const GENERATOR_VERSION = 6;
 
 /** Krótki „odcisk” sprawy: 4 znaki, po których ekipa sprawdza, że ma te same akta. */
 export function caseFingerprint(c) {
@@ -65,6 +65,12 @@ function params(diff) {
     noiseTableChance: 0.25 + diff * 0.08,
     // Od piątku jedna niewinna osoba też kłamie (ale jej kłamstwo nie daje alibi).
     innocentLie: diff >= 5,
+    // Jak zdradza się fałszywka: 'table' – sprzeczność z tabelą urzędową; 'self' – sprawcę widziano
+    // wtedy gdzie indziej (fizyczna niemożliwość); 'cross' – fałszywka obejmuje niewinną osobę,
+    // której prawdziwy pobyt temu przeczy (alibi krzyżowe).
+    forgeMode: diff <= 2 ? 'table' : diff <= 5 ? 'self' : 'cross',
+    // Prawdziwy wspólny dowód dwóch niewinnych osób (zmyłka: wspólny dowód nie musi być fałszywką).
+    jointDecoyChance: diff >= 6 ? 1 : diff >= 3 ? 0.5 : 0,
   };
 }
 
@@ -124,6 +130,7 @@ export function buildCase(opts) {
       c.attempt = attempt;
       c.generatorVersion = GENERATOR_VERSION;
       c.investigation = investigationProfile(c, res);
+      c.depth = proofDepth(res);
       c.fingerprint = caseFingerprint(c);
       return c;
     }
@@ -219,7 +226,10 @@ function generate(rng, opts) {
     if (dx === undefined || dy === undefined) return false;
     return y.from - x.to < Math.abs(dx - dy) + margin;
   };
-  const fits = (sid, evs) => evs.every((e, i) => events[sid].every((o) => !clash(e, o, 4)) && evs.slice(i + 1).every((f) => !clash(e, f, 4)));
+  // `avoid`: pobyty, z którymi nowe dowody danej osoby nie mogą kolidować (np. fałszywy wspólny dowód,
+  // żeby fałszywkę obalała dokładnie jedna karta).
+  const avoid = {};
+  const fits = (sid, evs) => evs.every((e, i) => events[sid].every((o) => !clash(e, o, 4)) && (avoid[sid] || []).every((o) => !clash(e, o, 4)) && evs.slice(i + 1).every((f) => !clash(e, f, 4)));
 
   const cards = [];
   const addCard = (card) => {
@@ -287,9 +297,24 @@ function generate(rng, opts) {
     return rng.pick(choices)();
   };
 
-  function makeClaim(kind, s, forged, noAlibi = false) {
+  function makeClaim(kind, s, forged, noAlibi = false, opts = {}) {
     let evs = [];
-    const tPick = (place, lo, hi) => (noAlibi ? nearOut(place) : timeIn(place, lo, hi));
+    const withP = opts.withP || null;
+    const tPick = (place, lo = 18 * 60, hi = 23 * 60) => {
+      if (noAlibi) return nearOut(place);
+      if (opts.mustConflict) {
+        // Godzina, która daje alibi, a jednocześnie nie da się jej pogodzić z prawdziwym pobytem osoby z dowodu.
+        const E = opts.mustConflict[0];
+        const D = Math.abs(travel[place] - travel[E.place]);
+        if (E.place === place || D < 10) retry();
+        const [a, b] = clearRange(place);
+        const from = Math.max(a, lo, E.from - (D - 5));
+        const to = Math.min(b, hi, E.to + (D - 5));
+        if (from > to) retry();
+        return rng.int(from, to);
+      }
+      return timeIn(place, lo, hi);
+    };
     let card;
     const by = s.id;
     switch (kind) {
@@ -340,7 +365,8 @@ function generate(rng, opts) {
           hours[dt] = [rng.pick([8, 9, 10]) * 60, Math.floor((t - rng.int(8, 60)) / 30) * 30];
         }
         T.hours.push({ place, ...hours });
-        const items = VENUE_ITEMS[place] || [['Usługa', '10,00']];
+        const baseItems = VENUE_ITEMS[place] || [['Usługa', '10,00']];
+        const items = withP ? baseItems.map(([n, pr]) => [`2× ${n}`, (Number(pr.replace(',', '.')) * 2).toFixed(2).replace('.', ',')]) : baseItems;
         const total = items.reduce((sum, [, price]) => sum + Number(price.replace(',', '.')), 0);
         card = addCard({
           desk: 'D', kind: 'supplied', by, title: 'Paragon fiskalny',
@@ -350,11 +376,12 @@ function generate(rng, opts) {
             `${dShort} godz. ${fmt(t)}`,
             ...items.map(([n, pr]) => `${n} ${pr}`),
             `SUMA PLN ${total.toFixed(2).replace('.', ',')}`,
+            ...(withP ? [`Rachunek na 2 osoby (${s.first} i ${withP.first})`] : []),
           ],
-          facts: [{ t: 'claim', kind, who: by, place, time: t }],
+          facts: [{ t: 'claim', kind, who: by, place, time: t, ...(withP ? { with: [withP.id] } : {}) }],
         });
         evs = [{ place, from: t, to: t }];
-        card.alibi = (id) => `Twierdzi, że ${g(s, 'był', 'była')} ${PLACES[place].loc} (paragon: ${id}).`;
+        card.alibi = (id) => `Twierdzi, że ${g(s, 'był', 'była')} ${PLACES[place].loc}${withP ? ` razem z ${withP.ins}` : ''} (paragon: ${id}).`;
         break;
       }
       case 'photo': {
@@ -404,20 +431,20 @@ function generate(rng, opts) {
           desk: 'Z', kind: 'supplied', by, title: 'Zdjęcie z telefonu',
           lines: [
             `${PLACES[place].name} · metadane pliku: ${dShort}, ${fmt(t)}`,
-            `Na zdjęciu: ${s.first} ${rng.pick(PHOTO_POSES)}.`,
+            withP ? `Na zdjęciu: ${s.first} i ${withP.first} ${rng.pick(['uśmiechają się do obiektywu przy fontannie', 'pozują na tle ratusza', 'stoją przy barierce', 'trzymają kubki z herbatą'])}.` : `Na zdjęciu: ${s.first} ${rng.pick(PHOTO_POSES)}.`,
             `W tle: ${skyText}; ${groundText}.`,
           ],
-          facts: [{ t: 'claim', kind, who: by, place, time: t, sky, ground }],
+          facts: [{ t: 'claim', kind, who: by, place, time: t, sky, ground, ...(withP ? { with: [withP.id] } : {}) }],
         });
         evs = [{ place, from: t, to: t }];
-        card.alibi = (id) => `Twierdzi, że ${g(s, 'spacerował', 'spacerowała')} ${PLACES[place].walk} (zdjęcie: ${id}).`;
+        card.alibi = (id) => `Twierdzi, że ${g(s, 'spacerował', 'spacerowała')} ${PLACES[place].walk}${withP ? ` razem z ${withP.ins}` : ''} (zdjęcie: ${id}).`;
         break;
       }
       case 'cinema': {
         usedPlaces.add('kino');
         taken.add('kino');
         const film = rng.pick(FILMS.filter((f) => !T.films.some((x) => x.film === f)));
-        const start = round5(timeIn('kino', 18 * 60, 21 * 60 + 30));
+        const start = round5(tPick('kino', 18 * 60, 21 * 60 + 30));
         const dur = rng.int(95, 135);
         let starts;
         if (!forged) {
@@ -433,12 +460,14 @@ function generate(rng, opts) {
             `Kino „Mewa” · sala ${rng.int(1, 3)}`,
             `„${film}”`,
             `${dShort} · seans ${fmt(start)}`,
-            `rząd ${rng.pick(['C', 'D', 'E', 'F', 'G', 'H'])}, miejsce ${rng.int(3, 18)} · 24,00 zł`,
+            withP
+              ? `2 bilety: rząd ${rng.pick(['C', 'D', 'E', 'F', 'G', 'H'])}, miejsca ${rng.int(3, 9)} i ${rng.int(10, 16)} · 48,00 zł`
+              : `rząd ${rng.pick(['C', 'D', 'E', 'F', 'G', 'H'])}, miejsce ${rng.int(3, 18)} · 24,00 zł`,
           ],
-          facts: [{ t: 'claim', kind, who: by, film, start }],
+          facts: [{ t: 'claim', kind, who: by, film, start, ...(withP ? { with: [withP.id] } : {}) }],
         });
         evs = [{ place: 'kino', from: start, to: start + dur }];
-        card.alibi = (id) => `Twierdzi, że ${g(s, 'był', 'była')} w kinie „Mewa” na filmie „${film}” (bilet: ${id}).`;
+        card.alibi = (id) => `Twierdzi, że ${g(s, 'był', 'była')} w kinie „Mewa”${withP ? ` razem z ${withP.ins}` : ''} na filmie „${film}” (bilet${withP ? 'y' : ''}: ${id}).`;
         break;
       }
       case 'delivery': {
@@ -568,6 +597,7 @@ function generate(rng, opts) {
       default:
         throw new Error(kind);
     }
+    if (opts.mustConflict && !evs.some((e) => opts.mustConflict.some((E) => clash(e, E, -4)))) retry();
     s.items.push(card);
     if (!s.claimCard) s.claimCard = card;
     return { card, events: evs };
@@ -597,6 +627,56 @@ function generate(rng, opts) {
   const TRAP_TEXT = (s, side, t) => (side === 'before'
     ? `„${pan(s)} ${s.first} ${g(s, 'wyszedł', 'wyszła')} od nas o ${fmt(t)}. ${g(s, 'Spieszył', 'Spieszyła')} się.”`
     : `„${pan(s)} ${s.first} ${g(s, 'przyszedł', 'przyszła')} do nas dopiero o ${fmt(t)}.”`);
+
+  /**
+   * Pułapka fizyczna: niezależny świadek albo kamera widzi sprawcę gdzie indziej o godzinie,
+   * której nie da się pogodzić z fałszywym dowodem (czasy dotarcia albo wyjazd pociągiem),
+   * a która sama nie daje alibi na czas kradzieży.
+   */
+  function makePhysicalTrap(s, forgedEvs) {
+    const others = events[s.id].filter((e) => !forgedEvs.includes(e));
+    for (let k = 0; k < 60; k++) {
+      const source = rng.pick(['witness', 'cctv']);
+      const options = Object.keys(PLACES).filter((key) => (source === 'witness' ? PLACES[key].witness : PLACES[key].cctv) && !taken.has(key));
+      if (!options.length) continue;
+      const place = rng.pick(options);
+      const d = travel[place];
+      const F = rng.pick(forgedEvs);
+      let t;
+      if (F.place === AWAY) {
+        t = rng.int(Math.max(F.from + 10, W2 + d + 3), F.from + 90);
+      } else {
+        const D = Math.abs(d - travel[F.place]);
+        if (place === F.place || D < 10) continue;
+        t = rng.int(F.from - (D - 5), F.to + (D - 5));
+      }
+      if (!(t <= W1 - d - 3 || t >= W2 + d + 3)) continue;
+      if (t < 17 * 60 || t > 23 * 60 + 30) continue;
+      const ev = { place, from: t, to: t };
+      if (!forgedEvs.some((f) => clash(ev, f, -4))) continue;
+      if (others.some((o) => clash(ev, o, 4))) continue;
+      taken.add(place);
+      usedPlaces.add(place);
+      if (source === 'witness') {
+        const w = nextWitness();
+        addCard({
+          desk: 'S', kind: 'witness', title: `Zeznanie: ${w.full}`,
+          sub: `${PLACES[place].witness[w.f ? 'f' : 'm']} ${PLACES[place].loc}`,
+          lines: [TRAP_TEXT(s, t < W1 ? 'before' : 'after', t)],
+          facts: [{ t: 'seen', who: s.id, place, from: t, to: t }],
+        });
+      } else {
+        addCard({
+          desk: 'Z', kind: 'official', title: 'Monitoring miejski',
+          lines: [`Kamera nr ${rng.int(2, 19)} · ${PLACES[place].name}`, `Nagranie z godz. ${fmt(t)}`, `Wyraźnie widać: ${s.full} ${rng.pick(CCTV_DETAILS)}.`],
+          facts: [{ t: 'seen', who: s.id, place, from: t, to: t }],
+        });
+      }
+      events[s.id].push(ev);
+      return;
+    }
+    retry();
+  }
 
   function makeNeutral(source, s, mode) {
     if (source === 'witness') {
@@ -668,20 +748,76 @@ function generate(rng, opts) {
   let kp = 0;
 
   const culprit = suspects[culpritIdx];
-  const forgedKind = kinds[kp++];
-  const forgedCard = attempt(culprit, () => makeClaim(forgedKind, culprit, true)).card;
+  const mode = P.forgeMode;
+  const JOINT_KINDS = ['receipt', 'photo', 'cinema'];
+  // Rodzaj dowodu zarezerwowany na fałszywkę krzyżową i na prawdziwy wspólny dowód (zmyłkę).
+  const crossKind = mode === 'cross' ? kinds.splice(kinds.findIndex((k) => JOINT_KINDS.includes(k)), 1)[0] : null;
+  const jointIdx = rng.chance(P.jointDecoyChance) ? kinds.findIndex((k) => JOINT_KINDS.includes(k)) : -1;
+  const jointKind = jointIdx >= 0 ? kinds.splice(jointIdx, 1)[0] : null;
+  const neutralPlace = {};
+  let forgedCard;
+  let forgedEvents = [];
+  if (mode === 'cross') {
+    // Alibi krzyżowe: sprawca pokazuje wspólny dowód z niewinną osobą Y, a prawdziwy pobyt Y temu przeczy.
+    const forgedKind = crossKind;
+    const yIdx = rng.pick(neutralIdx);
+    const Y = suspects[yIdx];
+    neutralPlace[yIdx] = attempt(Y, () => makeNeutral(rng.pick(['witness', 'witness', 'cctv', 'cardlog']), Y, 'clear')).place;
+    const yEvents = events[Y.id].slice();
+    const res = attempt(culprit, () => makeClaim(forgedKind, culprit, false, false, { withP: Y, mustConflict: yEvents }));
+    forgedCard = res.card;
+    forgedEvents = res.events;
+    avoid[Y.id] = res.events;
+  } else {
+    // Przy fałszywce „fizycznej” pomijamy bilet kolejowy: „widziany po odjeździe” to tylko jedno porównanie.
+    if (mode === 'self' && kinds[kp] === 'train') {
+      const swap = kinds.findIndex((k, i) => i > kp && k !== 'train');
+      [kinds[kp], kinds[swap]] = [kinds[swap], kinds[kp]];
+    }
+    const forgedKind = kinds[kp++];
+    const res = attempt(culprit, () => makeClaim(forgedKind, culprit, mode === 'table'));
+    forgedCard = res.card;
+    forgedEvents = res.events;
+  }
   for (const i of decoyIdx) {
     const kind = kinds[kp++];
     attempt(suspects[i], () => makeClaim(kind, suspects[i], false));
   }
-  const neutralPlace = {};
   for (const i of neutralIdx) {
+    if (neutralPlace[i]) continue;
     neutralPlace[i] = attempt(suspects[i], () => makeNeutral(rng.pick(['witness', 'witness', 'cctv', 'cardlog']), suspects[i], 'clear')).place;
   }
   const extraIdx = neutralIdx.slice(0, P.extraTrueItems);
   for (const i of extraIdx) {
     const kind = kinds[kp++];
     attempt(suspects[i], () => makeClaim(kind, suspects[i], false));
+  }
+  // Prawdziwy wspólny dowód dwóch niewinnych osób.
+  let jointDone = false;
+  if (jointKind) {
+    const pool = innocents.filter((i) => !avoid[suspects[i].id]);
+    if (pool.length >= 2) {
+      const kind = jointKind;
+      for (let k = 0; k < 30; k++) {
+        const [ai, bi] = rng.sample(pool, 2);
+        const A = suspects[ai];
+        const B = suspects[bi];
+        const sn = snapshot();
+        try {
+          const res = makeClaim(kind, A, false, false, { withP: B });
+          if (fits(A.id, res.events) && fits(B.id, res.events)) {
+            events[A.id].push(...res.events);
+            events[B.id].push(...res.events);
+            jointDone = true;
+            break;
+          }
+          restore(sn, A);
+        } catch (e) {
+          if (!(e instanceof RetryError)) throw e;
+          restore(sn, A);
+        }
+      }
+    }
   }
   // Kłamstwo niewinnej osoby: fałszywy dowód, który i tak nie daje alibi na czas kradzieży.
   // Kłamca ma niezależne alibi od świadka, kamery albo rejestru.
@@ -692,7 +828,8 @@ function generate(rng, opts) {
     lieCard = attempt(liar, () => makeClaim(lieKind, liar, true, true)).card;
   }
   for (const i of rng.sample(innocents, P.traps)) attempt(suspects[i], () => makeNeutral(rng.pick(['witness', 'cctv', 'cardlog']), suspects[i], 'trap'));
-  if (P.culpritTrap) attempt(culprit, () => makeNeutral(rng.pick(['witness', 'witness', 'cctv', 'cardlog']), culprit, 'trap'));
+  if (mode === 'self') makePhysicalTrap(culprit, forgedEvents);
+  else if (P.culpritTrap) attempt(culprit, () => makeNeutral(rng.pick(['witness', 'witness', 'cctv', 'cardlog']), culprit, 'trap'));
 
   // --- Karty urzędowe ze wspólnych tabel --------------------------------------
   const wantTable = (has) => has || rng.chance(P.noiseTableChance);
@@ -1043,6 +1180,7 @@ function generate(rng, opts) {
     cards: publicCards,
     solution: { culprit: suspects[culpritIdx].id, forged: forgedCard.id },
     innocentLie: Boolean(lieCard),
+    forgeMode: mode,
     lieCard: lieCard ? lieCard.id : null,
   };
 }
