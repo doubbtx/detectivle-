@@ -93,8 +93,9 @@ body::before {
   inset: 0 0 auto;
   height: env(safe-area-inset-top, 0px);
   z-index: 30;
-  background: var(--sheet);
+  background: var(--paper);
 }
+body.in-game::before { background: var(--sheet); }
 
 h1, h2, h3, h4 { text-wrap: balance; margin: 0; }
 p { margin: 0; }
@@ -313,7 +314,7 @@ button { font: inherit; color: inherit; }
 .topbar-inner {
   max-width: 76rem;
   margin: 0 auto;
-  padding-left: max(8px, env(safe-area-inset-left, 0px));
+  padding-left: max(16px, env(safe-area-inset-left, 0px));
   padding-right: max(16px, env(safe-area-inset-right, 0px));
   padding-block: 0.4rem;
   display: grid;

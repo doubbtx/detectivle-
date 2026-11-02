@@ -856,6 +856,7 @@ function render() {
     default: html = renderHome();
   }
   app.innerHTML = `${html}<div id="toast" class="toast" role="status" ${state.toast ? '' : 'hidden'}>${esc(state.toast)}</div>`;
+  document.body.classList.toggle('in-game', state.screen === 'game');
   const head = app.querySelector('.sticky-head');
   if (head) document.documentElement.style.setProperty('--head-h', `${head.offsetHeight}px`);
   const modal = app.querySelector('.modal');
