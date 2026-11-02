@@ -60,9 +60,17 @@ test('stare sprawy bez pola crimeType działają jako kradzieże (pliki z cases/
   const dir = join(fileURLToPath(new URL('.', import.meta.url)), '..', 'cases');
   const files = readdirSync(dir).filter((f) => /^\d{4}-\d{2}-\d{2}\.json$/.test(f));
   assert.ok(files.length > 0);
+  // Pliki bez pola crimeType (np. opublikowane przed v10) muszą działać jako kradzież;
+  // pliki z innym rodzajem zbrodni sprawdza tylko jednoznaczność.
+  const theft = [];
   for (const f of files) {
     const c = JSON.parse(readFileSync(join(dir, f), 'utf8'));
-    assert.equal(c.crimeType, undefined, f);
+    if (c.crimeType !== undefined) {
+      assert.notEqual(c.crimeType, 'theft', `${f}: kradzież nie zapisuje pola crimeType`);
+      assert.deepEqual(solveCase(c).unique, c.solution, f);
+      continue;
+    }
+    theft.push(f);
     assert.equal(crimeOf(c).id, 'theft', f);
     assert.equal(rulesFor(c)[0], RULES[0], f);
     assert.match(rulesShortFor(c)[0][1], /od otwarcia do zamknięcia drzwi/, f);
@@ -73,6 +81,7 @@ test('stare sprawy bez pola crimeType działają jako kradzieże (pliki z cases/
     const e = buildEpilogue(c, res, 'solved');
     assert.ok(e.paragraphs.join(' ').includes('odnaleziono'), f);
   }
+  assert.ok(theft.includes('2026-11-02.json'), 'opublikowana sprawa 2026-11-02 jest kradzieżą bez pola crimeType');
 });
 
 test('podpalenie: każda sprawa ma jedno rozwiązanie i przechodzi kontrolę jakości (dzienne i treningowe, trudność 1–7)', () => {
