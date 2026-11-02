@@ -195,7 +195,7 @@ export function solveCase(c) {
       }
       case 'parking': {
         out.sightings.push({ place: cl.place, from: cl.time, to: cl.time });
-        const zone = zones.find((z) => z.zone === cl.zone);
+        const zone = zones.find((z) => z.zone === cl.zone && (!z.streets || z.streets.includes(cl.place))) || zones.find((z) => z.zone === cl.zone);
         if (!zone) { out.unknown = true; break; }
         out.refs.push(zone.ref);
         if (!openAt(zone.hours, dt, cl.time)) {
@@ -351,7 +351,9 @@ export function solveCase(c) {
     explain.lies = evaluated.filter((e) => e !== f && e.contradicted).map((e) => {
       const s0 = e.sightings[0];
       const tr = travel.get(s0.place);
-      return { card: e.card, who: e.who, kind: e.kind, reason: e.reason, reasonCodes: e.reasonCodes, refs: [e.card, ...e.refs], place: s0.place, from: s0.from, to: s0.to, travel: tr?.min, travelRef: tr?.ref, alibi: givesAlibi(e) };
+      // Wszystkie miejsca z karty (np. dwa doręczenia kuriera) z czasami dotarcia.
+      const stops = e.sightings.map((x) => ({ place: x.place, from: x.from, to: x.to, travel: travel.get(x.place)?.min, travelRef: travel.get(x.place)?.ref }));
+      return { card: e.card, who: e.who, kind: e.kind, reason: e.reason, reasonCodes: e.reasonCodes, refs: [e.card, ...e.refs], place: s0.place, from: s0.from, to: s0.to, travel: tr?.min, travelRef: tr?.ref, stops, alibi: givesAlibi(e) };
     });
     const lieCards = new Set(explain.lies.map((x) => x.card));
     // Dlaczego kłamstwo nie jest fałszywką sprawcy: kłamca ma inne, potwierdzone alibi.
@@ -510,20 +512,22 @@ export function investigationProfile(c, res = solveCase(c)) {
   const need = new Set();
   for (const e of res.evaluated) for (const r of e.refs) if (cost(r)) need.add(r);
   for (const items of res.neutralClears.values()) for (const it of items) for (const r of it.refs) if (cost(r)) need.add(r);
-  const perDesk = {};
-  for (const id of need) {
-    const d = byId.get(id).desk;
-    perDesk[d] = (perDesk[d] || 0) + cost(id);
-  }
   const minimal = new Set();
   for (const ex of [res.explain.forged, ...(res.explain.lies || [])]) {
     if (ex) for (const r of ex.refs) if (cost(r)) minimal.add(r);
   }
-  const minimalPerDesk = {};
-  for (const id of minimal) {
-    const d = byId.get(id).desk;
-    minimalPerDesk[d] = (minimalPerDesk[d] || 0) + cost(id);
-  }
+  // Minimalna ścieżka (np. kamera z pułapką na sprawcę) też wchodzi do pełnego sprawdzenia.
+  for (const r of minimal) need.add(r);
+  const sumPerDesk = (ids) => {
+    const per = {};
+    for (const id of ids) {
+      const d = byId.get(id).desk;
+      per[d] = (per[d] || 0) + cost(id);
+    }
+    return per;
+  };
+  const perDesk = sumPerDesk(need);
+  const minimalPerDesk = sumPerDesk(minimal);
   return { need: [...need].sort(), total: [...need].reduce((a, id) => a + cost(id), 0), perDesk, minimalPerDesk };
 }
 
@@ -551,6 +555,6 @@ export function proofDepth(res) {
   const lie = res.explain.lies?.[0];
   if (!lie) return new Set(res.explain.forged.refs).size;
   // Kłamstwo: karta i jej obalenie, a do tego czas dotarcia (gdy nie daje alibi) albo najtańsze inne alibi kłamcy.
-  const extra = lie.alibi ? (lie.cleared || []).reduce((best, it) => (!best || it.refs.length < best.length ? it.refs : best), null) || [] : [lie.travelRef];
+  const extra = lie.alibi ? (lie.cleared || []).reduce((best, it) => (!best || it.refs.length < best.length ? it.refs : best), null) || [] : (lie.stops || []).map((x) => x.travelRef).concat(lie.travelRef);
   return new Set(res.explain.forged.refs).size + new Set([...lie.refs, ...extra].filter(Boolean)).size;
 }

@@ -167,7 +167,7 @@ export const PLACES = {
   stopZajezdnia: { name: 'przystanek Zajezdnia', loc: 'na przystanku Zajezdnia', stop: 'Zajezdnia' },
   stopZielone: { name: 'przystanek Osiedle Zielone', loc: 'na przystanku Osiedle Zielone', stop: 'Osiedle Zielone' },
   // miejsca tylko do szumu na mapie
-  stadion: { name: 'Stadion OSiR', loc: 'na stadionie OSiR' },
+  stadion: { name: 'Hala sportowa OSiR', loc: 'w hali sportowej OSiR' },
   szpital: { name: 'Szpital Powiatowy', loc: 'w Szpitalu Powiatowym' },
   ratusz: { name: 'Ratusz', loc: 'w ratuszu' },
   cmentarz: { name: 'Stary cmentarz', loc: 'na starym cmentarzu' },
@@ -245,7 +245,7 @@ export const RULES = [
   'Dowody dostarczone przez podejrzanych są prawdziwe, z wyjątkiem dokładnie jednego. Ten jeden sfałszował sprawca. Gdyby był prawdziwy, dawałby mu alibi na czas kradzieży.',
   'Czasy dotarcia na mapie podano dla najszybszego możliwego sposobu (pieszo, rowerem albo autem). Są dokładne co do minuty i takie same w każdą stronę. Mapa podaje tylko czasy do miejsca kradzieży, więc między dwoma innymi miejscami liczcie tak: przejście z A do B trwa co najmniej różnicę ich czasów (np. 31 i 15 min → co najmniej 16 min). Krócej się nie da, bo inaczej droga przez B do miejsca kradzieży byłaby szybsza niż podany czas z A.',
   'Fałszywkę zdradza albo karta urzędowa (rozkład, rejestr, pogoda…), albo to, że osobę z dowodu widziano wtedy gdzie indziej i nie zdążyłaby dotrzeć (liczcie czasy dotarcia). Dowód może dotyczyć dwóch osób, np. wspólne zdjęcie: należy do tego, kto go dostarczył, ale jeśli jest prawdziwy, obie osoby naprawdę tam były i obie mają alibi. Jeśli prawdziwy pobyt tej drugiej osoby mu przeczy, dowód jest fałszywy.',
-  'Prawdziwy bilet, paragon, zdjęcie albo zapis w rejestrze oznacza, że ta osoba naprawdę była w tym miejscu o tej porze. Wejście i wyjście w rejestrze kart, tak jak dwie godziny w jednym zeznaniu („przyszedł o…, zapłacił o…”), to pobyt w tym miejscu przez cały ten czas. Bilet do kina oznacza obecność na całym seansie, od początku do końca filmu (długość filmu podaje repertuar). Wyjazd pociągiem oznacza, że potem tej osoby nie było już w mieście. Zeznanie bez godziny („widziałam go przy Rynku”) niczego nie dowodzi, najwyżej podpowiada, gdzie szukać.',
+  'Prawdziwy bilet, paragon, zdjęcie, doręczenie w aplikacji kurierskiej albo zapis w rejestrze oznacza, że ta osoba naprawdę była w tym miejscu o tej porze. Wejście i wyjście w rejestrze kart, tak jak dwie godziny w jednym zeznaniu („przyszedł o…, zapłacił o…”), to pobyt w tym miejscu przez cały ten czas. Bilet do kina oznacza obecność na całym seansie, od początku do końca filmu (długość filmu podaje repertuar). Wyjazd pociągiem oznacza, że potem tej osoby nie było już w mieście. Zeznanie bez godziny („widziałam go przy Rynku”) niczego nie dowodzi, najwyżej podpowiada, gdzie szukać.',
   'Wszystkie zegary są zgodne. Rozkłady, godziny otwarcia i strefy parkowania obowiązują dokładnie tak, jak zapisano je na kartach, także w święta. Liczy się dzień tygodnia podany w aktach.',
 ];
 

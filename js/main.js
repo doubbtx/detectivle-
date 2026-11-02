@@ -406,9 +406,10 @@ function renderHow() {
     <summary>Jak grać</summary>
     <ol class="how-list">
       <li>Pięcioro podejrzanych ma alibi. Jedno z nich jest fałszywe: sprawca dostarczył <b>dokładnie jeden sfałszowany dowód</b>.</li>
-      <li>Dowody leżą na pięciu biurkach: Dokumenty, Świadkowie, Mapa i rozkłady, Zdjęcia, Rejestry. Fałszywkę zawsze obala karta z <b>innego</b> biurka.</li>
+      <li>Dowody leżą na pięciu biurkach: Dokumenty, Świadkowie, Mapa i rozkłady, Zdjęcia, Rejestry. Żadne biurko samo nie wystarczy: do obalenia fałszywki zawsze potrzebna jest karta z innego biurka (rozkład, rejestr, kamera albo czasy dotarcia).</li>
       <li>Część kart urzędowych (rozkłady, rejestry, nagrania z kamer, pogoda) jest <b>zapieczętowana</b>. Widzisz tylko tytuł i czynność, np. „Pobierz rozkład jazdy” (30 min). Masz budżet godzin śledztwa, a nadgodziny dodają czas. Zlecaj tylko to, co może coś wyjaśnić.</li>
       <li>Od środy fałszywka zgadza się z rozkładami i rejestrami. Zdradza ją dopiero to, że ktoś był wtedy gdzie indziej i nie zdążyłby dotrzeć. W weekend dowody mogą dotyczyć dwóch osób naraz.</li>
+      <li>Od piątku kłamią <b>dwie osoby</b>: sprawca i ktoś niewinny, kto ukrywał coś innego. Pierwsza znaleziona sprzeczność może być tym drugim kłamstwem. Kłamca zawsze ma inne, potwierdzone alibi, a sprawca poza fałszywką nie ma żadnego.</li>
       <li>Liczcie czasy. Jeśli kogoś widziano o 19:40 w teatrze, a z teatru na miejsce zbrodni najszybciej dociera się w 25 minut, to nie mógł być w środku o 19:52.</li>
       <li>Na koniec składasz <b>raport z dochodzenia</b>: sfałszowany dowód, karta, która go obala, i co ta karta pokazuje. Kto dostarczył fałszywkę, ten jest sprawcą. Masz ${CONFIG.maxAttempts} próby, każda pomyłka to +${fmtPenalty(CONFIG.wrongPenalty)}, a podpowiedź +${fmtPenalty(CONFIG.hintPenalty)}. Za trafny powód, potwierdzone alibi pozostałych i trafienie za pierwszym razem raport dostaje gwiazdki.</li>
       <li><b>Z ekipą:</b> każdy otwiera grę na swoim telefonie i wybiera inny numer gracza. Każdy widzi tylko swoje biurka, więc musicie rozmawiać (na Discordzie, przez telefon albo przy stole). Oskarżenie składa kapitan, czyli gracz 1.</li>
@@ -591,7 +592,7 @@ function renderAkta() {
       </div>
       <p class="w-note">Sprawca był w środku przez cały ten czas (${c.window.to - c.window.from} min).</p>
       <p class="seal-note">Część kart urzędowych jest zapieczętowana. Zlecasz czynności śledcze, np. pobranie rozkładu albo zabezpieczenie nagrania. Masz <span class="nw">${fmtHM(budgetMin())} h</span> śledztwa. ${state.mode === 'team' ? 'W ekipie każdy ma własny budżet, a nadgodziny są tylko informacją.' : `${state.mode === 'live' ? 'Budżet jest wspólny dla całej ekipy. ' : ''}Każde rozpoczęte pół godziny nadgodzin to +${fmtPenalty(OVERTIME_PENALTY)} do czasu rozwiązania.`}</p>
-      ${c.innocentLie ? '<p class="lie-badge"><b>Uwaga: w tej sprawie kłamią dwie osoby.</b> Jedno to fałszywka sprawcy. Druga osoba skłamała w innej sprawie, ale ma inne, potwierdzone alibi.</p>' : ''}
+      ${c.innocentLie ? '<p class="lie-badge"><b>Uwaga: w tej sprawie kłamią dwie osoby.</b> Jeden fałszywy dowód podrzucił sprawca. Drugi to kłamstwo niewinnej osoby, która ukrywała coś niezwiązanego z kradzieżą. Kłamca ma poza nim inne, potwierdzone alibi.</p>' : ''}
     </div>
     <h3 class="sec-label">Podejrzani i ich alibi</h3>
     <ul class="suspects">${renderSuspects()}</ul>

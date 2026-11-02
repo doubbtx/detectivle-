@@ -19,7 +19,8 @@ export function fmt(mins) {
 
 /** Godzina w rozkładach i godzinach otwarcia: 1260 → "21", 1290 → "21:30", 1560 → "2" */
 export function fmtHour(mins) {
-  const h = Math.floor(mins / 60) % 24;
+  // 24:00 zostaje „24” (koniec doby), późniejsze godziny zawijamy (1560 → "2").
+  const h = mins === 24 * 60 ? 24 : Math.floor(mins / 60) % 24;
   const m = mins % 60;
   return m === 0 ? String(h) : `${h}:${pad(m)}`;
 }

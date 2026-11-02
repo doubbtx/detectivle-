@@ -274,3 +274,30 @@ test('etykieta nagrania podaje okno czasowe, w którym leży zapisana chwila', (
   }
   assert.ok(n > 50);
 });
+
+test('alibi krzyżowe: dwa symetryczne wspólne dowody, a kłamca nie jest osobą z fałszywki', () => {
+  let n = 0;
+  for (const iso of dates) {
+    const c = buildDailyCase(iso);
+    if (c.forgeMode !== 'cross') continue;
+    n++;
+    const res = solveCase(c);
+    const joint = res.evaluated.filter((e) => e.with.length);
+    assert.equal(joint.length, 2, `${iso}: wspólnych dowodów ${joint.length}`);
+    const forged = joint.find((e) => e.card === c.solution.forged);
+    const decoy = joint.find((e) => e !== forged);
+    assert.ok(forged && decoy, iso);
+    // Właściciel prawdziwego wspólnego dowodu nie ma innego dowodu z alibi (tak jak sprawca).
+    const alibiCards = (who) => res.evaluated.filter((e) => e.who === who && e.sightings.some((st) => {
+      const tr = c.cards.flatMap((k) => k.facts || []).find((f) => f.t === 'travel' && f.place === st.place);
+      return tr && st.from < c.window.to + tr.min && st.to > c.window.from - tr.min;
+    })).length;
+    assert.equal(alibiCards(decoy.who), alibiCards(forged.who), `${iso}: ${alibiCards(decoy.who)} vs ${alibiCards(forged.who)}`);
+    // Partnerzy obu wspólnych dowodów nie mają własnych dowodów, a kłamca nie jest żadnym z nich.
+    for (const p of [forged.with[0], decoy.with[0]]) {
+      assert.equal(res.evaluated.filter((e) => e.who === p).length, 0, `${iso}: partner ${p} ma własny dowód`);
+      assert.notEqual(res.explain.lies[0].who, p, `${iso}: kłamca to partner wspólnego dowodu`);
+    }
+  }
+  assert.ok(n > 50);
+});

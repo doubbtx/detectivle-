@@ -54,8 +54,9 @@ export const DIFFICULTY_LABELS = ['', 'bardzo łatwa', 'łatwa', 'średnia', 'ś
 
 function params(diff) {
   return {
-    decoys: diff <= 2 ? 1 : diff <= 5 ? 2 : 3,
-    extraTrueItems: diff >= 5 ? 1 : 0,
+    decoys: diff <= 2 ? 1 : 2,
+    // W alibi krzyżowym (sob–nd) nie dajemy dodatkowych dowodów: psułyby symetrię dwóch wspólnych dowodów.
+    extraTrueItems: diff === 5 ? 1 : 0,
     traps: diff <= 1 ? 0 : diff <= 4 ? 1 : 2,
     culpritTrap: diff >= 3,
     cardsPerDesk: 4 + Math.ceil(diff * 0.75),
@@ -290,6 +291,13 @@ function generate(rng, opts) {
     return retry();
   };
 
+  const usedMeters = new Set();
+  const meterNo = () => {
+    let n;
+    do n = rng.int(10, 59); while (usedMeters.has(n));
+    usedMeters.add(n);
+    return n;
+  };
   const initialName = (p) => `${p.first[0]}. ${p.full.split(' ').slice(1).join(' ')}`;
 
   // --- Dowody dostarczone przez podejrzanych --------------------------------
@@ -470,9 +478,9 @@ function generate(rng, opts) {
             `Kino „Mewa” · sala ${rng.int(1, 3)}`,
             `„${film}”`,
             `${dShort} · seans ${fmt(start)}`,
-            withP
-              ? `2 bilety: rząd ${rng.pick(['C', 'D', 'E', 'F', 'G', 'H'])}, miejsca ${rng.int(3, 9)} i ${rng.int(10, 16)} · 48,00 zł`
-              : `rząd ${rng.pick(['C', 'D', 'E', 'F', 'G', 'H'])}, miejsce ${rng.int(3, 18)} · 24,00 zł`,
+            ...(withP
+              ? (() => { const seat = rng.int(3, 15); return [`2 bilety: rząd ${rng.pick(['C', 'D', 'E', 'F', 'G', 'H'])}, miejsca ${seat} i ${seat + 1} · 48,00 zł`, `rezerwacja imienna: ${initialName(s)}, ${initialName(withP)}`]; })()
+              : [`rząd ${rng.pick(['C', 'D', 'E', 'F', 'G', 'H'])}, miejsce ${rng.int(3, 18)} · 24,00 zł`]),
           ],
           facts: [{ t: 'claim', kind, who: by, film, start, ...(withP ? { with: [withP.id] } : {}) }],
         });
@@ -536,17 +544,17 @@ function generate(rng, opts) {
       case 'parking': {
         const place = takePlace((p) => p.parking);
         const t = tPick(place, 18 * 60, 22 * 60 + 30);
-        const zone = rng.pick(['A', 'B', 'C']);
+        const zone = rng.pick(['A', 'B', 'C', 'D', 'E'].filter((z) => !T.zones.some((x) => x.zone === z)));
         const span = () => [rng.pick([8, 9]) * 60, rng.pick([15, 16, 17, 18, 20, 22]) * 60];
         const hours = { wd: span(), sat: rng.chance(0.7) ? span() : null, sun: rng.chance(0.3) ? span() : null };
-        if (!forged) hours[dt] = [rng.pick([8, 9, 10]) * 60, Math.min(24 * 60, Math.ceil((t + rng.int(10, 90)) / 60) * 60)];
+        if (!forged) hours[dt] = [rng.pick([8, 9, 10]) * 60, Math.min(23 * 60 + 30, Math.ceil((t + rng.int(10, 90)) / 60) * 60)];
         else if (dt !== 'wd' && rng.chance(0.4)) hours[dt] = null;
         else hours[dt] = [rng.pick([8, 9]) * 60, Math.max(12 * 60, Math.floor((t - rng.int(6, 70)) / 30) * 30)];
         T.zones.push({ zone, streets: [place], hours, claimed: true });
         card = addCard({
           desk: 'D', kind: 'supplied', by, title: 'Bilet parkingowy',
           lines: [
-            `Parkomat nr ${rng.int(10, 59)} · ${PLACES[place].name} · strefa ${zone}`,
+            `Parkomat nr ${meterNo()} · ${PLACES[place].name} · strefa ${zone}`,
             `${dShort}, wydano ${fmt(t)}`,
             'opłata 4,00 zł',
           ],
@@ -617,7 +625,7 @@ function generate(rng, opts) {
   const WITNESS_TEXT = {
     teatr: (s, w, ts) => (ts.length > 1
       ? `„${pan(s)} ${s.first} ${g(s, 'przyszedł', 'przyszła')} na spektakl o ${fmt(ts[0])}. W przerwie, o ${fmt(ts[1])}, ${g(s, 'kupił', 'kupiła')} u mnie program.”`
-      : `„${pan(s)} ${s.first} ${g(s, 'kupił', 'kupiła')} u mnie w kasie bilety na przyszły tydzień. Było to o ${fmt(ts[0])}.”`),
+      : `„O ${fmt(ts[0])} ${pan(s).toLowerCase()} ${s.first} ${g(s, 'pytał', 'pytała')} mnie w holu, czy są jeszcze bilety na sobotę.”`),
     pub: (s, w, ts) => (ts.length > 1
       ? `„${pan(s)} ${s.first} ${g(s, 'siedział', 'siedziała')} przy barze. O ${fmt(ts[0])} ${g(s, 'zamówił', 'zamówiła')} herbatę z rumem, a o ${fmt(ts[1])} ${g(s, 'zapłacił', 'zapłaciła')} rachunek.”`
       : `„${pan(s)} ${s.first} ${g(s, 'grał', 'grała')} u nas w rzutki. O ${fmt(ts[0])} ${g(w, 'wpisałem', 'wpisałam')} wynik na tablicy.”`),
@@ -634,13 +642,27 @@ function generate(rng, opts) {
       ? `„${pan(s)} ${s.first} ${g(s, 'przyszedł', 'przyszła')} do czytelni o ${fmt(ts[0])}, a o ${fmt(ts[1])} ${g(s, 'wypożyczył', 'wypożyczyła')} dwie książki.”`
       : `„${pan(s)} ${s.first} ${g(s, 'oddał', 'oddała')} mi książki o ${fmt(ts[0])}.”`),
   };
+  // Kilka wersji, żeby dwa zeznania w jednej sprawie nie brzmiały identycznie.
+  const TRAP_BEFORE = [
+    (s, t) => `„${pan(s)} ${s.first} ${g(s, 'wyszedł', 'wyszła')} od nas o ${fmt(t)}. ${g(s, 'Spieszył', 'Spieszyła')} się.”`,
+    (s, t) => `„O ${fmt(t)} ${pan(s).toLowerCase()} ${s.first} ${g(s, 'założył', 'założyła')} płaszcz i ${g(s, 'wyszedł', 'wyszła')}. Więcej ${s.f ? 'jej' : 'go'} tu nie było.”`,
+    (s, t) => `„${pan(s)} ${s.first} ${g(s, 'pożegnał', 'pożegnała')} się ze mną o ${fmt(t)} i ${g(s, 'poszedł', 'poszła')} w swoją stronę.”`,
+  ];
+  const TRAP_AFTER = [
+    (s, t) => `„${pan(s)} ${s.first} ${g(s, 'przyszedł', 'przyszła')} do nas dopiero o ${fmt(t)}.”`,
+    (s, t) => `„${pan(s)} ${s.first} ${g(s, 'pojawił', 'pojawiła')} się u nas o ${fmt(t)}, wcześniej ${s.f ? 'jej' : 'go'} nie było.”`,
+    (s, t) => `„O ${fmt(t)} ${pan(s).toLowerCase()} ${s.first} ${g(s, 'wszedł', 'weszła')} i ${g(s, 'rozglądał', 'rozglądała')} się za kimś.”`,
+  ];
+  let trapB = 0;
+  let trapA = 0;
+  const trapShift = rng.int(0, 2);
   const TRAP_TEXT = (s, side, t) => (side === 'before'
-    ? `„${pan(s)} ${s.first} ${g(s, 'wyszedł', 'wyszła')} od nas o ${fmt(t)}. ${g(s, 'Spieszył', 'Spieszyła')} się.”`
-    : `„${pan(s)} ${s.first} ${g(s, 'przyszedł', 'przyszła')} do nas dopiero o ${fmt(t)}.”`);
+    ? TRAP_BEFORE[(trapShift + trapB++) % TRAP_BEFORE.length](s, t)
+    : TRAP_AFTER[(trapShift + trapA++) % TRAP_AFTER.length](s, t));
 
   const TIP_TEXTS = [
     (s, w, place) => `„${pan(s)} ${s.first} ${g(s, 'kręcił', 'kręciła')} się tamtego wieczoru ${PLACES[place].loc}. O której? Nie ${g(w, 'patrzyłem', 'patrzyłam')} na zegarek.”`,
-    (s, w, place) => `„Jestem ${g(w, 'pewny', 'pewna')}, że ${pan(s).toLowerCase()} ${s.first} ${g(s, 'był', 'była')} wieczorem ${PLACES[place].loc}. Czy przed tą kradzieżą, czy po niej, tego nie wiem.”`,
+    (s, w, place) => `„Jestem ${g(w, 'pewien', 'pewna')}, że ${pan(s).toLowerCase()} ${s.first} ${g(s, 'był', 'była')} wieczorem ${PLACES[place].loc}. Czy to było wcześnie, czy późno, tego nie wiem.”`,
     (s, w, place) => `„${pan(s)} ${s.first} ${g(s, 'przeszedł', 'przeszła')} obok mnie ${PLACES[place].loc}. Godziny nie pamiętam, ale tam wisi kamera, to się sprawdzi.”`,
     (s, w, place) => `„${pan(s)} ${s.first}? Tak, ${g(w, 'widziałem', 'widziałam')} ${s.f ? 'ją' : 'go'} ${PLACES[place].loc}. To był ten wieczór, ale godziny nie podam.”`,
   ];
@@ -669,7 +691,9 @@ function generate(rng, opts) {
       if (!options.length) continue;
       const place = rng.pick(options);
       const d = travel[place];
-      const F = rng.pick(forgedEvs);
+      // Przy bilecie kolejowym świadek widzi sprawcę przed odjazdem w miejscu, z którego nie zdążyłby na dworzec
+      // (trzeba policzyć czasy dotarcia), a nie po prostu „w mieście po odjeździe pociągu”.
+      const F = rng.pick(forgedEvs.filter((e) => e.place !== AWAY));
       let t;
       if (F.place === AWAY) {
         t = rng.int(Math.max(F.from + 10, W2 + d + 3), F.from + 90);
@@ -774,23 +798,43 @@ function generate(rng, opts) {
   const decoyIdx = rng.sample(innocents, P.decoys);
   const neutralIdx = innocents.filter((i) => !decoyIdx.includes(i));
   const kinds = rng.shuffle(ALL_KINDS);
-  const lieKind = P.innocentLie ? kinds.splice(kinds.findIndex((k) => LIE_KINDS.includes(k)), 1)[0] : null;
+  // W alibi krzyżowym kłamstwo nie zabiera rodzajów wspólnych dowodów (paragon, zdjęcie, kino).
+  const lieKinds = P.forgeMode === 'cross' ? ['parking', 'delivery'] : LIE_KINDS;
+  const lieKind = P.innocentLie ? kinds.splice(kinds.findIndex((k) => lieKinds.includes(k)), 1)[0] : null;
   let kp = 0;
 
   const culprit = suspects[culpritIdx];
   const mode = P.forgeMode;
   const JOINT_KINDS = ['receipt', 'photo', 'cinema'];
   // Rodzaj dowodu zarezerwowany na fałszywkę krzyżową i na prawdziwy wspólny dowód (zmyłkę).
-  const crossKind = mode === 'cross' ? kinds.splice(kinds.findIndex((k) => JOINT_KINDS.includes(k)), 1)[0] : null;
-  const jointIdx = rng.chance(P.jointDecoyChance) ? kinds.findIndex((k) => JOINT_KINDS.includes(k)) : -1;
-  const jointKind = jointIdx >= 0 ? kinds.splice(jointIdx, 1)[0] : null;
+  // Bilet do kina łatwiej „zgrać” w sprzeczność z pobytem Y, więc losujemy go rzadziej: wtedy rodzaj wspólnego
+  // dowodu nie zdradza, który z dwóch jest fałszywy.
+  // Alibi krzyżowe: losujemy parę rodzajów dla dwóch wspólnych dowodów i dopiero potem, który z nich jest
+  // fałszywy, żeby rodzaj dowodu niczego nie zdradzał. Bilet do kina łatwiej „zgrać” w sprzeczność
+  // z pobytem Y (częściej przechodzi kontrolę jakości), więc rzadziej przydzielamy mu rolę fałszywki.
+  let crossKind = null;
+  let jointKind = null;
+  if (mode === 'cross') {
+    const pair = rng.sample(JOINT_KINDS.filter((k) => kinds.includes(k)), 2);
+    const forgedFirst = pair.includes('cinema') ? rng.chance(pair[0] === 'cinema' ? 0.4 : 0.6) : rng.chance(0.5);
+    [crossKind, jointKind] = forgedFirst ? pair : [pair[1], pair[0]];
+    for (const k of pair) kinds.splice(kinds.indexOf(k), 1);
+  } else {
+    const jointIdx = rng.chance(P.jointDecoyChance) ? kinds.findIndex((k) => JOINT_KINDS.includes(k)) : -1;
+    jointKind = jointIdx >= 0 ? kinds.splice(jointIdx, 1)[0] : null;
+  }
   const neutralPlace = {};
+  // Alibi krzyżowe: dwa symetryczne wspólne dowody. Fałszywy (sprawca + Y) i prawdziwy (zmyłka A + N2).
+  // A nie ma innego dowodu z alibi (tak jak sprawca), a N2, tak jak Y, ma prawdziwy pobyt tylko
+  // na zapieczętowanym nagraniu albo w rejestrze. Żeby wskazać fałszywkę, trzeba to sprawdzić.
+  const jointOwnerIdx = mode === 'cross' ? rng.pick(decoyIdx) : -1;
+  const jointPartnerIdx = mode === 'cross' ? neutralIdx[1] : -1;
   let forgedCard;
   let forgedEvents = [];
   if (mode === 'cross') {
     // Alibi krzyżowe: sprawca pokazuje wspólny dowód z niewinną osobą Y, a prawdziwy pobyt Y temu przeczy.
     const forgedKind = crossKind;
-    const yIdx = rng.pick(neutralIdx);
+    const yIdx = neutralIdx[0];
     const Y = suspects[yIdx];
     // Prawdziwy pobyt Y jest na zapieczętowanym nagraniu albo w rejestrze wejść: trzeba go zlecić,
     // a trop jest logiczny (Y twierdzi, że był właśnie tam).
@@ -804,10 +848,15 @@ function generate(rng, opts) {
     forgedEvents = res.events;
     avoid[Y.id] = res.events;
   } else {
-    // Przy fałszywce „fizycznej” pomijamy bilet kolejowy: „widziany po odjeździe” to tylko jedno porównanie.
-    if (mode === 'self' && kinds[kp] === 'train') {
-      const swap = kinds.findIndex((k, i) => i > kp && k !== 'train');
-      [kinds[kp], kinds[swap]] = [kinds[swap], kinds[kp]];
+    // Fałszywka „fizyczna”: rodzaj losujemy z wagami, bo niektóre rodzaje częściej przechodzą kontrolę
+    // jakości. Dzięki temu żaden rodzaj dowodu nie jest „zawsze prawdziwy” ani „zwykle fałszywy”.
+    if (mode === 'self') {
+      const W = { receipt: 3, photo: 2.3, train: 1.6, parking: 1.6, bus: 2, delivery: 0.9, cinema: 0.6 };
+      const avail = kinds.slice(kp);
+      let x = rng.next() * avail.reduce((sum, k) => sum + (W[k] || 1), 0);
+      const pick = avail.find((k) => (x -= W[k] || 1) < 0) || avail[avail.length - 1];
+      const at = kinds.indexOf(pick, kp);
+      [kinds[kp], kinds[at]] = [kinds[at], kinds[kp]];
     }
     const forgedKind = kinds[kp++];
     const res = attempt(culprit, () => makeClaim(forgedKind, culprit, mode === 'table'));
@@ -815,11 +864,18 @@ function generate(rng, opts) {
     forgedEvents = res.events;
   }
   for (const i of decoyIdx) {
+    if (i === jointOwnerIdx) continue;
     const kind = kinds[kp++];
     attempt(suspects[i], () => makeClaim(kind, suspects[i], false));
   }
   for (const i of neutralIdx) {
     if (neutralPlace[i]) continue;
+    if (i === jointPartnerIdx) {
+      noTip.add(suspects[i].id);
+      neutralPlace[i] = attempt(suspects[i], () => makeNeutral(rng.pick(['cctv', 'cardlog']), suspects[i], 'clear')).place;
+      noTip.delete(suspects[i].id);
+      continue;
+    }
     neutralPlace[i] = attempt(suspects[i], () => makeNeutral(rng.pick(['witness', 'witness', 'cctv', 'cardlog']), suspects[i], 'clear')).place;
   }
   const extraIdx = neutralIdx.slice(0, P.extraTrueItems);
@@ -834,7 +890,7 @@ function generate(rng, opts) {
     if (pool.length >= 2) {
       const kind = jointKind;
       for (let k = 0; k < 30; k++) {
-        const [ai, bi] = rng.sample(pool, 2);
+        const [ai, bi] = mode === 'cross' ? [jointOwnerIdx, jointPartnerIdx] : rng.sample(pool, 2);
         const A = suspects[ai];
         const B = suspects[bi];
         const sn = snapshot();
@@ -874,16 +930,20 @@ function generate(rng, opts) {
   // Kłamca ma niezależne alibi od świadka, kamery albo rejestru.
   let lieCard = null;
   if (lieKind) {
-    const pool = neutralIdx.filter((i) => !extraIdx.includes(i));
+    // W alibi krzyżowym kłamie zmyłka spoza wspólnych dowodów (inaczej kłamca zdradzałby, który wspólny dowód jest fałszywy).
+    const pool = mode === 'cross' ? decoyIdx.filter((i) => i !== jointOwnerIdx) : neutralIdx.filter((i) => !extraIdx.includes(i));
     const liar = suspects[rng.pick(pool.length ? pool : neutralIdx)];
     // Kłamstwo zwykle wygląda na alibi (godzina w zasięgu), a od fałszywki sprawcy odróżnia je to,
     // że kłamca ma inne, potwierdzone alibi. Czasem godzina wypada tuż poza zasięgiem.
     const lieNoAlibi = !rng.chance(P.lieAlibiChance);
     lieCard = attempt(liar, () => makeClaim(lieKind, liar, true, lieNoAlibi)).card;
   }
-  for (const i of rng.sample(innocents, P.traps)) attempt(suspects[i], () => makeNeutral(rng.pick(['witness', 'cctv', 'cardlog']), suspects[i], 'trap'));
+  // Pułapki niewinnych są na nagraniu tak samo często jak pułapka sprawcy, żeby kamera z zeznaniem-tropem go nie zdradzała.
+  for (const i of rng.sample(innocents, P.traps)) attempt(suspects[i], () => makeNeutral(rng.chance(P.sealedTrapChance) ? 'cctv' : rng.pick(['witness', 'cardlog']), suspects[i], 'trap'));
   if (mode === 'self') makePhysicalTrap(culprit, forgedEvents);
-  else if (P.culpritTrap) attempt(culprit, () => makeNeutral(rng.pick(['witness', 'witness', 'cctv', 'cardlog']), culprit, 'trap'));
+  // Pułapka sprawcy jest na nagraniu (z ewentualnym zeznaniem-tropem) mniej więcej tak często jak pułapka
+  // któregoś z niewinnych, żeby trop do kamery nie wskazywał ani sprawcy, ani niewinnych.
+  else if (P.culpritTrap) attempt(culprit, () => makeNeutral(rng.chance(0.4) ? 'cctv' : rng.pick(['witness', 'cardlog']), culprit, 'trap'));
 
   // --- Karty urzędowe ze wspólnych tabel --------------------------------------
   const wantTable = (has) => has || rng.chance(P.noiseTableChance);
