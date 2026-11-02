@@ -244,13 +244,13 @@ export const RULES = [
   'Dokumenty urzędowe, rejestry, rozkłady, mapy, nagrania z kamer i świadkowie spoza grona podejrzanych mówią prawdę.',
   'Dowody dostarczone przez podejrzanych są prawdziwe, z wyjątkiem dokładnie jednego. Ten jeden sfałszował sprawca. Gdyby był prawdziwy, dawałby mu alibi na czas kradzieży.',
   'Czasy dotarcia na mapie podano dla najszybszego możliwego sposobu (pieszo, rowerem albo autem). Są dokładne co do minuty i takie same w każdą stronę.',
-  'Fałszywkę zdradza albo karta urzędowa (rozkład, rejestr, pogoda…), albo to, że osobę z dowodu widziano wtedy gdzie indziej i nie zdążyłaby dotrzeć (liczcie czasy dotarcia). Dowód może dotyczyć dwóch osób, np. wspólne zdjęcie: jeśli jest prawdziwy, obie naprawdę tam były.',
+  'Fałszywkę zdradza albo karta urzędowa (rozkład, rejestr, pogoda…), albo to, że osobę z dowodu widziano wtedy gdzie indziej i nie zdążyłaby dotrzeć (liczcie czasy dotarcia). Dowód może dotyczyć dwóch osób, np. wspólne zdjęcie: należy do tego, kto go dostarczył, ale jeśli jest prawdziwy, obie osoby naprawdę tam były i obie mają alibi. Jeśli prawdziwy pobyt tej drugiej osoby mu przeczy, dowód jest fałszywy.',
   'Prawdziwy bilet, paragon, zdjęcie albo zapis w rejestrze oznacza, że ta osoba naprawdę była w tym miejscu o tej porze. Wejście i wyjście w rejestrze kart, tak jak dwie godziny w jednym zeznaniu („przyszedł o…, zapłacił o…”), to pobyt w tym miejscu przez cały ten czas, a wyjazd pociągiem oznacza, że potem tej osoby nie było już w mieście.',
   'Wszystkie zegary są zgodne. Rozkłady, godziny otwarcia i strefy parkowania obowiązują dokładnie tak, jak zapisano je na kartach, także w święta. Liczy się dzień tygodnia podany w aktach.',
 ];
 
 /** Zasada nr 3 w sprawach, w których kłamie też niewinna osoba (od piątku). */
-export const RULE_LIE = 'W tej sprawie fałszywe są dwa dowody dostarczone przez podejrzanych. Jeden sfałszował sprawca i tylko ten dałby mu alibi na czas kradzieży. Drugi to kłamstwo niewinnej osoby: nawet gdyby był prawdziwy, nie dawałby alibi na czas kradzieży. Pozostałe dowody od podejrzanych są prawdziwe.';
+export const RULE_LIE = 'W tej sprawie fałszywe są dwa dowody dostarczone przez podejrzanych. Jeden sfałszował sprawca: gdyby był prawdziwy, dawałby mu alibi na czas kradzieży. Drugi to kłamstwo niewinnej osoby, która skłamała w innej sprawie. Ta osoba ma inne, potwierdzone alibi (od świadka, z kamery, rejestru albo z prawdziwego dowodu), a sprawca poza fałszywką nie ma żadnego. Pozostałe dowody od podejrzanych są prawdziwe.';
 
 /** Zasady dla danej sprawy. */
 export function rulesFor(c) {

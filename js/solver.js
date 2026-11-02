@@ -306,17 +306,26 @@ export function solveCase(c) {
   // Wszystkie hipotezy: (sprawca, sfałszowany dowód tego sprawcy).
   // Zasada: fałszywka sprawcy daje mu alibi na czas kradzieży. W sprawach z kłamstwem
   // niewinnej osoby (c.innocentLie) dokładnie jeden inny dowód może być fałszywy, ale
-  // należy do kogoś innego i nie daje alibi na czas kradzieży.
+  // należy do kogoś innego, a ta osoba i tak ma inne, potwierdzone alibi.
   const maxLies = c.innocentLie ? 1 : 0;
   const givesAlibi = (e) => clearingFrom(e.sightings, [e.card]).length > 0;
+  /** Potwierdzone alibi osoby z kart uznanych w hipotezie za prawdziwe. */
+  const clearedBy = (who, falseCards) => {
+    const items = [...(neutralClears.get(who) || [])];
+    for (const e of evaluated) {
+      if ((e.who === who || e.with.includes(who)) && !falseCards.has(e.card)) items.push(...clearingFrom(e.sightings, [e.card]));
+    }
+    return items;
+  };
   const consistent = [];
   for (const sus of c.suspects) {
     for (const forged of evaluated.filter((e) => e.who === sus.id)) {
       if (!givesAlibi(forged)) continue;
       const lies = evaluated.filter((e) => e !== forged && e.contradicted);
       if (lies.length > maxLies) continue;
-      if (lies.some((e) => e.who === sus.id || givesAlibi(e))) continue;
+      if (lies.some((e) => e.who === sus.id)) continue;
       const falseCards = new Set([forged.card, ...lies.map((e) => e.card)]);
+      if (lies.some((e) => !clearedBy(e.who, falseCards).length)) continue;
       if (neutralClears.has(sus.id)) continue;
       const ownTrue = evaluated.filter((e) => (e.who === sus.id || e.with.includes(sus.id)) && !falseCards.has(e.card));
       if (ownTrue.some((e) => givesAlibi(e))) continue;
@@ -342,9 +351,11 @@ export function solveCase(c) {
     explain.lies = evaluated.filter((e) => e !== f && e.contradicted).map((e) => {
       const s0 = e.sightings[0];
       const tr = travel.get(s0.place);
-      return { card: e.card, who: e.who, kind: e.kind, reason: e.reason, reasonCodes: e.reasonCodes, refs: [e.card, ...e.refs], place: s0.place, from: s0.from, to: s0.to, travel: tr?.min, travelRef: tr?.ref };
+      return { card: e.card, who: e.who, kind: e.kind, reason: e.reason, reasonCodes: e.reasonCodes, refs: [e.card, ...e.refs], place: s0.place, from: s0.from, to: s0.to, travel: tr?.min, travelRef: tr?.ref, alibi: givesAlibi(e) };
     });
     const lieCards = new Set(explain.lies.map((x) => x.card));
+    // Dlaczego kłamstwo nie jest fałszywką sprawcy: kłamca ma inne, potwierdzone alibi.
+    for (const lie of explain.lies) lie.cleared = clearedBy(lie.who, new Set([f.card, ...lieCards]));
     if (!f.contradicted) explainPhysical(f, new Set([f.card, ...lieCards]));
     for (const sus of c.suspects) {
       if (sus.id === unique.culprit) continue;
@@ -538,5 +549,8 @@ export function investigationBudget(c, desks) {
 export function proofDepth(res) {
   if (!res.explain.forged) return 0;
   const lie = res.explain.lies?.[0];
-  return new Set(res.explain.forged.refs).size + (lie ? new Set([...lie.refs, lie.travelRef].filter(Boolean)).size : 0);
+  if (!lie) return new Set(res.explain.forged.refs).size;
+  // Kłamstwo: karta i jej obalenie, a do tego czas dotarcia (gdy nie daje alibi) albo najtańsze inne alibi kłamcy.
+  const extra = lie.alibi ? (lie.cleared || []).reduce((best, it) => (!best || it.refs.length < best.length ? it.refs : best), null) || [] : [lie.travelRef];
+  return new Set(res.explain.forged.refs).size + new Set([...lie.refs, ...extra].filter(Boolean)).size;
 }

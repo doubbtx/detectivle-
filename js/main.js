@@ -591,7 +591,7 @@ function renderAkta() {
       </div>
       <p class="w-note">Sprawca był w środku przez cały ten czas (${c.window.to - c.window.from} min).</p>
       <p class="seal-note">Część kart urzędowych jest zapieczętowana. Zlecasz czynności śledcze, np. pobranie rozkładu albo zabezpieczenie nagrania. Masz <span class="nw">${fmtHM(budgetMin())} h</span> śledztwa. ${state.mode === 'team' ? 'W ekipie każdy ma własny budżet, a nadgodziny są tylko informacją.' : `${state.mode === 'live' ? 'Budżet jest wspólny dla całej ekipy. ' : ''}Każde rozpoczęte pół godziny nadgodzin to +${fmtPenalty(OVERTIME_PENALTY)} do czasu rozwiązania.`}</p>
-      ${c.innocentLie ? '<p class="lie-badge"><b>Uwaga: w tej sprawie kłamią dwie osoby.</b> Tylko jedno kłamstwo daje alibi na czas kradzieży. Drugie skrywa coś innego.</p>' : ''}
+      ${c.innocentLie ? '<p class="lie-badge"><b>Uwaga: w tej sprawie kłamią dwie osoby.</b> Jedno to fałszywka sprawcy. Druga osoba skłamała w innej sprawie, ale ma inne, potwierdzone alibi.</p>' : ''}
     </div>
     <h3 class="sec-label">Podejrzani i ich alibi</h3>
     <ul class="suspects">${renderSuspects()}</ul>
@@ -1005,12 +1005,18 @@ function renderResult() {
       ${sol.explain.lies.map((lie) => {
         const liar = suspectById(lie.who);
         const card = cardById(lie.card);
+        const head = `<b>Kłamstwo niewinnej osoby:</b> ${esc(liar.full)}, karta <span class="chip">${card.id}</span> ${esc(card.title)}. ${refsHtml(lie.reason.charAt(0).toUpperCase() + lie.reason.slice(1))}.`;
+        if (lie.alibi) {
+          const cl = (lie.cleared || [])[0];
+          const alibi = cl ? `${esc(sol.describeClear(cl))} ${cl.refs.map((r) => `<span class="chip">${r}</span>`).join(' ')}` : '';
+          return `<p class="lie-explain">${head} To nie była fałszywka sprawcy, bo ${esc(liar.full)} i tak ${liar.f ? 'miała' : 'miał'} potwierdzone alibi: ${alibi}.</p>`;
+        }
         const before = lie.to <= c.window.from - lie.travel;
         const when = lie.from === lie.to ? `o ${fmt(lie.from)}` : `od ${fmt(lie.from)} do ${fmt(lie.to)}`;
         const why = before
           ? `z miejsca podanego na karcie (${PLACES[lie.place]?.name ?? lie.place}, ${when}, dotarcie ${lie.travel} min) ${liar.f ? 'zdążyłaby' : 'zdążyłby'} na kradzież o ${fmt(c.window.from)}`
           : `do miejsca podanego na karcie (${PLACES[lie.place]?.name ?? lie.place}, ${when}, dotarcie ${lie.travel} min) dało się dotrzeć już po kradzieży`;
-        return `<p class="lie-explain"><b>Kłamstwo niewinnej osoby:</b> ${esc(liar.full)}, karta <span class="chip">${card.id}</span> ${esc(card.title)}. ${refsHtml(lie.reason.charAt(0).toUpperCase() + lie.reason.slice(1))}. Ten dowód i tak nie dawał alibi, bo ${esc(why)}${lie.travelRef ? ` <span class="chip">${lie.travelRef}</span>` : ''}.</p>`;
+        return `<p class="lie-explain">${head} Ten dowód i tak nie dawał alibi, bo ${esc(why)}${lie.travelRef ? ` <span class="chip">${lie.travelRef}</span>` : ''}.</p>`;
       }).join('')}
       <div class="cards cards-solution">
         ${renderCard(forged, { noActions: true, highlight: true })}

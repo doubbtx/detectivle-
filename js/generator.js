@@ -21,7 +21,7 @@ import { solveCase, qualityIssues, investigationProfile, proofDepth } from './so
  * Wersja generatora. Podbij ją przy każdej zmianie, która zmienia treść spraw.
  * Opublikowane sprawy (cases/*.json) i tak się nie zmienią, bo gra czyta je z plików.
  */
-export const GENERATOR_VERSION = 6;
+export const GENERATOR_VERSION = 7;
 
 /** Krótki „odcisk” sprawy: 4 znaki, po których ekipa sprawdza, że ma te same akta. */
 export function caseFingerprint(c) {
@@ -63,8 +63,14 @@ function params(diff) {
     splitCardOwners: diff >= 4,
     motives: diff >= 2 ? Math.min(3, diff - 1) : 0,
     noiseTableChance: 0.25 + diff * 0.08,
-    // Od piątku jedna niewinna osoba też kłamie (ale jej kłamstwo nie daje alibi).
+    // Od piątku jedna niewinna osoba też kłamie (ale ma inne, potwierdzone alibi).
     innocentLie: diff >= 5,
+    // Jak często kłamstwo wygląda na alibi (godzina w zasięgu); w pozostałych sprawach wypada tuż poza zasięgiem.
+    lieAlibiChance: 0.7,
+    // Pułapka fizyczna na zapieczętowanym nagraniu zamiast darmowego zeznania.
+    sealedTrapChance: diff >= 5 ? 0.75 : 0.5,
+    // Zeznanie bez godziny („widziałam go przy Rynku”), które naprowadza na nagranie z kamery.
+    tipChance: diff >= 3 ? 0.6 : 0.3,
     // Jak zdradza się fałszywka: 'table' – sprzeczność z tabelą urzędową; 'self' – sprawcę widziano
     // wtedy gdzie indziej (fizyczna niemożliwość); 'cross' – fałszywka obejmuje niewinną osobę,
     // której prawdziwy pobyt temu przeczy (alibi krzyżowe).
@@ -80,7 +86,7 @@ const retry = () => {
 };
 
 const ALL_KINDS = ['train', 'receipt', 'photo', 'cinema', 'delivery', 'parking', 'bus'];
-/** Rodzaje dowodów, którymi może skłamać niewinna osoba (godzina poza zasięgiem miejsca zbrodni). */
+/** Rodzaje dowodów, którymi może skłamać niewinna osoba. */
 const LIE_KINDS = ['receipt', 'photo', 'parking', 'delivery'];
 
 export function buildDailyCase(iso) {
@@ -628,6 +634,18 @@ function generate(rng, opts) {
     ? `„${pan(s)} ${s.first} ${g(s, 'wyszedł', 'wyszła')} od nas o ${fmt(t)}. ${g(s, 'Spieszył', 'Spieszyła')} się.”`
     : `„${pan(s)} ${s.first} ${g(s, 'przyszedł', 'przyszła')} do nas dopiero o ${fmt(t)}.”`);
 
+  const TIP_TEXTS = [
+    (s, w, place) => `„${pan(s)} ${s.first} ${g(s, 'kręcił', 'kręciła')} się tamtego wieczoru ${PLACES[place].loc}. O której? Nie ${g(w, 'patrzyłem', 'patrzyłam')} na zegarek.”`,
+    (s, w, place) => `„Jestem ${g(w, 'pewny', 'pewna')}, że ${pan(s).toLowerCase()} ${s.first} ${g(s, 'był', 'była')} wieczorem ${PLACES[place].loc}. Czy przed tą kradzieżą, czy po niej, tego nie wiem.”`,
+    (s, w, place) => `„${g(w, 'Mijałem', 'Mijałam')} ${PLACES[place].loc} kogoś bardzo podobnego do ${s.f ? 'pani' : 'pana'} ${s.gen}. Godziny nie pamiętam, ale tam wisi kamera, to się sprawdzi.”`,
+    (s, w, place) => `„${pan(s)} ${s.first}? Tak, ${g(w, 'widziałem', 'widziałam')} ${s.f ? 'ją' : 'go'} ${PLACES[place].loc}. To był ten wieczór, ale godziny nie podam.”`,
+  ];
+  /** Zeznanie bez godziny: naprowadza na nagranie z kamery, ale samo niczego nie dowodzi. */
+  function makeTip(s, place) {
+    const w = nextWitness();
+    addCard({ desk: 'S', kind: 'witness', title: `Zeznanie: ${w.full}`, sub: g(w, 'mieszkaniec okolicy', 'mieszkanka okolicy'), lines: [rng.pick(TIP_TEXTS)(s, w, place)] });
+  }
+
   /**
    * Pułapka fizyczna: niezależny świadek albo kamera widzi sprawcę gdzie indziej o godzinie,
    * której nie da się pogodzić z fałszywym dowodem (czasy dotarcia albo wyjazd pociągiem),
@@ -636,7 +654,7 @@ function generate(rng, opts) {
   function makePhysicalTrap(s, forgedEvs) {
     const others = events[s.id].filter((e) => !forgedEvs.includes(e));
     for (let k = 0; k < 60; k++) {
-      const source = rng.pick(['witness', 'cctv']);
+      const source = rng.chance(P.sealedTrapChance) ? 'cctv' : 'witness';
       const options = Object.keys(PLACES).filter((key) => (source === 'witness' ? PLACES[key].witness : PLACES[key].cctv) && !taken.has(key));
       if (!options.length) continue;
       const place = rng.pick(options);
@@ -671,6 +689,7 @@ function generate(rng, opts) {
           lines: [`Kamera nr ${rng.int(2, 19)} · ${PLACES[place].name}`, `Nagranie z godz. ${fmt(t)}`, `Wyraźnie widać: ${s.full} ${rng.pick(CCTV_DETAILS)}.`],
           facts: [{ t: 'seen', who: s.id, place, from: t, to: t }],
         });
+        makeTip(s, place);
       }
       events[s.id].push(ev);
       return;
@@ -714,6 +733,7 @@ function generate(rng, opts) {
         ],
         facts: [{ t: 'seen', who: s.id, place, from: t, to: t }],
       });
+      if (rng.chance(P.tipChance)) makeTip(s, place);
       return { place, events: [{ place, from: t, to: t }] };
     }
     // rejestr kart wejściowych
@@ -762,7 +782,9 @@ function generate(rng, opts) {
     const forgedKind = crossKind;
     const yIdx = rng.pick(neutralIdx);
     const Y = suspects[yIdx];
-    neutralPlace[yIdx] = attempt(Y, () => makeNeutral(rng.pick(['witness', 'witness', 'cctv', 'cardlog']), Y, 'clear')).place;
+    // Prawdziwy pobyt Y jest na zapieczętowanym nagraniu albo w rejestrze wejść: trzeba go zlecić,
+    // a trop jest logiczny (Y twierdzi, że był właśnie tam).
+    neutralPlace[yIdx] = attempt(Y, () => makeNeutral(rng.pick(['cctv', 'cardlog']), Y, 'clear')).place;
     const yEvents = events[Y.id].slice();
     const res = attempt(culprit, () => makeClaim(forgedKind, culprit, false, false, { withP: Y, mustConflict: yEvents }));
     forgedCard = res.card;
@@ -819,13 +841,16 @@ function generate(rng, opts) {
       }
     }
   }
-  // Kłamstwo niewinnej osoby: fałszywy dowód, który i tak nie daje alibi na czas kradzieży.
+  // Kłamstwo niewinnej osoby: fałszywy dowód, a obok niego inne, prawdziwe alibi tej osoby.
   // Kłamca ma niezależne alibi od świadka, kamery albo rejestru.
   let lieCard = null;
   if (lieKind) {
     const pool = neutralIdx.filter((i) => !extraIdx.includes(i));
     const liar = suspects[rng.pick(pool.length ? pool : neutralIdx)];
-    lieCard = attempt(liar, () => makeClaim(lieKind, liar, true, true)).card;
+    // Kłamstwo zwykle wygląda na alibi (godzina w zasięgu), a od fałszywki sprawcy odróżnia je to,
+    // że kłamca ma inne, potwierdzone alibi. Czasem godzina wypada tuż poza zasięgiem.
+    const lieNoAlibi = !rng.chance(P.lieAlibiChance);
+    lieCard = attempt(liar, () => makeClaim(lieKind, liar, true, lieNoAlibi)).card;
   }
   for (const i of rng.sample(innocents, P.traps)) attempt(suspects[i], () => makeNeutral(rng.pick(['witness', 'cctv', 'cardlog']), suspects[i], 'trap'));
   if (mode === 'self') makePhysicalTrap(culprit, forgedEvents);

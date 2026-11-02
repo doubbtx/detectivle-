@@ -51,7 +51,7 @@ console.log(c.intro);
 console.log(`Okno: ${fmt(c.window.from)}–${fmt(c.window.to)}\n`);
 console.log('## Zasady');
 rulesFor(c).forEach((r, i) => console.log(`${i + 1}. ${r}`));
-if (c.innocentLie) console.log('UWAGA: w tej sprawie kłamią dwie osoby. Tylko jedno kłamstwo daje alibi na czas kradzieży.');
+if (c.innocentLie) console.log('UWAGA: w tej sprawie kłamią dwie osoby. Jedno to fałszywka sprawcy. Druga osoba skłamała w innej sprawie, ale ma inne, potwierdzone alibi.');
 console.log('\n## Podejrzani');
 for (const s of c.suspects) console.log(`- ${s.full} (${s.role}): ${s.alibi}`);
 for (const d of DESK_DEFS) {

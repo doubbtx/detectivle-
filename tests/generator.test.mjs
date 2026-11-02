@@ -182,8 +182,9 @@ test('każdy z 7 rodzajów dowodów pojawia się jako fałszywka i jako prawdziw
   }
 });
 
-test('od piątku: dwa sprzeczne dowody, ale tylko fałszywka sprawcy daje alibi', () => {
+test('od piątku: dwa fałszywe dowody, a kłamca ma inne potwierdzone alibi', () => {
   let lieDays = 0;
+  let lieAlibi = 0;
   for (const iso of dates) {
     const c = buildDailyCase(iso);
     const res = solveCase(c);
@@ -198,13 +199,10 @@ test('od piątku: dwa sprzeczne dowody, ale tylko fałszywka sprawcy daje alibi'
       const lie = res.explain.lies[0];
       assert.equal(lie.card, c.lieCard, iso);
       assert.notEqual(lie.who, c.solution.culprit, iso);
-      // Kłamstwo nie daje alibi: z żadnego miejsca na karcie nie wynika, że kłamca nie mógł być w środku.
-      const ev = res.evaluated.find((e) => e.card === c.lieCard);
-      const travelOf = (place) => c.cards.flatMap((k) => k.facts || []).find((f) => f.t === 'travel' && f.place === place)?.min;
-      for (const st of ev.sightings) {
-        const d = travelOf(st.place);
-        assert.ok(st.to <= c.window.from - d || st.from >= c.window.to + d, `${iso}: kłamstwo daje alibi (${st.place})`);
-      }
+      // Kłamca ma inne, potwierdzone alibi (z kart prawdziwych), więc kłamstwo nie może być fałszywką.
+      assert.ok(lie.cleared.length > 0, `${iso}: kłamca bez innego alibi`);
+      assert.ok(lie.cleared.every((it) => !it.refs.includes(c.lieCard) && !it.refs.includes(c.solution.forged)), iso);
+      if (lie.alibi) lieAlibi++;
     } else {
       // pn–wt: fałszywka kłóci się z tabelą; śr–czw: nic nie kłóci się z tabelą (zdradza ją fizyczna niemożliwość).
       assert.equal(contradicted.length, difficultyForDate(iso) <= 2 ? 1 : 0, `${iso}: sprzeczne ${contradicted}`);
@@ -212,6 +210,8 @@ test('od piątku: dwa sprzeczne dowody, ale tylko fałszywka sprawcy daje alibi'
     }
   }
   assert.ok(lieDays > 100);
+  // Zwykle kłamstwo wygląda na alibi (brak skrótu „jedyny dowód bez alibi to kłamstwo”), ale nie zawsze.
+  assert.ok(lieAlibi > lieDays * 0.5 && lieAlibi < lieDays * 0.9, `kłamstw z alibi: ${lieAlibi}/${lieDays}`);
 });
 
 test('od środy fałszywkę obala fizyczna niemożliwość, a w weekend alibi krzyżowe', () => {
@@ -242,4 +242,18 @@ test('głębokość dowodu: pn–wt co najmniej 2 karty, śr–czw co najmniej 3
     const min = d <= 2 ? 2 : d <= 4 ? 3 : 5;
     assert.ok(c.depth >= min, `${iso}: głębokość ${c.depth} < ${min}`);
   }
+});
+
+test('w weekend kartę obalającą trzeba zlecić (zapieczętowane nagranie albo rejestr)', () => {
+  let n = 0;
+  for (const iso of dates) {
+    const c = buildDailyCase(iso);
+    if (c.forgeMode !== 'cross') continue;
+    n++;
+    const res = solveCase(c);
+    const proof = res.explain.forged.proofRefs.map((id) => c.cards.find((k) => k.id === id));
+    const nonTravel = proof.filter((k) => !(k.facts || []).some((f) => f.t === 'travel'));
+    assert.ok(nonTravel.length > 0 && nonTravel.every((k) => k.action), `${iso}: ${nonTravel.map((k) => k.id)}`);
+  }
+  assert.ok(n > 50);
 });
