@@ -62,6 +62,20 @@ export function buildEpilogue(c, sol, outcome) {
   const recovered = `${cap(c.stolen?.acc || 'skradziony przedmiot')} odnaleziono ${hiding} i zwrócono do ${c.scene.short}.`;
   const title = (k) => `„${k.title}”`;
 
+  // Kłamstwo niewinnej osoby (sprawy od piątku).
+  const lieLines = (sol.explain.lies || []).map((lie) => {
+    const liar = c.suspects.find((s) => s.id === lie.who);
+    const lg = (m, f) => (liar.f ? f : m);
+    const card = c.cards.find((k) => k.id === lie.card);
+    const excuse = rng.pick([
+      `nie ${lg('chciał', 'chciała')}, żeby rodzina wiedziała, gdzie naprawdę ${lg('spędził', 'spędziła')} wieczór`,
+      `${lg('wstydził', 'wstydziła')} się przyznać, że ${lg('był', 'była')} w kasynie`,
+      `${lg('chciał', 'chciała')} ukryć przed szefem, że ${lg('wyszedł', 'wyszła')} wcześniej z pracy`,
+      `${lg('krył', 'kryła')} znajomego, z którym ${lg('był umówiony', 'była umówiona')}`,
+    ]);
+    return `Przy okazji wyszło na jaw, że ${liar.full} ${lg('skłamał', 'skłamała')} (${card.id} „${card.title}”), bo ${excuse}. Z kradzieżą nie ${lg('miał', 'miała')} nic wspólnego.`;
+  });
+
   if (outcome === 'failed') {
     return {
       heading: 'Sprawa umorzona',
@@ -69,6 +83,7 @@ export function buildEpilogue(c, sol, outcome) {
       paragraphs: [
         `Śledztwo utknęło. Trzy tygodnie później policja zatrzymała ${who} przy próbie sprzedaży łupu.`,
         `W protokole przesłuchania zapisano, że alibi opierało się na fałszywce ${forged.id} ${title(forged)}, którą obalała karta ${proof.id} ${title(proof)}.`,
+        ...lieLines,
         recovered,
       ],
       quote,
@@ -81,6 +96,7 @@ export function buildEpilogue(c, sol, outcome) {
       `${culprit.full} (${culprit.role}) ${g('został zatrzymany', 'została zatrzymana')} ${arrestLoc}.`,
       `Gdy pokazano ${g('mu', 'jej')} kartę ${proof.id} ${title(proof)}, ${g('przestał', 'przestała')} zaprzeczać, że ${forged.id} ${title(forged)} to fałszywka.`,
       recovered,
+      ...lieLines,
     ],
     quote,
   };

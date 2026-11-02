@@ -242,11 +242,19 @@ export const TEAM_DESKS = {
 export const RULES = [
   'Sprawca jest jednym z pięciorga podejrzanych i działał sam. Przez cały czas od otwarcia do zamknięcia drzwi był w środku.',
   'Dokumenty urzędowe, rejestry, rozkłady, mapy, nagrania z kamer i świadkowie spoza grona podejrzanych mówią prawdę.',
-  'Dowody dostarczone przez podejrzanych są prawdziwe, z wyjątkiem dokładnie jednego. Ten jeden sfałszował sprawca, żeby mieć alibi.',
+  'Dowody dostarczone przez podejrzanych są prawdziwe, z wyjątkiem dokładnie jednego. Ten jeden sfałszował sprawca i dałby mu on alibi na czas kradzieży.',
   'Czasy dotarcia na mapie to najszybszy możliwy sposób (pieszo, rowerem albo autem). Są dokładne co do minuty i takie same w każdą stronę.',
   'Prawdziwy bilet, paragon, zdjęcie albo zapis w rejestrze oznacza, że ta osoba naprawdę była w tym miejscu o tej porze. Wejście i wyjście w rejestrze kart, tak jak dwie godziny w jednym zeznaniu („przyszedł o…, zapłacił o…”), to pobyt w tym miejscu przez cały ten czas, a wyjazd pociągiem oznacza, że potem tej osoby nie było już w mieście.',
   'Wszystkie zegary są zgodne. Rozkłady, godziny otwarcia i strefy parkowania obowiązują dokładnie tak, jak zapisano je na kartach, także w święta. Liczy się dzień tygodnia podany w aktach.',
 ];
+
+/** Zasada nr 3 w sprawach, w których kłamie też niewinna osoba (od piątku). */
+export const RULE_LIE = 'W tej sprawie fałszywe są dwa dowody dostarczone przez podejrzanych. Jeden sfałszował sprawca i tylko ten dałby mu alibi na czas kradzieży. Drugi to kłamstwo niewinnej osoby: nawet gdyby był prawdziwy, nie dawałby alibi na czas kradzieży. Pozostałe dowody od podejrzanych są prawdziwe.';
+
+/** Zasady dla danej sprawy. */
+export function rulesFor(c) {
+  return RULES.map((r, i) => (i === 2 && c.innocentLie ? RULE_LIE : r));
+}
 
 /**
  * Powody do wyboru w raporcie z dochodzenia, osobno dla każdego rodzaju dowodu.

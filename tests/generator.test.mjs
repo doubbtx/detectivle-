@@ -62,7 +62,7 @@ test('solver wykrywa zepsutą sprawę: bez sprzeczności nie ma jednego rozwiąz
 test('solver wykrywa zepsutą sprawę: drugi sprzeczny dowód daje zero rozwiązań', () => {
   for (const iso of dates.slice(0, 40)) {
     const c = buildDailyCase(iso);
-    const supplied = c.cards.filter((k) => k.kind === 'supplied' && k.id !== c.solution.forged);
+    const supplied = c.cards.filter((k) => k.kind === 'supplied' && k.id !== c.solution.forged && k.id !== c.lieCard);
     const victim = supplied[0];
     // Przestawiamy czas na dowodzie niewinnej osoby na 3:33 w nocy, co psuje jego zgodność z faktami.
     const broken = structuredClone(c);
@@ -118,7 +118,7 @@ function staysOf(c) {
     for (const f of k.facts || []) {
       if (f.t === 'seen') add(f.who, { place: f.place, from: f.from, to: f.to, card: k.id });
       if (f.t === 'cardlog') add(owners[`${f.place}#${f.card}`], { place: f.place, from: f.from, to: f.to, card: k.id });
-      if (f.t === 'claim' && k.id !== c.solution.forged) {
+      if (f.t === 'claim' && k.id !== c.solution.forged && k.id !== c.lieCard) {
         if (f.kind === 'train') {
           add(f.who, { place: 'dworzec', from: f.time, to: f.time, card: k.id });
           add(f.who, { place: '@away', from: f.time + 1, to: 1e9, card: k.id });
@@ -180,4 +180,28 @@ test('każdy z 7 rodzajów dowodów pojawia się jako fałszywka i jako prawdziw
     assert.ok((forged[kind] || 0) >= dates.length * 0.05, `fałszywka ${kind}: ${forged[kind] || 0}`);
     assert.ok((real[kind] || 0) >= dates.length * 0.05, `prawdziwy ${kind}: ${real[kind] || 0}`);
   }
+});
+
+test('od piątku: dwa sprzeczne dowody, ale tylko fałszywka sprawcy daje alibi', () => {
+  let lieDays = 0;
+  for (const iso of dates) {
+    const c = buildDailyCase(iso);
+    const res = solveCase(c);
+    const contradicted = res.evaluated.filter((e) => e.contradicted).map((e) => e.card);
+    if (difficultyForDate(iso) >= 5) {
+      lieDays++;
+      assert.equal(c.innocentLie, true, iso);
+      assert.equal(contradicted.length, 2, `${iso}: sprzeczne ${contradicted}`);
+      assert.ok(contradicted.includes(c.solution.forged) && contradicted.includes(c.lieCard), iso);
+      const lie = res.explain.lies[0];
+      assert.equal(lie.card, c.lieCard, iso);
+      assert.notEqual(lie.who, c.solution.culprit, iso);
+      // Kłamstwo nie daje alibi: z miejsca z karty dało się zdążyć (albo wrócić po kradzieży).
+      assert.ok(lie.to <= c.window.from - lie.travel || lie.from >= c.window.to + lie.travel, `${iso}: kłamstwo daje alibi`);
+    } else {
+      assert.equal(contradicted.length, 1, `${iso}: w zwykły dzień tylko fałszywka jest sprzeczna`);
+      assert.ok(!c.innocentLie, iso);
+    }
+  }
+  assert.ok(lieDays > 100);
 });

@@ -3,7 +3,7 @@
 import { randomPracticeCode, DIFFICULTY_LABELS } from './generator.js';
 import { loadDailyCase, loadPracticeCase } from './cases.js';
 import { solveCase } from './solver.js';
-import { TEAM_DESKS, RULES, DESK_DEFS, REASONS } from './data.js';
+import { TEAM_DESKS, DESK_DEFS, REASONS, PLACES, rulesFor } from './data.js';
 import { buildEpilogue } from './epilogue.js';
 import { fmt, localTodayIso, addDays } from './time.js';
 import { store } from './storage.js';
@@ -314,6 +314,7 @@ function caseHeading() {
     <h1 class="case-title">${esc(c.title)}</h1>
     <p class="case-meta">Data kradzieży: ${esc(c.crimeDate.label)}</p>
     <p class="case-meta">Trudność ${difficultyDots(c.difficulty)} ${esc(DIFFICULTY_LABELS[c.difficulty])}</p>
+    ${c.innocentLie ? '<p class="case-meta lie-meta">W tej sprawie kłamią dwie osoby.</p>' : ''}
     ${isArchive() ? '<p class="case-meta"><b>Sprawa archiwalna.</b> Wynik nie liczy się do serii.</p>' : ''}`;
 }
 
@@ -517,13 +518,14 @@ function renderAkta() {
         <div><span class="w-label">zamknięcie</span><span class="w-time">${fmt(c.window.to)}</span></div>
       </div>
       <p class="w-note">Sprawca był w środku przez cały ten czas (${c.window.to - c.window.from} min).</p>
+      ${c.innocentLie ? '<p class="lie-badge"><b>Uwaga: w tej sprawie kłamią dwie osoby.</b> Tylko jedno kłamstwo daje alibi na czas kradzieży. Drugie skrywa coś innego.</p>' : ''}
     </div>
     <h3 class="sec-label">Podejrzani i ich alibi</h3>
     <ul class="suspects">${renderSuspects()}</ul>
     ${team ? `<p class="muted small">Szare kody to karty z biurek innych graczy. Kliknij kod, żeby sprawdzić, kto ma tę kartę.</p>` : ''}
     <details class="rules" open>
       <summary>Zasady śledztwa</summary>
-      <ol>${RULES.map((r) => `<li>${esc(r)}</li>`).join('')}</ol>
+      <ol>${rulesFor(c).map((r) => `<li>${esc(r)}</li>`).join('')}</ol>
     </details>
   </section>`;
 }
@@ -886,6 +888,16 @@ function renderResult() {
       <h2>Rozwiązanie</h2>
       <p class="verdict">${culprit.f ? 'Sprawczynią' : 'Sprawcą'} jest <b>${esc(culprit.full)}</b> (${esc(culprit.role)}). Sfałszowany dowód to <span class="chip">${forged.id}</span> ${esc(forged.title)}, a obala go ${[...proofSet()].map((r) => `<span class="chip">${r}</span>`).join(' lub ')}.</p>
       <p>Dlaczego: ${refsHtml(sol.explain.forged.reason)}.</p>
+      ${sol.explain.lies.map((lie) => {
+        const liar = suspectById(lie.who);
+        const card = cardById(lie.card);
+        const before = lie.to <= c.window.from - lie.travel;
+        const when = lie.from === lie.to ? `o ${fmt(lie.from)}` : `od ${fmt(lie.from)} do ${fmt(lie.to)}`;
+        const why = before
+          ? `z miejsca z karty (${PLACES[lie.place]?.name ?? lie.place}, ${when}, dotarcie ${lie.travel} min) ${liar.f ? 'zdążyłaby' : 'zdążyłby'} na kradzież o ${fmt(c.window.from)}`
+          : `na miejsce z karty (${PLACES[lie.place]?.name ?? lie.place}, ${when}, dotarcie ${lie.travel} min) dało się dotrzeć już po kradzieży`;
+        return `<p class="lie-explain"><b>Kłamstwo niewinnej osoby:</b> ${esc(liar.full)}, karta <span class="chip">${card.id}</span> ${esc(card.title)}. ${refsHtml(lie.reason.charAt(0).toUpperCase() + lie.reason.slice(1))}. Nie dawało alibi, bo ${esc(why)}${lie.travelRef ? ` <span class="chip">${lie.travelRef}</span>` : ''}.</p>`;
+      }).join('')}
       <div class="cards cards-solution">
         ${renderCard(forged, { noActions: true, highlight: true })}
         ${sol.explain.forged.refs.filter((r) => r !== forged.id).map((r) => renderCard(cardById(r), { noActions: true })).join('')}

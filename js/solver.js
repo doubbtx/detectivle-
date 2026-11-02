@@ -283,9 +283,11 @@ export function solveCase(c) {
     neutralEvents.get(s.who).push({ place: s.place, from: s.from, to: s.to, refs: s.refs });
   }
   /** Prawdziwe pobyty osoby przy założeniu, że `forgedCard` jest fałszywką. */
-  function trueEvents(who, forgedCard) {
+  /** Prawdziwe pobyty osoby; `falseCards` to karty uznane w danej hipotezie za fałszywe. */
+  function trueEvents(who, falseCards) {
+    const skip = falseCards instanceof Set ? falseCards : new Set([falseCards]);
     const evs = [...(neutralEvents.get(who) || [])];
-    for (const e of evaluated) if (e.who === who && e.card !== forgedCard) evs.push(...e.events);
+    for (const e of evaluated) if (e.who === who && !skip.has(e.card)) evs.push(...e.events);
     return evs;
   }
 
@@ -299,18 +301,26 @@ export function solveCase(c) {
   }
 
   // Wszystkie hipotezy: (sprawca, sfałszowany dowód tego sprawcy).
+  // Zasada: fałszywka sprawcy daje mu alibi na czas kradzieży. W sprawach z kłamstwem
+  // niewinnej osoby (c.innocentLie) dokładnie jeden inny dowód może być fałszywy, ale
+  // należy do kogoś innego i nie daje alibi na czas kradzieży.
+  const maxLies = c.innocentLie ? 1 : 0;
+  const givesAlibi = (e) => clearingFrom(e.sightings, [e.card]).length > 0;
   const consistent = [];
   for (const sus of c.suspects) {
     for (const forged of evaluated.filter((e) => e.who === sus.id)) {
-      const othersOk = evaluated.every((e) => e === forged || !e.contradicted);
-      if (!othersOk) continue;
+      if (!givesAlibi(forged)) continue;
+      const lies = evaluated.filter((e) => e !== forged && e.contradicted);
+      if (lies.length > maxLies) continue;
+      if (lies.some((e) => e.who === sus.id || givesAlibi(e))) continue;
+      const falseCards = new Set([forged.card, ...lies.map((e) => e.card)]);
       if (neutralClears.has(sus.id)) continue;
-      const ownTrue = evaluated.filter((e) => e.who === sus.id && e !== forged);
-      if (ownTrue.some((e) => clearingFrom(e.sightings, [e.card]).length)) continue;
+      const ownTrue = evaluated.filter((e) => e.who === sus.id && !falseCards.has(e.card));
+      if (ownTrue.some((e) => givesAlibi(e))) continue;
       // Każda osoba musi dać się fizycznie „przeprowadzić” przez wszystkie swoje prawdziwe pobyty,
       // a sprawca dodatkowo przez pobyt na miejscu zbrodni.
       const physicalOk = c.suspects.every((p) => {
-        const evs = trueEvents(p.id, forged.card);
+        const evs = trueEvents(p.id, falseCards);
         if (p.id === sus.id) evs.push({ place: SCENE, from: W1, to: W2, refs: [] });
         return !firstConflict(evs);
       });
@@ -322,15 +332,21 @@ export function solveCase(c) {
   const unique = consistent.length === 1 ? consistent[0] : null;
 
   // Wyjaśnienie: kto i czym ma potwierdzone alibi.
-  const explain = { suspects: {}, forged: null };
+  const explain = { suspects: {}, forged: null, lies: [] };
   if (unique) {
     const f = byCard.get(unique.forged);
     explain.forged = { card: f.card, kind: f.kind, reason: f.reason, reasonCodes: f.reasonCodes, refs: [f.card, ...f.refs] };
+    explain.lies = evaluated.filter((e) => e !== f && e.contradicted).map((e) => {
+      const s0 = e.sightings[0];
+      const tr = travel.get(s0.place);
+      return { card: e.card, who: e.who, kind: e.kind, reason: e.reason, reasonCodes: e.reasonCodes, refs: [e.card, ...e.refs], place: s0.place, from: s0.from, to: s0.to, travel: tr?.min, travelRef: tr?.ref };
+    });
+    const lieCards = new Set(explain.lies.map((x) => x.card));
     for (const sus of c.suspects) {
       if (sus.id === unique.culprit) continue;
       const items = [];
       for (const n of neutralClears.get(sus.id) || []) items.push({ type: 'neutral', ...n });
-      for (const e of evaluated.filter((x) => x.who === sus.id)) {
+      for (const e of evaluated.filter((x) => x.who === sus.id && !lieCards.has(x.card))) {
         for (const cl of clearingFrom(e.sightings, [e.card])) items.push({ type: 'supplied', note: e.okNote, ...cl });
       }
       explain.suspects[sus.id] = items;
@@ -377,9 +393,22 @@ export function qualityIssues(c, res = solveCase(c)) {
     if (!res.explain.suspects[s.id]?.length) issues.push(`niewinny ${s.full} nie ma potwierdzonego alibi`);
   }
   // Fałszywkę ma obalać tylko zamierzona karta, a nie np. pułapka z udziałem sprawcy.
-  const storyEvents = [...res.trueEvents(c.solution.culprit, c.solution.forged), ...forged.sightings.map((x) => ({ ...x, refs: [forged.card] }))];
+  const lieSet = new Set(res.explain.lies.map((x) => x.card));
+  const storyEvents = [...res.trueEvents(c.solution.culprit, new Set([c.solution.forged, ...lieSet])), ...forged.sightings.map((x) => ({ ...x, refs: [forged.card] }))];
   if (forged.kind === 'train') storyEvents.push({ place: '@poza-miastem', from: forged.sightings[0].from + 1, to: 100000, refs: [forged.card] });
   if (res.firstConflict(storyEvents)) issues.push('fałszywkę obala też fizyczna sprzeczność z innym pobytem sprawcy');
+  if (c.innocentLie) {
+    if (res.explain.lies.length !== 1) issues.push(`liczba kłamstw niewinnych: ${res.explain.lies.length}`);
+    for (const lie of res.explain.lies) {
+      // Kłamstwo ma obalać tylko karta z tabeli, a nie inny pobyt kłamcy.
+      const e = res.evaluated.find((x) => x.card === lie.card);
+      const evs = [...res.trueEvents(lie.who, new Set([c.solution.forged, lie.card])), ...e.sightings.map((x) => ({ ...x, refs: [lie.card] }))];
+      if (res.firstConflict(evs)) issues.push('kłamstwo niewinnej osoby obala też fizyczna sprzeczność');
+      if (c.lieCard && c.lieCard !== lie.card) issues.push('solver wskazał inne kłamstwo niż zamierzone');
+    }
+  } else if (res.explain.lies.length) {
+    issues.push('sprzeczny dowód poza fałszywką w sprawie bez kłamstwa');
+  }
   // Współpraca: sfałszowana karta i karta, która ją obala, muszą być u różnych graczy.
   const deskOf = (id) => c.cards.find((k) => k.id === id)?.desk;
   const forgedDesk = deskOf(c.solution.forged);

@@ -63,6 +63,8 @@ function params(diff) {
     splitCardOwners: diff >= 4,
     motives: diff >= 2 ? Math.min(3, diff - 1) : 0,
     noiseTableChance: 0.25 + diff * 0.08,
+    // Od piątku jedna niewinna osoba też kłamie (ale jej kłamstwo nie daje alibi).
+    innocentLie: diff >= 5,
   };
 }
 
@@ -72,6 +74,8 @@ const retry = () => {
 };
 
 const ALL_KINDS = ['train', 'receipt', 'photo', 'cinema', 'delivery', 'parking', 'bus'];
+/** Rodzaje dowodów, którymi może skłamać niewinna osoba (godzina poza zasięgiem miejsca zbrodni). */
+const LIE_KINDS = ['receipt', 'photo', 'parking', 'delivery'];
 
 export function buildDailyCase(iso) {
   return buildCase({
@@ -268,8 +272,23 @@ function generate(rng, opts) {
   };
 
   // --- Dowody dostarczone przez podejrzanych --------------------------------
-  function makeClaim(kind, s, forged) {
+  /** Godzina tuż poza zasięgiem: z tego miejsca dało się jeszcze zdążyć na kradzież (albo wrócić po niej). */
+  const nearOut = (place) => {
+    const d = travel[place];
+    const choices = [];
+    const bLo = Math.max(17 * 60, W1 - d - 18);
+    const bHi = W1 - d - 4;
+    if (bLo <= bHi) choices.push(() => rng.int(bLo, bHi));
+    const aLo = W2 + d + 4;
+    const aHi = Math.min(23 * 60 + 15, W2 + d + 18);
+    if (aLo <= aHi) choices.push(() => rng.int(aLo, aHi));
+    if (!choices.length) retry();
+    return rng.pick(choices)();
+  };
+
+  function makeClaim(kind, s, forged, noAlibi = false) {
     let evs = [];
+    const tPick = (place, lo, hi) => (noAlibi ? nearOut(place) : timeIn(place, lo, hi));
     let card;
     const by = s.id;
     switch (kind) {
@@ -309,7 +328,7 @@ function generate(rng, opts) {
       }
       case 'receipt': {
         const place = takePlace((p) => p.venue);
-        const t = timeIn(place);
+        const t = tPick(place);
         const span = () => [rng.pick([7, 8, 9, 10, 11, 12]) * 60, rng.pick([18, 19, 20, 21, 22, 23]) * 60 + rng.pick([0, 0, 30])];
         const hours = { wd: span(), sat: rng.chance(0.85) ? span() : null, sun: rng.chance(0.6) ? span() : null };
         if (!forged) {
@@ -341,7 +360,7 @@ function generate(rng, opts) {
         const place = takePlace((p) => p.photo);
         let t = 0;
         for (let k = 0; k < 6; k++) {
-          t = timeIn(place);
+          t = tPick(place);
           if (Math.abs(t - sunset) > 30) break;
         }
         if (Math.abs(t - sunset) <= 30) retry();
@@ -424,8 +443,9 @@ function generate(rng, opts) {
       case 'delivery': {
         const st1 = takePlace((p) => p.street);
         const st2 = takePlace((p) => p.street);
-        const t1 = timeIn(st1, 18 * 60, 22 * 60 + 30);
+        const t1 = tPick(st1, 18 * 60, 22 * 60 + 30);
         const t2 = t1 + Math.max(rng.int(9, 24), Math.abs(travel[st1] - travel[st2]) + rng.int(5, 10));
+        if (noAlibi && t2 > W1 - travel[st2] - 4 && t2 < W2 + travel[st2] + 4) retry();
         const mkStreet = (street) => {
           const parity = rng.pick(['all', 'all', 'even', 'odd']);
           let max = rng.int(7, 48);
@@ -475,7 +495,7 @@ function generate(rng, opts) {
       }
       case 'parking': {
         const place = takePlace((p) => p.parking);
-        const t = timeIn(place, 18 * 60, 22 * 60 + 30);
+        const t = tPick(place, 18 * 60, 22 * 60 + 30);
         const zone = rng.pick(['A', 'B', 'C']);
         const span = () => [rng.pick([8, 9]) * 60, rng.pick([15, 16, 17, 18, 20, 22]) * 60];
         const hours = { wd: span(), sat: rng.chance(0.7) ? span() : null, sun: rng.chance(0.3) ? span() : null };
@@ -643,6 +663,7 @@ function generate(rng, opts) {
   const decoyIdx = rng.sample(innocents, P.decoys);
   const neutralIdx = innocents.filter((i) => !decoyIdx.includes(i));
   const kinds = rng.shuffle(ALL_KINDS);
+  const lieKind = P.innocentLie ? kinds.splice(kinds.findIndex((k) => LIE_KINDS.includes(k)), 1)[0] : null;
   let kp = 0;
 
   const culprit = suspects[culpritIdx];
@@ -656,10 +677,18 @@ function generate(rng, opts) {
   for (const i of neutralIdx) {
     neutralPlace[i] = attempt(suspects[i], () => makeNeutral(rng.pick(['witness', 'witness', 'cctv', 'cardlog']), suspects[i], 'clear')).place;
   }
-  for (let k = 0; k < P.extraTrueItems && k < neutralIdx.length; k++) {
+  const extraIdx = neutralIdx.slice(0, P.extraTrueItems);
+  for (const i of extraIdx) {
     const kind = kinds[kp++];
-    const sus = suspects[neutralIdx[k]];
-    attempt(sus, () => makeClaim(kind, sus, false));
+    attempt(suspects[i], () => makeClaim(kind, suspects[i], false));
+  }
+  // Kłamstwo niewinnej osoby: fałszywy dowód, który i tak nie daje alibi na czas kradzieży.
+  // Kłamca ma niezależne alibi od świadka, kamery albo rejestru.
+  let lieCard = null;
+  if (lieKind) {
+    const pool = neutralIdx.filter((i) => !extraIdx.includes(i));
+    const liar = suspects[rng.pick(pool.length ? pool : neutralIdx)];
+    lieCard = attempt(liar, () => makeClaim(lieKind, liar, true, true)).card;
   }
   for (const i of rng.sample(innocents, P.traps)) attempt(suspects[i], () => makeNeutral(rng.pick(['witness', 'cctv', 'cardlog']), suspects[i], 'trap'));
   if (P.culpritTrap) attempt(culprit, () => makeNeutral(rng.pick(['witness', 'witness', 'cctv', 'cardlog']), culprit, 'trap'));
@@ -985,5 +1014,7 @@ function generate(rng, opts) {
     desks: DESK_DEFS,
     cards: publicCards,
     solution: { culprit: suspects[culpritIdx].id, forged: forgedCard.id },
+    innocentLie: Boolean(lieCard),
+    lieCard: lieCard ? lieCard.id : null,
   };
 }

@@ -5,7 +5,7 @@
 import { buildDailyCase, buildPracticeCase } from '../js/generator.js';
 import { solveCase } from '../js/solver.js';
 import { fmt } from '../js/time.js';
-import { RULES } from '../js/data.js';
+import { rulesFor } from '../js/data.js';
 
 const arg = process.argv[2] || '2026-11-02';
 const showSolution = process.argv.includes('--solution');
@@ -20,7 +20,8 @@ console.log(`Trudność: ${c.difficulty}/7 · zbrodnia: ${c.crimeDate.label}`);
 console.log(`\n${c.intro}`);
 console.log(`Okno: ${fmt(c.window.from)}–${fmt(c.window.to)}\n`);
 console.log('## Zasady');
-RULES.forEach((r, i) => console.log(`${i + 1}. ${r}`));
+rulesFor(c).forEach((r, i) => console.log(`${i + 1}. ${r}`));
+if (c.innocentLie) console.log('UWAGA: w tej sprawie kłamią dwie osoby. Tylko jedno kłamstwo daje alibi na czas kradzieży.');
 console.log('');
 console.log('## Podejrzani');
 for (const s of c.suspects) console.log(`- ${s.full} (${s.role}): ${s.alibi}`);

@@ -411,6 +411,10 @@ button { font: inherit; color: inherit; }
 .w-time { font-family: var(--font-doc); font-weight: 700; font-size: var(--step-4); line-height: 1; color: var(--stamp); font-variant-numeric: tabular-nums; }
 .w-line { flex: 1; height: 0; border-top: 3px dashed var(--stamp); }
 .w-note { font-size: var(--step--1); color: var(--ink-soft); }
+.lie-badge { border: 2px solid var(--stamp); color: var(--ink); background: var(--stamp-soft); border-radius: var(--radius); padding: 0.5rem 0.7rem; font-size: var(--step--1); }
+.lie-badge b { color: var(--stamp); }
+.lie-meta { color: var(--stamp); font-weight: 600; }
+.lie-explain { background: var(--sheet-alt); border-radius: var(--radius); padding: 0.6rem 0.75rem; }
 
 .sec-label {
   font-family: var(--font-display);

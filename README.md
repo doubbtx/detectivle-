@@ -8,6 +8,8 @@ Pięcioro podejrzanych ma alibi. Sprawca podrzucił **dokładnie jeden sfałszow
 
 Na koniec składasz **raport z dochodzenia**: sfałszowany dowód, karta, która go obala, co ta karta pokazuje i (nieobowiązkowo) karty potwierdzające alibi pozostałych. Kto dostarczył fałszywkę, ten jest sprawcą. Są 3 próby. Każda pomyłka dodaje 5 minut do czasu, a każda podpowiedź 2 minuty. Raport dostaje do trzech gwiazdek: za trafny powód, za potwierdzone alibi wszystkich niewinnych i za trafienie za pierwszym razem. Po zamknięciu sprawy czytasz protokół zatrzymania i przyznanie się sprawcy.
 
+Od piątku do niedzieli sprawa jest podchwytliwa: **kłamią dwie osoby**. Fałszywy dowód sprawcy daje mu alibi na czas kradzieży. Drugi fałszywy dowód należy do niewinnej osoby, która skłamała w innej sprawie, a jej godzina leży tuż poza zasięgiem miejsca zbrodni. Trzeba więc policzyć czasy dotarcia, a nie tylko znaleźć sprzeczność.
+
 Trudność rośnie w ciągu tygodnia: poniedziałek to około 25 kart i 2 dowody do sprawdzenia, niedziela około 45 kart, pułapki z czasami dotarcia i 5 dowodów od podejrzanych.
 
 ### Gra z ekipą (2–5 osób)
