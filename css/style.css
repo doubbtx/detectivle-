@@ -755,3 +755,13 @@ button.chip { cursor: pointer; }
 .town .t-hit { fill: transparent; }
 .town .t-scene-label { pointer-events: none; }
 .plan .plan-info { margin: 0.5rem 0 0.6rem; }
+/* Ekran główny: Borowice z biurem detektywa i gwiazdkami rozwiązanych spraw */
+.town-home { margin: 1.25rem 0; min-width: 0; max-width: 100%; display: grid; }
+.town-home .town-wrap { min-width: 0; max-width: 100%; }
+.town-wrap-home { max-height: 52vh; }
+.town .t-plaque circle { fill: #e3b341; stroke: #7a5a12; stroke-width: 1.2; }
+.town .t-plaque-ico { color: #5a3f06; }
+.town .t-plaque-n { fill: #5a3f06; font: 700 10px var(--font-display); paint-order: stroke; stroke: #fffdf6; stroke-width: 3px; }
+.town .t-office rect { fill: var(--m-olive); stroke: #fffdf6; stroke-width: 1.5; }
+.town .t-office-ico { color: var(--m-on-olive); }
+.town .t-office-label { fill: var(--m-olive); font: 700 10.5px var(--font-display); text-transform: uppercase; letter-spacing: 0.04em; paint-order: stroke; stroke: #fffdf6; stroke-width: 3.5px; stroke-linejoin: round; }

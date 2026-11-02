@@ -152,8 +152,11 @@ function routePath(a, b) {
  * @param {string} [o.sceneLabel]
  * @param {Set<string>} [o.active] miejsca występujące w sprawie (reszta przygaszona)
  * @param {string[]} [o.selected] wybrane miejsca (klucze; 'scene' = miejsce kradzieży), najwyżej dwa
+ * @param {string} [o.office] pole biura detektywa (ekran główny)
+ * @param {{cell: string, items: string[]}[]} [o.plaques] tabliczki rozwiązanych spraw
+ * @param {string} [o.sceneAct] akcja po kliknięciu miejsca kradzieży (domyślnie wybór na planie)
  */
-export function renderTownSvg({ places, scene, sceneLabel = 'Miejsce kradzieży', active = null, selected = [] }) {
+export function renderTownSvg({ places, scene, sceneLabel = 'Miejsce kradzieży', active = null, selected = [], office = null, plaques = [], sceneAct = 'map-pick' }) {
   const p = [];
   p.push(`<svg class="town" viewBox="0 0 ${W} ${H}" role="img" aria-label="Plan Borowic">`);
   p.push(`<rect class="m-land" x="0" y="0" width="${W}" height="${H}"/>`);
@@ -232,13 +235,27 @@ export function renderTownSvg({ places, scene, sceneLabel = 'Miejsce kradzieży'
       : `<circle class="t-dot" cx="${mx}" cy="${my - 2}" r="9"/>${markerInner(key, places[key], mx, my - 2, 11)}`;
     p.push(`<g class="t-place${on ? ' on' : ''}${sel ? ' sel' : ''}" data-act="map-pick" data-place="${key}" tabindex="${on ? 0 : -1}" role="button" aria-pressed="${sel}" aria-label="${esc(name)}, pole ${PLACE_CELLS[key]}"><circle class="t-hit" cx="${mx}" cy="${my - 6}" r="19"/>${head}<text class="t-label" x="${mx}" y="${my + 18}" text-anchor="middle">${esc(MAP_LABELS[key] || key)}</text></g>`);
   }
+  // Tabliczki: tu detektyw rozwiązał wcześniejsze sprawy
+  for (const pl of plaques) {
+    const [x, y] = parseCell(pl.cell);
+    const bx = cx(x) + 13;
+    const by = cy(y) - 30;
+    p.push(`<g class="t-plaque"><title>${esc(pl.items.join('\n'))}</title><circle cx="${bx}" cy="${by}" r="9"/>${icon('star', bx, by, 11, 't-plaque-ico')}${pl.items.length > 1 ? `<text x="${bx + 9}" y="${by - 6}" class="t-plaque-n">${pl.items.length}</text>` : ''}</g>`);
+  }
+  // Biuro detektywa
+  if (office) {
+    const [x, y] = parseCell(office);
+    const mx = cx(x);
+    const my = cy(y);
+    p.push(`<g class="t-office"><rect x="${mx - 15}" y="${my - 24}" width="30" height="26" rx="5"/>${icon('briefcase', mx, my - 11, 17, 't-office-ico')}<text class="t-office-label" x="${mx}" y="${my + 16}" text-anchor="middle">Biuro detektywa</text></g>`);
+  }
   // Miejsce kradzieży
   if (scene && SCENE_CELLS[scene]) {
     const [x, y] = parseCell(SCENE_CELLS[scene]);
     const mx = cx(x);
     const my = cy(y);
     const sel = selected.includes('scene');
-    p.push(`<g class="t-scene${sel ? ' sel' : ''}" data-act="map-pick" data-place="scene" tabindex="0" role="button" aria-pressed="${sel}" aria-label="Miejsce kradzieży: ${esc(sceneLabel)}, pole ${SCENE_CELLS[scene]}">`
+    p.push(`<g class="t-scene${sel ? ' sel' : ''}" data-act="${sceneAct}" data-place="scene" tabindex="0" role="button" aria-pressed="${sel}" aria-label="Miejsce kradzieży: ${esc(sceneLabel)}, pole ${SCENE_CELLS[scene]}">`
       + `<circle class="t-hit" cx="${mx}" cy="${my - 14}" r="22"/>`
       + `<path d="M ${mx} ${my + 8} C ${mx - 5} ${my + 1}, ${mx - 16} ${my - 7}, ${mx - 16} ${my - 18} A 16 16 0 1 1 ${mx + 16} ${my - 18} C ${mx + 16} ${my - 7}, ${mx + 5} ${my + 1}, ${mx} ${my + 8} Z"/>`
       + icon('search', mx, my - 18, 17, 't-scene-ico')

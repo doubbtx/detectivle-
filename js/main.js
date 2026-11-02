@@ -3,10 +3,10 @@
 import { randomPracticeCode, DIFFICULTY_LABELS, EPOCH } from './generator.js';
 import { loadDailyCase, loadPracticeCase } from './cases.js';
 import { solveCase, investigationBudget } from './solver.js';
-import { TEAM_DESKS, DESK_DEFS, REASONS, PLACES, rulesFor, hasTownMap } from './data.js';
+import { TEAM_DESKS, DESK_DEFS, REASONS, PLACES, SCENES, rulesFor, hasTownMap } from './data.js';
 import { renderTownSvg } from './map.js';
 import { icon } from './icons.js';
-import { PLACE_CELLS, SCENE_CELLS, cellsApart, blocksText, MIN_PER_CELL } from './town.js';
+import { PLACE_CELLS, SCENE_CELLS, OFFICE_CELL, cellsApart, blocksText, MIN_PER_CELL } from './town.js';
 import { buildEpilogue } from './epilogue.js';
 import { fmt, localTodayIso, addDays } from './time.js';
 import { store } from './storage.js';
@@ -70,7 +70,7 @@ function resetCaseUi() {
   state.showAll = false;
   state.tab = 'akta';
   state.mapSel = [];
-  state.mapScroll = null;
+  if (state.mapScrolls) delete state.mapScrolls.plan;
   state.modal = null;
   state.confirm = null;
 }
@@ -219,9 +219,42 @@ function shownStreak(st) {
   return st.last === today || st.last === addDays(today, -1) ? st.streak : 0;
 }
 
+/** Tabliczka na planie miasta: tu detektyw rozwiązał sprawę (tylko sprawy dnia, raz na sprawę). */
+function addPlaque() {
+  const c = state.c;
+  const list = store.get('plaques') || [];
+  if (list.some((x) => x.date === c.date)) return;
+  const culprit = suspectById(c.solution.culprit);
+  list.push({ date: c.date, scene: sceneIdOf(c), title: c.title, culprit: culprit.full });
+  store.set('plaques', list.slice(-200));
+}
+
+function renderTown() {
+  const c = state.c;
+  const list = store.get('plaques') || [];
+  const byCell = new Map();
+  for (const x of list) {
+    const cell = SCENE_CELLS[x.scene];
+    if (!cell) continue;
+    if (!byCell.has(cell)) byCell.set(cell, []);
+    const [y, m, d] = x.date.split('-');
+    byCell.get(cell).push(`${d}.${m}.${y}: ${x.title}. Zatrzymano: ${x.culprit}`);
+  }
+  const plaques = [...byCell].map(([cell, items]) => ({ cell, items }));
+  const scene = sceneIdOf(c);
+  const svg = renderTownSvg({ places: PLACES, scene, sceneLabel: c.scene.name, active: new Set(), office: OFFICE_CELL, plaques, sceneAct: 'home-case' });
+  return `
+  <section class="town-home" aria-label="Borowice">
+    <h2 class="sec-label">Borowice · twoje miasto</h2>
+    <p class="muted small">Nowe zgłoszenie: <b>${esc(c.title)}</b> (pole ${SCENE_CELLS[scene] || '–'}). ${list.length ? `Gwiazdki to rozwiązane już sprawy (${list.length}); najedź albo przytrzymaj, żeby zobaczyć, co się tam stało.` : 'Każda rozwiązana sprawa zostawi na planie gwiazdkę w miejscu zdarzenia.'}</p>
+    <div class="town-wrap town-wrap-home" data-scroll-key="home">${svg}</div>
+  </section>`;
+}
+
 function recordResult(solved) {
   // Do serii liczą się tylko sprawy dnia (dzisiejsza albo wczorajsza, jeśli gra przeszła przez północ).
   if (state.ref.type !== 'daily') return;
+  if (solved) addPlaque();
   const statsMode = state.mode === 'live' ? 'team' : state.mode;
   const today = localTodayIso();
   const startedDay = progress.startedAt ? localTodayIso(new Date(progress.startedAt)) : today;
@@ -455,6 +488,7 @@ function renderHome() {
       </div>
       ${lines ? `<ul class="played">${lines}</ul>` : ''}
     </section>
+    ${renderTown()}
     ${renderHow()}
     <section class="practice">
       <h2>Trening</h2>
@@ -685,7 +719,7 @@ const mapPlaceName = (key) => (key === 'scene' ? state.c.scene.name : PLACES[key
 const mapCell = (key) => (key === 'scene' ? SCENE_CELLS[sceneIdOf(state.c)] : PLACE_CELLS[key]);
 function sceneIdOf(c) {
   const g = mapCardOf(c)?.facts.find((f) => f.t === 'grid');
-  return Object.keys(SCENE_CELLS).find((id) => SCENE_CELLS[id] === g?.scene);
+  return Object.keys(SCENE_CELLS).find((id) => SCENE_CELLS[id] === g?.scene) || SCENES.find((x) => x.name === c.scene?.name)?.id;
 }
 
 /** Karty (z biurek gracza), które dotyczą danego miejsca. Zapieczętowane rozpoznajemy tylko po etykiecie czynności. */
@@ -725,7 +759,7 @@ function renderPlan() {
       <p class="muted small">1 przecznica = ${MIN_PER_CELL} min · pinezki: miejsca z akt (karta ${mc.id}) · lupa: miejsce kradzieży</p>
     </header>
     <div class="plan-info">${info}${sel.length ? '<p><button class="link-btn" data-act="map-clear">Wyczyść wybór</button></p>' : ''}</div>
-    <div class="town-wrap">${svg}</div>
+    <div class="town-wrap" data-scroll-key="plan">${svg}</div>
   </section>`;
 }
 
@@ -1348,8 +1382,8 @@ function render() {
   const focusKey = app.contains(active) ? focusKeyOf(active) : null;
   const modalScroll = app.querySelector('.modal')?.scrollTop ?? 0;
   const mapWrap = app.querySelector('.town-wrap');
-  if (mapWrap) state.mapScroll = [mapWrap.scrollLeft, mapWrap.scrollTop];
-  const mapScroll = state.mapScroll || null;
+  state.mapScrolls = state.mapScrolls || {};
+  if (mapWrap) state.mapScrolls[mapWrap.dataset.scrollKey] = [mapWrap.scrollLeft, mapWrap.scrollTop];
   const caret = active && app.contains(active) && typeof active.selectionStart === 'number' ? [active.selectionStart, active.selectionEnd] : null;
   if (state.modal && !lastModal) modalOpener = focusKey;
   let html = '';
@@ -1368,6 +1402,7 @@ function render() {
   if (head) document.documentElement.style.setProperty('--head-h', `${head.offsetHeight}px`);
   // Plan miasta: przy odświeżeniu zostaje przewinięty tam, gdzie był; za pierwszym razem pokazuje miejsce kradzieży.
   const wrap = app.querySelector('.town-wrap');
+  const mapScroll = wrap && state.mapScrolls?.[wrap.dataset.scrollKey];
   if (wrap && mapScroll) [wrap.scrollLeft, wrap.scrollTop] = mapScroll;
   else if (wrap) {
     const pin = wrap.querySelector('.t-scene');
@@ -1472,6 +1507,7 @@ app.addEventListener('click', (e) => {
       break;
     }
     case 'map-clear': state.mapSel = []; render(); break;
+    case 'home-case': app.querySelector('.case-file .actions .btn')?.focus(); app.querySelector('.case-file')?.scrollIntoView({ behavior: 'smooth', block: 'start' }); break;
     case 'mark-sus': {
       const { id, v } = target.dataset;
       progress.sus[id] = progress.sus[id] === v ? '' : v;

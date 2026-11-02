@@ -21,6 +21,9 @@ export const PLACE_CELLS = {
   stadion: 'T9', szpital: 'B3', ratusz: 'K6', cmentarz: 'D12',
 };
 
+/** Biuro detektywa (ekran główny): tuż przy Rynku. */
+export const OFFICE_CELL = 'H7';
+
 /** Kratki miejsc zbrodni (SCENES w data.js). */
 export const SCENE_CELLS = {
   antykwariat: 'H5', galeria: 'L5', zegarmistrz: 'I8', jubiler: 'K8', muzeum: 'G7',
